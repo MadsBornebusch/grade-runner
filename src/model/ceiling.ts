@@ -60,6 +60,21 @@ export interface CeilingInput {
 }
 
 /**
+ * Full (100% VO2max) gross aerobic power at a given altitude, W/kg —
+ * altitude-adjusted but independent of the duration/LT2 curve. Used as the
+ * reference for %VO2max intensity (which drives substrate partitioning),
+ * as distinct from the pace-limiting `ceilingPower` below.
+ */
+export function maxAerobicPower(
+  altitudeM: number,
+  params: CeilingParams = {},
+): number {
+  const merged = { ...DEFAULTS, ...params };
+  const availableVo2 = altitudeFraction(altitudeM) * merged.vo2MaxMlPerKgPerMin;
+  return vo2ToPower(availableVo2, O2_ENERGY_EQUIVALENT_CARB_KJ_PER_L);
+}
+
+/**
  * Gross aerobic power ceiling (W/kg) at a point in the event: duration-capped
  * fraction of VO2max, altitude-adjusted, with optional durability drift.
  */
