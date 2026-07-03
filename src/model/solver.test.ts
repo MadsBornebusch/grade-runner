@@ -147,7 +147,7 @@ describe("findSustainableTheta", () => {
     expect(theta).toBeLessThan(1);
   });
 
-  it("returns the floor theta when the runner starts already at the reserve floor", () => {
+  it("reports a real bonk point, not a degenerate stall, when no theta is feasible", () => {
     // Starting glycogen == reserve: any positive carb demand at all bonks
     // immediately, at every effort level, so no theta can ever be feasible.
     const impossible = baseInputs({
@@ -156,9 +156,13 @@ describe("findSustainableTheta", () => {
       glycogenStoreG: 60,
       reserveG: 60,
     });
-    const { theta, result } = findSustainableTheta(impossible, { lo: 0.05 });
-    expect(theta).toBe(0.05);
+    const { result } = findSustainableTheta(impossible, { lo: 0.05 });
     expect(result.feasible).toBe(false);
+    // Must not fall back to the near-zero-effort stall region (segments: [],
+    // finishTimeS: 0) -- that would report a meaningless "bonked at 0km/0s"
+    // instead of the actual bonk point.
+    expect(result.segments.length).toBeGreaterThan(0);
+    expect(result.finishTimeS).toBeGreaterThan(0);
 
     // At a theta well clear of the near-zero stall region, confirm the
     // failure is specifically an immediate bonk, not a stall.

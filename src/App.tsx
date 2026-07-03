@@ -123,9 +123,15 @@ function App() {
                       result={solverResult.result}
                       totalDistanceM={courseResult.totalDistance3D}
                     />
-                    <ElevationProfileChart points={chartPoints} />
-                    <FuelChart points={chartPoints} reserveG={formInputs.reserveG} />
-                    <SplitTable points={chartPoints} />
+                    {/* A handful of segments (e.g. an immediate bonk) isn't
+                        enough for a meaningful chart axis/scale. */}
+                    {chartPoints.length >= 5 && (
+                      <>
+                        <ElevationProfileChart points={chartPoints} />
+                        <FuelChart points={chartPoints} reserveG={formInputs.reserveG} />
+                        <SplitTable points={chartPoints} />
+                      </>
+                    )}
                   </>
                 )}
               </>

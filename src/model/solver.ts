@@ -184,8 +184,20 @@ export function findSustainableTheta(
   const iterations = opts.iterations ?? 30;
   const scanSteps = opts.scanSteps ?? 20;
 
+  const distanceReached = (result: SimulationResult): number =>
+    result.segments.length > 0
+      ? result.segments[result.segments.length - 1].cumulativeDistance3D
+      : 0;
+
   const hiResult = simulate(hi0, inputs);
   if (hiResult.feasible) return { theta: hi0, result: hiResult };
+
+  // If no theta is feasible anywhere (checked below), report whichever
+  // attempt got furthest before failing -- a real bonk point -- rather than
+  // an arbitrary floor pick, which can itself land in the near-zero-effort
+  // stall region (see doc comment) and report a meaningless 0km/0s result.
+  let furthestTheta = hi0;
+  let furthestResult = hiResult;
 
   let bestFeasibleTheta: number | null = null;
   let bestFeasibleResult: SimulationResult | null = null;
@@ -193,6 +205,10 @@ export function findSustainableTheta(
   for (let i = 1; i <= scanSteps; i++) {
     const theta = lo0 + ((hi0 - lo0) * i) / scanSteps;
     const result = simulate(theta, inputs);
+    if (distanceReached(result) > distanceReached(furthestResult)) {
+      furthestTheta = theta;
+      furthestResult = result;
+    }
     if (result.feasible) {
       bestFeasibleTheta = theta;
       bestFeasibleResult = result;
@@ -204,7 +220,7 @@ export function findSustainableTheta(
 
   if (bestFeasibleTheta === null || bestFeasibleResult === null) {
     // No feasible sample anywhere in the scanned range.
-    return { theta: lo0, result: simulate(lo0, inputs) };
+    return { theta: furthestTheta, result: furthestResult };
   }
 
   let lo = bestFeasibleTheta;
