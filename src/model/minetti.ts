@@ -62,3 +62,47 @@ export function costOfWalking(i: number): number {
   const clamped = Math.max(-GRADE_CLAMP, Math.min(GRADE_CLAMP, i));
   return walkingPolynomial(clamped) + steepClimbSurcharge(i);
 }
+
+/**
+ * Gradient beyond which running speed on a descent starts being limited by
+ * something other than metabolic cost. Matches where Cr(i) bottoms out
+ * (PLAN.md §2) -- past this point Minetti's treadmill data (a controlled,
+ * smooth, motor-imposed-speed protocol) has nothing to say about whether a
+ * human can actually control their body at the speed their aerobic budget
+ * would allow.
+ */
+const DESCENT_LIMIT_ONSET_GRADE = -0.1;
+
+/**
+ * Max controllable running speed right at the onset grade, m/s. Braking
+ * (eccentric quad control), footing/balance, and technical terrain -- none
+ * captured by Minetti -- cap real descending speed well below what a power
+ * budget divided by Cr(i) implies, and it keeps getting more restrictive as
+ * the descent steepens (PLAN.md §6 flags this as an "optional descent-fatigue
+ * penalty... not captured by Minetti"; this is that penalty, expressed as a
+ * speed limit rather than an energy cost so it doesn't distort the
+ * metabolic/glycogen accounting used elsewhere, including Analysis mode).
+ *
+ * Roughly calibrated against one recorded 55km trail ultra's actual GPS pace
+ * (median ~2.8 m/s at -10%, decaying to ~1.0 m/s by -45%) -- a real but
+ * single, noisy data point, not a validated constant like Minetti's own
+ * curve. Treat as a reasonable default, not a precise universal figure.
+ */
+const DESCENT_LIMIT_SPEED_AT_ONSET_MS = 2.8;
+
+/** Max controllable running speed at the steepest clamped grade, m/s. */
+const DESCENT_LIMIT_SPEED_AT_CLAMP_MS = 1.0;
+
+/**
+ * Max running speed on a descent, independent of metabolic cost -- reflects
+ * biomechanical/technical control limits rather than energy availability.
+ * No limit above the onset grade (mild downhill is genuinely both cheap and
+ * fast; the metabolic-cost model already governs there correctly). Returns
+ * `Infinity` on flat/uphill.
+ */
+export function maxDescentSpeedMs(i: number): number {
+  if (i >= DESCENT_LIMIT_ONSET_GRADE) return Infinity;
+  const clamped = Math.max(-GRADE_CLAMP, i);
+  const t = (clamped - DESCENT_LIMIT_ONSET_GRADE) / (-GRADE_CLAMP - DESCENT_LIMIT_ONSET_GRADE);
+  return DESCENT_LIMIT_SPEED_AT_ONSET_MS + (DESCENT_LIMIT_SPEED_AT_CLAMP_MS - DESCENT_LIMIT_SPEED_AT_ONSET_MS) * t;
+}

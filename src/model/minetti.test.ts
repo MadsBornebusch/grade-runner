@@ -3,6 +3,7 @@ import {
   GRADE_CLAMP,
   costOfRunning,
   costOfWalking,
+  maxDescentSpeedMs,
 } from "./minetti";
 
 describe("costOfRunning", () => {
@@ -62,5 +63,33 @@ describe("costOfWalking", () => {
 
   it("clamps steep descents rather than exploding", () => {
     expect(costOfWalking(-2)).toBeCloseTo(costOfWalking(-GRADE_CLAMP), 6);
+  });
+});
+
+describe("maxDescentSpeedMs", () => {
+  it("is unlimited on flat, uphill, and mild downhill (above the onset grade)", () => {
+    expect(maxDescentSpeedMs(0.1)).toBe(Infinity);
+    expect(maxDescentSpeedMs(0)).toBe(Infinity);
+    expect(maxDescentSpeedMs(-0.05)).toBe(Infinity);
+  });
+
+  it("decreases monotonically as the descent steepens past the onset grade", () => {
+    const grades = [-0.1, -0.15, -0.2, -0.25, -0.3, -0.35, -0.4, -0.45];
+    const speeds = grades.map(maxDescentSpeedMs);
+    for (let k = 1; k < speeds.length; k++) {
+      expect(speeds[k]).toBeLessThan(speeds[k - 1]);
+    }
+  });
+
+  it("clamps beyond the steepest validated grade instead of continuing to fall", () => {
+    expect(maxDescentSpeedMs(-0.6)).toBeCloseTo(maxDescentSpeedMs(-GRADE_CLAMP), 6);
+    expect(maxDescentSpeedMs(-2)).toBeCloseTo(maxDescentSpeedMs(-GRADE_CLAMP), 6);
+  });
+
+  it("stays well below what raw metabolic cost alone would allow at the steepest cheap grades", () => {
+    // This is the exact failure mode being fixed: a large power budget divided
+    // by Cr(i) near its minimum implies an absurd speed; the cap should hold
+    // it to something a person could plausibly control on a technical descent.
+    expect(maxDescentSpeedMs(-0.18)).toBeLessThan(4);
   });
 });

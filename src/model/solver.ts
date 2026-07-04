@@ -4,7 +4,7 @@
 // constraints) and §6 (walk/run transition).
 
 import type { CourseSegment } from "../gpx/pipeline";
-import { costOfRunning, costOfWalking } from "./minetti";
+import { costOfRunning, costOfWalking, maxDescentSpeedMs } from "./minetti";
 import { grossToNet, netToGross } from "./energetics";
 import { type CeilingParams, ceilingPower, maxAerobicPower } from "./ceiling";
 import {
@@ -91,7 +91,7 @@ export function simulate(theta: number, inputs: SolverInputs): SimulationResult 
 
     const costRun = costOfRunning(seg.gradient);
     const costWalk = costOfWalking(seg.gradient);
-    const vRun = targetNet / costRun;
+    const vRun = Math.min(targetNet / costRun, maxDescentSpeedMs(seg.gradient));
     const vWalk = Math.min(walkMaxMs, targetNet / costWalk);
 
     const forceWalk =

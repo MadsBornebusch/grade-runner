@@ -217,15 +217,32 @@ The user specifically asked for literature. Findings:
 **Recommendation (implement this — no magic grade constant):** let the transition
 *emerge* from a walking-speed cap, which reproduces the literature:
 ```
-v_run(i)  = P_net / Cr(i)
-v_walk(i) = min( v_walk_max , P_net / Cw(i) )     # v_walk_max ≈ 2.0 m/s
-mode      = argmax(v_run, v_walk)                  # faster mode at equal power wins
+v_run(i)  = min( P_net / Cr(i), v_descent_max(i) )   # v_descent_max = ∞ above i ≈ -0.10
+v_walk(i) = min( v_walk_max , P_net / Cw(i) )        # v_walk_max ≈ 2.0 m/s
+mode      = argmax(v_run, v_walk)                     # faster mode at equal power wins
 ```
 On the flat, `v_run ≫ 2` → run. As grade steepens, `v_run` collapses below walking
 speed and Cw < Cr → walk. The crossover falls out at ~15–25% grade (fitness-dependent
 via P_net and `v_walk_max`), matching the studies. Expose `v_walk_max` and a
-"force walk above X% grade" override as user settings. Optional descent-fatigue penalty
-for long steep downhills (eccentric damage, not captured by Minetti).
+"force walk above X% grade" override as user settings.
+
+**Descent speed cap (implemented, `model/minetti.ts` `maxDescentSpeedMs`):** Minetti's
+data is metabolic cost measured on a smooth, motor-driven treadmill at an *imposed*
+speed — it says nothing about whether a real trail runner can safely control their
+body at the speed their aerobic budget alone would allow on a real descent. Without a
+separate limit, `v_run(i) = P_net / Cr(i)` blows up right at Cr(i)'s minimum
+(i ≈ −0.10 to −0.20): a large-but-plausible power budget divided by ~1.8 J/kg/m
+implies sub-2:30/km paces on ordinary trail descents, which no one actually runs.
+`v_descent_max(i)` is an independent, non-metabolic ceiling (braking/eccentric
+control, footing, technical terrain — this *is* the "descent-fatigue penalty...
+not captured by Minetti" flagged above) that only engages below i ≈ −0.10, so mild
+downhill and everything else is untouched. It's a speed limit, not an added energy
+cost, so it doesn't distort glycogen/fat-burn accounting (including Analysis mode,
+which uses actual recorded speed and never calls this function at all). Roughly
+calibrated against one recorded 55 km trail ultra's actual GPS pace vs. grade — real
+signal, but a single noisy data point, not a validated constant like Minetti's own
+curve. Not yet exposed as a user setting (see §7); a strong technical descender and a
+cautious one likely warrant different values.
 
 ---
 
