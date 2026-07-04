@@ -58,7 +58,16 @@ export interface PipelineResult {
 }
 
 const DEFAULT_SEGMENT_LENGTH_M = 50;
-const DEFAULT_SMOOTHING_WINDOW_M = 40;
+/**
+ * 150, not 40 -- chosen to behavior-preserve the default at the moment
+ * smoothing changed from a point-count radius to a real distance window
+ * (see smoothMedianByDistance). The old (50, 40) combo floored to a 1-point
+ * median radius, which at 50m spacing spanned 150m in practice regardless of
+ * the "40" label; 150 keeps that same real-world smoothing extent now that
+ * the number means what it says, rather than silently changing what a
+ * fresh install's default course looks like.
+ */
+const DEFAULT_SMOOTHING_WINDOW_M = 150;
 const DEFAULT_PAUSE_SPEED_MS = 0.5;
 
 function attr(tagAttrs: string, name: string): string | null {
@@ -157,15 +166,39 @@ function resample(points: GpxPoint[], spacingM: number): GpxPoint[] {
   return resampled;
 }
 
-/** Rolling median smoothing, window given as a point-count radius on each side. */
-function smoothMedian(values: number[], radius: number): number[] {
-  if (radius <= 0) return values.slice();
-  return values.map((_, i) => {
-    const lo = Math.max(0, i - radius);
-    const hi = Math.min(values.length - 1, i + radius);
-    const window = values.slice(lo, hi + 1).sort((a, b) => a - b);
-    return window[Math.floor(window.length / 2)];
-  });
+/**
+ * Rolling median smoothing over a genuine real-world distance window (not a
+ * fixed point count). Point-count radii are wrong here: converting a meters
+ * window to a point-count radius via `round(windowM / spacingM / 2)` and
+ * flooring at 1 point (as an earlier version of this function did) collapses
+ * to the *same* 1-point radius for almost any windowM smaller than roughly
+ * 3x the point spacing -- so "smoothing window" silently stopped doing
+ * anything across most of its useful range, and "segment length" ended up
+ * secretly controlling the real smoothing extent instead (since a 1-point
+ * radius spans 3x whatever the spacing happens to be). Walking a real
+ * distance window sidesteps that entirely: it means the same thing whether
+ * `points` are raw, unevenly-spaced GPS fixes or an evenly resampled grid.
+ */
+function smoothMedianByDistance(points: GpxPoint[], windowM: number): number[] {
+  const eles = points.map((p) => p.ele ?? 0);
+  if (windowM <= 0 || points.length < 2) return eles;
+
+  const cumulative = [0];
+  for (let i = 1; i < points.length; i++) {
+    cumulative.push(cumulative[i - 1] + haversineDistance(points[i - 1], points[i]));
+  }
+
+  const half = windowM / 2;
+  const smoothed: number[] = [];
+  let lo = 0;
+  let hi = 0;
+  for (let i = 0; i < points.length; i++) {
+    while (lo < i && cumulative[i] - cumulative[lo] > half) lo++;
+    while (hi < points.length - 1 && cumulative[hi + 1] - cumulative[i] <= half) hi++;
+    const window = eles.slice(lo, hi + 1).sort((a, b) => a - b);
+    smoothed.push(window[Math.floor(window.length / 2)]);
+  }
+  return smoothed;
 }
 
 function metersToPointRadius(windowM: number, spacingM: number): number {
@@ -196,12 +229,13 @@ export function runPipeline(
   const hasElevation = points.some((p) => p.ele !== null);
   const hasTimestamps = points.some((p) => p.time !== null);
 
-  const resampled = resample(points, segmentLengthM);
-  const rawEle = resampled.map((p) => p.ele ?? 0);
-  const smoothedEle = smoothMedian(
-    rawEle,
-    metersToPointRadius(smoothingWindowM, segmentLengthM),
-  );
+  // Smooth on the raw points first, using a real distance window -- keeps
+  // smoothing extent independent of whatever resample spacing is chosen next.
+  const smoothedRawEle = smoothMedianByDistance(points, smoothingWindowM);
+  const smoothedPoints = points.map((p, i) => ({ ...p, ele: smoothedRawEle[i] }));
+
+  const resampled = resample(smoothedPoints, segmentLengthM);
+  const smoothedEle = resampled.map((p) => p.ele ?? 0);
   const gradientRadius = metersToPointRadius(gradientWindowM, segmentLengthM);
 
   const segments: CourseSegment[] = [];

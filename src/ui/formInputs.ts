@@ -55,7 +55,7 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   altitudeAdjustment: true,
   durabilityDriftPerHour: 0,
   segmentLengthM: 50,
-  smoothingWindowM: 40,
+  smoothingWindowM: 150,
   fatOxPoints: [],
   walkSpeedDisplayUnit: "ms",
 };

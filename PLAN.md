@@ -93,7 +93,7 @@ grade-runner/
       ceiling.ts      # duration→fraction curve, LT2 cap, altitude, optional durability drift
       solver.ts       # walk/run mode choice, forward simulation, bisection on effort θ
     gpx/
-      pipeline.ts     # parse → resample fixed 3D distance → smooth ele → gradient window → pause detect
+      pipeline.ts     # parse → smooth ele (distance window) → resample fixed 3D distance → gradient window → pause detect
     ui/               # upload, profile chart, pace/HR/fuel charts, inputs panel, mode toggle
     App.tsx
   Dockerfile
@@ -106,8 +106,8 @@ grade-runner/
 ## 4. The two modes
 
 ### Planning mode
-1. Upload **course** GPX → pipeline (parse, resample to fixed distance, smooth
-   elevation, compute windowed gradient, clamp to ±0.45).
+1. Upload **course** GPX → pipeline (parse, smooth elevation, resample to fixed
+   distance, compute windowed gradient, clamp to ±0.45).
 2. Solve for the sustainable plan (see §5): choose a single effort knob `θ`,
    forward-simulate the whole course, bisect θ to the largest value that keeps
    glycogen above reserve everywhere and power ≤ ceiling.
@@ -189,11 +189,21 @@ efforts glycogen-expensive and drives the bonk.
 - **Optional durability drift** (biggest ultra-specific effect missing otherwise):
   `Ė_sus(t) = Ė_sus·(1 − d·hours)`, off by default.
 
-**GPX pipeline:** resample to fixed 3D spacing first; distance-based elevation
-smoothing (rolling median / Savitzky–Golay over ~30–50 m); gradient = rise over a
-~20–50 m window (never point-to-point — that's pure noise). Report total gain *after*
-smoothing; let the user calibrate smoothing/scale to a known course vertical. Missing
-elevation → warn / flat-course fallback. Missing timestamps → planning only.
+**GPX pipeline:** distance-based elevation smoothing (rolling median over a real
+meters window) on the raw points *first*, then resample to fixed 3D spacing;
+gradient = rise over a ~20–50 m window on the (already-smoothed) resampled grid
+(never point-to-point — that's pure noise). Smoothing before resampling, not after,
+matters: smoothing an already-resampled (lossily interpolated) series can't recover
+detail the resample step threw away, and — the actual bug found in testing —
+converting a meters window to a resampled-grid point-count radius and flooring at 1
+point collapses to the *same* radius for any window smaller than ~3x the segment
+length, silently making "smoothing window" a no-op across most of its practical
+range while segment length ends up secretly controlling the real smoothing extent
+instead. Smooth on the raw points with a genuine distance window and this doesn't
+happen — the two controls stay independent regardless of point density. Report total
+gain *after* smoothing; let the user calibrate smoothing/scale to a known course
+vertical. Missing elevation → warn / flat-course fallback. Missing timestamps →
+planning only.
 
 ---
 
@@ -261,7 +271,7 @@ cautious one likely warrant different values.
 | FO_peak (fat rate ceiling) | 0.55 g/min | ~1.0 for elites |
 | Resting metabolism | 1.2 W/kg | net→gross bridge |
 | Walk max speed / force-walk grade | 2.0 m/s / off | |
-| Smoothing window / segment length | 40 m / 50 m | |
+| Smoothing window / segment length | 150 m / 50 m | see §5 GPX pipeline note re: why 150, not 40 |
 | Altitude adjustment | on | Cerretelli per-segment |
 | Durability drift | off | decay Ė_sus over hours |
 

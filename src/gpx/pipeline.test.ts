@@ -145,4 +145,39 @@ describe("runPipeline", () => {
       expect(segment.dtS).toBeNull();
     }
   });
+
+  it("smoothingWindowM changes the result independently of segmentLengthM", () => {
+    // Regression guard: an earlier version converted smoothingWindowM to a
+    // point-count radius on the resampled grid and floored it at 1 point,
+    // which collapsed to the same radius (hence identical output) for any
+    // smoothingWindowM smaller than roughly 3x segmentLengthM -- silently
+    // making the "smoothing window" control a no-op across most of its
+    // range. Noisy elevation (alternating +/-2m jitter) makes smoothing
+    // actually change the computed gain, so this would fail on that bug.
+    const points = makeLine({ n: 400, spacingM: 2, grade: 0.05 }).map((p, i) => ({
+      ...p,
+      ele: (p.ele ?? 0) + (i % 2 === 0 ? 2 : -2),
+    }));
+
+    const light = runPipeline(points, { segmentLengthM: 50, smoothingWindowM: 10 });
+    const heavy = runPipeline(points, { segmentLengthM: 50, smoothingWindowM: 300 });
+
+    expect(heavy.totalElevationGain).toBeLessThan(light.totalElevationGain);
+  });
+
+  it("smoothing extent is independent of segmentLengthM at a fixed smoothingWindowM", () => {
+    const points = makeLine({ n: 400, spacingM: 2, grade: 0.05 }).map((p, i) => ({
+      ...p,
+      ele: (p.ele ?? 0) + (i % 2 === 0 ? 2 : -2),
+    }));
+
+    const fine = runPipeline(points, { segmentLengthM: 20, smoothingWindowM: 200 });
+    const coarse = runPipeline(points, { segmentLengthM: 100, smoothingWindowM: 200 });
+
+    // Both apply the same real-world smoothing window, so gain shouldn't
+    // diverge sharply just because segmentLengthM (display resolution) differs.
+    const ratio = fine.totalElevationGain / coarse.totalElevationGain;
+    expect(ratio).toBeGreaterThan(0.8);
+    expect(ratio).toBeLessThan(1.25);
+  });
 });
