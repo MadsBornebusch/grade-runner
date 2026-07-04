@@ -12,7 +12,7 @@ import { SplitTable } from "./ui/SplitTable";
 import { ResultsSummary } from "./ui/ResultsSummary";
 import { AnalysisSummary } from "./ui/AnalysisSummary";
 import { buildAnalysisChartPoints, buildChartPoints } from "./ui/chartData";
-import { loadFormInputs, saveFormInputs, substrateAnchorsFromThresholds } from "./ui/formInputs";
+import { loadFormInputs, resolveSubstrateAnchors, saveFormInputs } from "./ui/formInputs";
 import "./App.css";
 
 type AppMode = "planning" | "analysis";
@@ -46,7 +46,7 @@ function App() {
 
   const solverInputs = useMemo<SolverInputs | null>(() => {
     if (!courseResult || courseResult.segments.length === 0) return null;
-    const { x0, k } = substrateAnchorsFromThresholds(formInputs.lt1Fraction, formInputs.lt2Fraction);
+    const { x0, k, intensityIsAbsolutePower } = resolveSubstrateAnchors(formInputs);
     return {
       segments: courseResult.segments,
       bodyMassKg: formInputs.bodyMassKg,
@@ -58,7 +58,7 @@ function App() {
         tauMin: formInputs.tauMin,
         durabilityDriftPerHour: formInputs.durabilityDriftPerHour,
       },
-      substrateParams: { x0, k, foPeakGPerMin: formInputs.foPeakGPerMin },
+      substrateParams: { x0, k, intensityIsAbsolutePower, foPeakGPerMin: formInputs.foPeakGPerMin },
       fueling: { intakeGPerH: formInputs.intakeGPerH, gutMaxGPerH: formInputs.gutMaxGPerH },
       glycogenStoreG: formInputs.glycogenStoreG,
       reserveG: formInputs.reserveG,
@@ -87,11 +87,11 @@ function App() {
     if (!analysisCourseResult || !analysisCourseResult.hasTimestamps || analysisCourseResult.segments.length === 0) {
       return null;
     }
-    const { x0, k } = substrateAnchorsFromThresholds(formInputs.lt1Fraction, formInputs.lt2Fraction);
+    const { x0, k, intensityIsAbsolutePower } = resolveSubstrateAnchors(formInputs);
     return {
       bodyMassKg: formInputs.bodyMassKg,
       ceilingParams: { vo2MaxMlPerKgPerMin: formInputs.vo2MaxMlPerKgPerMin },
-      substrateParams: { x0, k, foPeakGPerMin: formInputs.foPeakGPerMin },
+      substrateParams: { x0, k, intensityIsAbsolutePower, foPeakGPerMin: formInputs.foPeakGPerMin },
       fueling: { intakeGPerH: formInputs.intakeGPerH, gutMaxGPerH: formInputs.gutMaxGPerH },
       glycogenStoreG: formInputs.glycogenStoreG,
       reserveG: formInputs.reserveG,

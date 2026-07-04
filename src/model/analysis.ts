@@ -90,7 +90,9 @@ export function analyzeRun(segments: CourseSegment[], inputs: AnalysisInputs): A
     }
     cumulativeElapsedTimeS += dt;
 
-    const x = grossPower / maxAerobicPower(altitudeM, inputs.ceilingParams);
+    const x = inputs.substrateParams?.intensityIsAbsolutePower
+      ? grossPower
+      : grossPower / maxAerobicPower(altitudeM, inputs.ceilingParams);
     const split = splitPower(grossPower, x, inputs.bodyMassKg, inputs.substrateParams);
 
     glycogen = stepGlycogen(glycogen, split.carbRateWPerKg, inputs.bodyMassKg, inputs.fueling, dt, reserveG);

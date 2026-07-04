@@ -63,6 +63,20 @@ describe("simulate", () => {
     expect(result.segments.every((s) => s.mode === "walk")).toBe(true);
   });
 
+  it("intensityIsAbsolutePower changes what x0/k mean for the substrate split", () => {
+    // Same numeric x0/k (0.5, 11) -- a sane %VO2max anchor, but a tiny
+    // absolute power anchor. At theta=0.6 on flat ground, gross power is
+    // ~8-9 W/kg: in %VO2max mode x is normalized down to ~0.5 (near the
+    // anchor, a mixed split); in absolute-power mode x is that ~8-9 W/kg
+    // directly (miles past the x0=0.5 anchor, saturating to nearly all carb).
+    const asVo2max = simulate(0.6, baseInputs({ substrateParams: { x0: 0.5, k: 11 } }));
+    const asPower = simulate(
+      0.6,
+      baseInputs({ substrateParams: { x0: 0.5, k: 11, intensityIsAbsolutePower: true } }),
+    );
+    expect(asPower.segments[0].carbRateWPerKg).toBeGreaterThan(asVo2max.segments[0].carbRateWPerKg);
+  });
+
   it("bonks when glycogen is exhausted with no fueling", () => {
     const noFuel = baseInputs({
       segments: makeSegments(2000, 50, 0), // 100km

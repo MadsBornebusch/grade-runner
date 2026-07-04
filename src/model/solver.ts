@@ -107,7 +107,9 @@ export function simulate(theta: number, inputs: SolverInputs): SimulationResult 
 
     const cost = mode === "run" ? costRun : costWalk;
     const grossPower = netToGross(cost * speed);
-    const x = grossPower / maxAerobicPower(altitudeM, inputs.ceilingParams);
+    const x = inputs.substrateParams?.intensityIsAbsolutePower
+      ? grossPower
+      : grossPower / maxAerobicPower(altitudeM, inputs.ceilingParams);
     const split = splitPower(grossPower, x, inputs.bodyMassKg, inputs.substrateParams);
 
     const dt = seg.distance3D / speed;

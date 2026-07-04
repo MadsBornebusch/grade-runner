@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   bonkPowerWPerKg,
   carbEnergyFraction,
+  fatOxPacePointToPowerFraction,
   fatOxPointToFraction,
   fitCarbFractionAnchors,
   splitPower,
@@ -41,6 +42,17 @@ describe("fitCarbFractionAnchors", () => {
     expect(k).toBe(11);
     expect(x0).toBeCloseTo(0.7, 6);
   });
+
+  it("stays finite when a point sits exactly at the fC=0 or fC=1 boundary", () => {
+    const points = [
+      { x: 5, fC: 0 },
+      { x: 10, fC: 0.5 },
+      { x: 15, fC: 1 },
+    ];
+    const { x0, k } = fitCarbFractionAnchors(points);
+    expect(Number.isFinite(x0)).toBe(true);
+    expect(Number.isFinite(k)).toBe(true);
+  });
 });
 
 describe("fatOxPointToFraction", () => {
@@ -50,6 +62,45 @@ describe("fatOxPointToFraction", () => {
     expect(x).toBe(0.6);
     expect(fC).toBeGreaterThan(0);
     expect(fC).toBeLessThan(1);
+  });
+});
+
+describe("fatOxPacePointToPowerFraction", () => {
+  it("returns x in absolute gross-power units, not a %VO2max fraction", () => {
+    // 5:00/km = 3.33 m/s, well above the walk threshold -> running cost.
+    const { x } = fatOxPacePointToPowerFraction(5, 0.5, 1.5);
+    expect(x).toBeGreaterThan(5); // gross power at running pace is several W/kg
+    expect(x).toBeLessThan(20);
+  });
+
+  it("produces a fraction in (0,1) for a plausible point", () => {
+    const { fC } = fatOxPacePointToPowerFraction(6, 0.4, 1.5);
+    expect(fC).toBeGreaterThan(0);
+    expect(fC).toBeLessThan(1);
+  });
+
+  it("uses the walking cost curve below the walk-speed threshold", () => {
+    // ~10:00/km = 1.67 m/s, below the default 2.0 m/s walk threshold.
+    const { x: walkX } = fatOxPacePointToPowerFraction(10, 0.3, 1.0);
+    const { x: runX } = fatOxPacePointToPowerFraction(5, 0.3, 1.0);
+    expect(walkX).toBeLessThan(runX);
+  });
+
+  it("computes fC as a pure ratio of measured rates, independent of Minetti's assumed power", () => {
+    // At an easy pace with high measured fat oxidation, the old formula (which
+    // compared measured fat against Minetti's *assumed* gross power for that
+    // pace) could go negative or even land above 1 if the two disagreed. The
+    // ratio-based formula can't: it's bounded in (0,1) by construction for any
+    // positive fat/carb rates.
+    const { fC } = fatOxPacePointToPowerFraction(10, 0.6, 0.3);
+    expect(fC).toBeGreaterThan(0);
+    expect(fC).toBeLessThan(1);
+  });
+
+  it("stays finite when fat oxidation is exactly zero (max-effort test stage)", () => {
+    const { fC } = fatOxPacePointToPowerFraction(4, 0, 3.0);
+    expect(fC).toBe(1);
+    expect(Number.isFinite(fC)).toBe(true);
   });
 });
 

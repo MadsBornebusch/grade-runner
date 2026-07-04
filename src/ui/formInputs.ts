@@ -1,6 +1,15 @@
 // Shared shape for the user-editable parameters in PLAN.md §7, persisted to
 // localStorage so a returning user doesn't have to re-enter their physiology.
 
+import { maxAerobicPower } from "../model/ceiling";
+import { fatOxPacePointToPowerFraction, fitCarbFractionAnchors } from "../model/substrate";
+
+export interface FatOxPoint {
+  paceMinPerKm: number;
+  fatGPerMin: number;
+  carbGPerMin: number;
+}
+
 export interface FormInputs {
   bodyMassKg: number;
   vo2MaxMlPerKgPerMin: number;
@@ -22,6 +31,8 @@ export interface FormInputs {
   durabilityDriftPerHour: number;
   segmentLengthM: number;
   smoothingWindowM: number;
+  /** Measured (pace, fat-oxidation) points. Non-empty overrides LT1/LT2 for the fuel/substrate split. */
+  fatOxPoints: FatOxPoint[];
 }
 
 export const DEFAULT_FORM_INPUTS: FormInputs = {
@@ -43,6 +54,7 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   durabilityDriftPerHour: 0,
   segmentLengthM: 50,
   smoothingWindowM: 40,
+  fatOxPoints: [],
 };
 
 const STORAGE_KEY = "grade-runner:inputs";
@@ -67,4 +79,30 @@ export function substrateAnchorsFromThresholds(
   lt2Fraction: number,
 ): { x0: number; k: number } {
   return { x0: lt1Fraction, k: Math.log(9) / (lt2Fraction - lt1Fraction) };
+}
+
+// Fallback slope for a fitted fat-ox curve with only one point (no k to fit
+// from), scaled down from the default %VO2max slope to absolute-power units
+// via a nominal 50 ml/kg/min VO2max -- just needs to be a plausible order of
+// magnitude, since a single point is inherently under-determined anyway.
+const FALLBACK_ABSOLUTE_POWER_K =
+  (Math.log(9) / (0.85 - 0.65)) / maxAerobicPower(0, { vo2MaxMlPerKgPerMin: 50 });
+
+/**
+ * Resolves the substrate params to actually use: the user's own fat-ox-vs-pace
+ * curve if they've supplied one (fit directly in absolute power, no VO2max
+ * needed), otherwise the LT1/LT2-derived %VO2max curve.
+ */
+export function resolveSubstrateAnchors(
+  inputs: Pick<FormInputs, "lt1Fraction" | "lt2Fraction" | "fatOxPoints" | "walkMaxMs">,
+): { x0: number; k: number; intensityIsAbsolutePower: boolean } {
+  if (inputs.fatOxPoints.length > 0) {
+    const points = inputs.fatOxPoints.map((p) =>
+      fatOxPacePointToPowerFraction(p.paceMinPerKm, p.fatGPerMin, p.carbGPerMin, inputs.walkMaxMs),
+    );
+    const { x0, k } = fitCarbFractionAnchors(points, FALLBACK_ABSOLUTE_POWER_K);
+    return { x0, k, intensityIsAbsolutePower: true };
+  }
+  const { x0, k } = substrateAnchorsFromThresholds(inputs.lt1Fraction, inputs.lt2Fraction);
+  return { x0, k, intensityIsAbsolutePower: false };
 }

@@ -134,6 +134,66 @@
   width: auto;
 }
 
+.field-group-help {
+  font-size: 13px;
+  opacity: 0.75;
+  line-height: 1.4;
+  margin: 0 0 4px;
+}
+
+.field-group-note {
+  font-size: 13px;
+  color: var(--accent);
+  margin: 0;
+}
+
+.fatox-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fatox-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto 1fr auto auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.fatox-row input[type="number"] {
+  width: 100%;
+}
+
+.fatox-row__unit {
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+.fatox-row__remove {
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text);
+  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.fatox-add {
+  align-self: flex-start;
+  border: 1px dashed var(--border);
+  background: none;
+  color: var(--text);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
 .course-name {
   font-weight: 600;
   color: var(--text-h);

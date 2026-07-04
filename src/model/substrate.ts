@@ -2,15 +2,26 @@
 // See PLAN.md §5 "Fat oxidation — energy-conserving default (P1)" and
 // "Fuel = reservoir + flow limit, in grams".
 
-import { CARB_KJ_PER_G, FAT_KJ_PER_G } from "./energetics";
+import { CARB_KJ_PER_G, FAT_KJ_PER_G, netToGross } from "./energetics";
+import { costOfRunning, costOfWalking } from "./minetti";
 
 export interface SubstrateParams {
-  /** Anchor: %VO2max at which carb fraction = 0.5. Default LT1 = 0.65. */
+  /** Anchor: intensity at which carb fraction = 0.5. Default LT1 = 0.65 (%VO2max). */
   x0?: number;
   /** Logistic slope. Default ln(9)/(LT2-LT1) so fraction reaches 0.9 at LT2 = 0.85. */
   k?: number;
   /** Absolute fat oxidation rate ceiling, g/min. Default 0.55, ~1.0 for elites. */
   foPeakGPerMin?: number;
+  /**
+   * If true, `x0`/`k` (and the `x` callers pass to carbEnergyFraction/splitPower)
+   * are in absolute gross power (W/kg) rather than %VO2max — set when the
+   * anchors came from a user's own fat-ox-vs-pace curve rather than
+   * LT1/LT2 fractions. Trade-off: skips the per-segment Cerretelli altitude
+   * adjustment for the substrate split specifically (the aerobic ceiling
+   * remains fully altitude-aware regardless) since there's no VO2max to
+   * adjust. A secondary-order effect for most courses.
+   */
+  intensityIsAbsolutePower?: boolean;
 }
 
 const DEFAULT_LT1 = 0.65;
@@ -46,7 +57,14 @@ export function fitCarbFractionAnchors(
 ): { x0: number; k: number } {
   if (points.length === 0) throw new Error("fitCarbFractionAnchors: need at least one point");
 
-  const z = points.map((p) => Math.log(p.fC / (1 - p.fC)));
+  // Clamp away from 0/1: real measured points can legitimately land at an
+  // exact substrate extreme (e.g. ~0 fat oxidation at max effort), which
+  // would otherwise send the logit to +/-Infinity and poison the fit with NaN.
+  const EPSILON = 1e-6;
+  const z = points.map((p) => {
+    const fC = Math.min(1 - EPSILON, Math.max(EPSILON, p.fC));
+    return Math.log(fC / (1 - fC));
+  });
 
   if (points.length === 1) {
     return { x0: points[0].x - z[0] / defaultK, k: defaultK };
@@ -83,6 +101,37 @@ export function fatOxPointToFraction(
   const fatRateWPerKg = ((fatGPerMin / 60) * FAT_KJ_PER_G * 1000) / bodyMassKg;
   const fatFraction = fatRateWPerKg / pGrossWPerKg;
   return { x: intensityFraction, fC: 1 - fatFraction };
+}
+
+/**
+ * Converts a (pace, fat-ox, carb-ox) calibration point measured on flat
+ * ground into a (gross power, carb-energy-fraction) pair, in absolute W/kg
+ * rather than %VO2max — for users who have their own fat/carb-oxidation-vs-pace
+ * data and don't know their VO2max. `fC` is computed as a ratio of the two
+ * measured oxidation rates directly (mass cancels, so neither needs body
+ * mass), rather than comparing measured fat against Minetti's *assumed*
+ * gross power for that pace — the latter can disagree with the metabolic
+ * cart enough to push fC outside (0,1) and blow up the logistic fit. `x`
+ * (the intensity axis) still comes from the Minetti pace->power conversion,
+ * since that's what the simulation itself uses as its intensity axis.
+ * Assumes the test was run on a flat treadmill (the usual protocol) and that
+ * walking vs. running gait follows the same speed threshold as everywhere
+ * else in the model.
+ */
+export function fatOxPacePointToPowerFraction(
+  paceMinPerKm: number,
+  fatGPerMin: number,
+  carbGPerMin: number,
+  walkMaxMs = 2.0,
+): { x: number; fC: number } {
+  const speedMs = 1000 / (paceMinPerKm * 60);
+  const cost = speedMs <= walkMaxMs ? costOfWalking(0) : costOfRunning(0);
+  const pGrossWPerKg = netToGross(cost * speedMs);
+  const fatKJPerMin = fatGPerMin * FAT_KJ_PER_G;
+  const carbKJPerMin = carbGPerMin * CARB_KJ_PER_G;
+  const totalKJPerMin = fatKJPerMin + carbKJPerMin;
+  const fC = totalKJPerMin > 0 ? carbKJPerMin / totalKJPerMin : 0.5;
+  return { x: pGrossWPerKg, fC };
 }
 
 function fatCeilingWPerKg(foPeakGPerMin: number, bodyMassKg: number): number {
