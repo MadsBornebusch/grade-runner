@@ -1,4 +1,11 @@
-import type { FatOxPoint, FormInputs } from "./formInputs";
+import {
+  speedFromMs,
+  speedToMs,
+  suggestedFoPeakGPerMin,
+  type FatOxPoint,
+  type FormInputs,
+  type WalkSpeedUnit,
+} from "./formInputs";
 
 interface InputsPanelProps {
   values: FormInputs;
@@ -31,6 +38,45 @@ function NumberField({ label, hint, value, step = 1, min, max, onChange }: Field
         }}
       />
       {hint && <span className="field__hint">{hint}</span>}
+    </label>
+  );
+}
+
+interface SpeedFieldProps {
+  label: string;
+  valueMs: number;
+  unit: WalkSpeedUnit;
+  onUnitChange: (unit: WalkSpeedUnit) => void;
+  onChange: (ms: number) => void;
+}
+
+const MIN_WALK_SPEED_MS = 0.1;
+
+function SpeedField({ label, valueMs, unit, onUnitChange, onChange }: SpeedFieldProps) {
+  const displayValue = speedFromMs(valueMs, unit);
+  return (
+    <label className="field">
+      <span className="field__label">{label}</span>
+      <input
+        type="number"
+        value={Number.isFinite(displayValue) ? Math.round(displayValue * 100) / 100 : ""}
+        step={0.1}
+        min={0}
+        onChange={(e) => {
+          const next = e.target.valueAsNumber;
+          if (!Number.isNaN(next)) onChange(Math.max(MIN_WALK_SPEED_MS, speedToMs(next, unit)));
+        }}
+      />
+      <select
+        className="field__unit-select"
+        value={unit}
+        onChange={(e) => onUnitChange(e.target.value as WalkSpeedUnit)}
+        aria-label={`${label} unit`}
+      >
+        <option value="ms">m/s</option>
+        <option value="kmh">km/h</option>
+        <option value="minkm">min/km</option>
+      </select>
     </label>
   );
 }
@@ -160,7 +206,27 @@ export function InputsPanel({ values, onChange }: InputsPanelProps) {
           split at that pace. Add at least 2-3 points across a range of paces for a reliable fit — one point just
           shifts the default curve. Assumes the points were measured on flat ground.
         </p>
-        <FatOxRows points={values.fatOxPoints} onChange={(fatOxPoints) => set("fatOxPoints", fatOxPoints)} />
+        <FatOxRows
+          points={values.fatOxPoints}
+          onChange={(fatOxPoints) => {
+            const peak = suggestedFoPeakGPerMin(fatOxPoints);
+            onChange({ ...values, fatOxPoints, ...(peak !== null ? { foPeakGPerMin: peak } : {}) });
+          }}
+        />
+        <NumberField
+          label="Fat oxidation peak"
+          hint="g/min"
+          value={values.foPeakGPerMin}
+          step={0.05}
+          min={0.1}
+          onChange={(v) => set("foPeakGPerMin", v)}
+        />
+        {usingFatOxCurve && (
+          <p className="field-group-note">
+            Auto-filled from your highest measured fat-oxidation rate above — override if you know your true peak is
+            higher (e.g. the test didn't reach it).
+          </p>
+        )}
       </fieldset>
 
       <fieldset>
@@ -176,7 +242,7 @@ export function InputsPanel({ values, onChange }: InputsPanelProps) {
           value={values.intakeGPerH}
           step={5}
           min={0}
-          onChange={(v) => set("intakeGPerH", v)}
+          onChange={(v) => onChange({ ...values, intakeGPerH: v, gutMaxGPerH: v })}
         />
         <NumberField
           label="Gut oxidation max"
@@ -201,14 +267,6 @@ export function InputsPanel({ values, onChange }: InputsPanelProps) {
           step={5}
           min={0}
           onChange={(v) => set("reserveG", v)}
-        />
-        <NumberField
-          label="Fat oxidation peak"
-          hint="g/min"
-          value={values.foPeakGPerMin}
-          step={0.05}
-          min={0.1}
-          onChange={(v) => set("foPeakGPerMin", v)}
         />
       </fieldset>
 
@@ -281,13 +339,12 @@ export function InputsPanel({ values, onChange }: InputsPanelProps) {
           pace would need faster walking than that cap allows, running becomes faster and wins. Max walk speed sets
           that cap; force-walk overrides it for grades you know you'd never run anyway.
         </p>
-        <NumberField
+        <SpeedField
           label="Max walk speed"
-          hint="m/s"
-          value={values.walkMaxMs}
-          step={0.1}
-          min={0.5}
-          onChange={(v) => set("walkMaxMs", v)}
+          valueMs={values.walkMaxMs}
+          unit={values.walkSpeedDisplayUnit}
+          onUnitChange={(unit) => set("walkSpeedDisplayUnit", unit)}
+          onChange={(ms) => set("walkMaxMs", ms)}
         />
         <label className="field field--checkbox">
           <input

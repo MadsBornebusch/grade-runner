@@ -134,6 +134,17 @@
   width: auto;
 }
 
+.field__unit-select {
+  font: inherit;
+  font-size: 12px;
+  min-width: 70px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
 .field-group-help {
   font-size: 13px;
   opacity: 0.75;

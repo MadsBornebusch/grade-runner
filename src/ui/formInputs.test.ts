@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { resolveSubstrateAnchors, substrateAnchorsFromThresholds } from "./formInputs";
+import {
+  resolveSubstrateAnchors,
+  speedFromMs,
+  speedToMs,
+  substrateAnchorsFromThresholds,
+  suggestedFoPeakGPerMin,
+} from "./formInputs";
 
 describe("substrateAnchorsFromThresholds", () => {
   it("matches substrate.ts's own defaults at LT1=0.65/LT2=0.85", () => {
@@ -54,5 +60,41 @@ describe("resolveSubstrateAnchors", () => {
     });
     expect(Number.isFinite(result.x0)).toBe(true);
     expect(Number.isFinite(result.k)).toBe(true);
+  });
+});
+
+describe("suggestedFoPeakGPerMin", () => {
+  it("returns null with no points", () => {
+    expect(suggestedFoPeakGPerMin([])).toBeNull();
+  });
+
+  it("returns the highest measured fat-oxidation rate", () => {
+    const points = [
+      { paceMinPerKm: 7, fatGPerMin: 0.5, carbGPerMin: 0.8 },
+      { paceMinPerKm: 10, fatGPerMin: 0.7, carbGPerMin: 0.3 },
+      { paceMinPerKm: 4, fatGPerMin: 0, carbGPerMin: 4.0 },
+    ];
+    expect(suggestedFoPeakGPerMin(points)).toBe(0.7);
+  });
+});
+
+describe("speedFromMs / speedToMs", () => {
+  it("round-trips through km/h", () => {
+    const ms = 2.0;
+    const kmh = speedFromMs(ms, "kmh");
+    expect(kmh).toBeCloseTo(7.2, 6);
+    expect(speedToMs(kmh, "kmh")).toBeCloseTo(ms, 6);
+  });
+
+  it("round-trips through min/km", () => {
+    const ms = 2.0;
+    const pace = speedFromMs(ms, "minkm");
+    expect(pace).toBeCloseTo(8.333, 2);
+    expect(speedToMs(pace, "minkm")).toBeCloseTo(ms, 6);
+  });
+
+  it("is identity for m/s", () => {
+    expect(speedFromMs(2.0, "ms")).toBe(2.0);
+    expect(speedToMs(2.0, "ms")).toBe(2.0);
   });
 });

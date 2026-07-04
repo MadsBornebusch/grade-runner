@@ -33,6 +33,8 @@ export interface FormInputs {
   smoothingWindowM: number;
   /** Measured (pace, fat-oxidation) points. Non-empty overrides LT1/LT2 for the fuel/substrate split. */
   fatOxPoints: FatOxPoint[];
+  /** Display-only unit for the max walk speed field; the value is always stored as walkMaxMs. */
+  walkSpeedDisplayUnit: "ms" | "kmh" | "minkm";
 }
 
 export const DEFAULT_FORM_INPUTS: FormInputs = {
@@ -55,6 +57,7 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   segmentLengthM: 50,
   smoothingWindowM: 40,
   fatOxPoints: [],
+  walkSpeedDisplayUnit: "ms",
 };
 
 const STORAGE_KEY = "grade-runner:inputs";
@@ -105,4 +108,30 @@ export function resolveSubstrateAnchors(
   }
   const { x0, k } = substrateAnchorsFromThresholds(inputs.lt1Fraction, inputs.lt2Fraction);
   return { x0, k, intensityIsAbsolutePower: false };
+}
+
+/**
+ * Suggests a fat-oxidation-peak ceiling from a fat-ox curve: the highest
+ * fat-burning rate the user actually measured. Returns null with no points,
+ * since there's nothing to derive it from.
+ */
+export function suggestedFoPeakGPerMin(points: FatOxPoint[]): number | null {
+  if (points.length === 0) return null;
+  return Math.max(...points.map((p) => p.fatGPerMin));
+}
+
+export type WalkSpeedUnit = FormInputs["walkSpeedDisplayUnit"];
+
+/** Converts a walk speed from m/s into the given display unit. */
+export function speedFromMs(ms: number, unit: WalkSpeedUnit): number {
+  if (unit === "kmh") return ms * 3.6;
+  if (unit === "minkm") return ms > 0 ? 1000 / (ms * 60) : 0;
+  return ms;
+}
+
+/** Converts a walk speed from the given display unit back into m/s. */
+export function speedToMs(value: number, unit: WalkSpeedUnit): number {
+  if (unit === "kmh") return value / 3.6;
+  if (unit === "minkm") return value > 0 ? 1000 / (value * 60) : 0;
+  return value;
 }
