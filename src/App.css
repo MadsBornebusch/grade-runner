@@ -56,6 +56,15 @@
   top: 16px;
 }
 
+/* Sticky only makes sense beside a taller main column (desktop). In the
+   single-column stack the sidebar comes before main, so keeping it sticky
+   makes it overlap main as you scroll past a tall sidebar. */
+@media (max-width: 900px) {
+  .app__sidebar {
+    position: static;
+  }
+}
+
 .app__main {
   min-width: 0;
   display: flex;
