@@ -1,4 +1,5 @@
 import type { CourseSegment } from "../gpx/pipeline";
+import type { AnalysisSegmentResult } from "../model/analysis";
 import type { SegmentResult } from "../model/solver";
 
 export interface ChartPoint {
@@ -27,6 +28,29 @@ export function buildChartPoints(
       mode: r.mode,
       glycogenG: r.glycogenG,
       cumulativeTimeS: r.cumulativeTimeS,
+    };
+  });
+}
+
+/** Same shape as buildChartPoints, for analysis mode's reconstructed run.
+ * cumulativeTimeS is elapsed (not moving) time, so it includes pauses --
+ * the same convention a wall-clock split table should use. Mode is inferred
+ * from the same speed threshold analyzeRun used to pick a cost curve. */
+export function buildAnalysisChartPoints(
+  courseSegments: CourseSegment[],
+  results: AnalysisSegmentResult[],
+  walkMaxMs = 2.0,
+): ChartPoint[] {
+  return results.map((r) => {
+    const seg = courseSegments[r.index];
+    return {
+      distanceKm: r.cumulativeDistance3D / 1000,
+      elevationM: seg?.elevation ?? 0,
+      gradient: seg?.gradient ?? 0,
+      speedMs: r.speedMs,
+      mode: r.speedMs <= walkMaxMs ? "walk" : "run",
+      glycogenG: r.glycogenG,
+      cumulativeTimeS: r.cumulativeElapsedTimeS,
     };
   });
 }

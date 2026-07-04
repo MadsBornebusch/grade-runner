@@ -43,6 +43,8 @@ export interface CourseSegment {
   gradient: number;
   /** Timestamp at the end of this segment, if the source GPX had timestamps. */
   time: Date | null;
+  /** Elapsed time for this segment, in seconds, or null without timestamps. */
+  dtS: number | null;
   /** True if this segment's average speed fell below the pause threshold. */
   paused: boolean;
 }
@@ -222,9 +224,9 @@ export function runPipeline(
     if (eleDelta > 0) totalElevationGain += eleDelta;
 
     let paused = false;
+    let dtS: number | null = null;
     if (hasTimestamps && resampled[i - 1].time && resampled[i].time) {
-      const dtS =
-        (resampled[i].time!.getTime() - resampled[i - 1].time!.getTime()) / 1000;
+      dtS = (resampled[i].time!.getTime() - resampled[i - 1].time!.getTime()) / 1000;
       const speed = dtS > 0 ? distance3D / dtS : 0;
       paused = speed < pauseSpeedThresholdMs;
     }
@@ -237,6 +239,7 @@ export function runPipeline(
       elevation: smoothedEle[i],
       gradient,
       time: resampled[i].time,
+      dtS,
       paused,
     });
   }

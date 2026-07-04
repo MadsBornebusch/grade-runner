@@ -132,5 +132,17 @@ describe("runPipeline", () => {
 
     expect(result.hasTimestamps).toBe(true);
     expect(result.segments.some((s) => s.paused)).toBe(true);
+    // dtS should sum to the total elapsed time across the whole run.
+    const totalDtS = result.segments.reduce((sum, s) => sum + (s.dtS ?? 0), 0);
+    const expectedTotalS = (moving2[moving2.length - 1].time!.getTime() - moving1[0].time!.getTime()) / 1000;
+    expect(totalDtS).toBeCloseTo(expectedTotalS, 0);
+  });
+
+  it("leaves dtS null when the course has no timestamps", () => {
+    const points = makeLine({ n: 20, spacingM: 5 });
+    const result = runPipeline(points);
+    for (const segment of result.segments) {
+      expect(segment.dtS).toBeNull();
+    }
   });
 });

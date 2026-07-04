@@ -15,6 +15,7 @@ function makeSegments(n: number, segLenM: number, gradient: number): CourseSegme
       elevation: 0,
       gradient,
       time: null,
+      dtS: null,
       paused: false,
     });
   }
