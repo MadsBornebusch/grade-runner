@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   speedFromMs,
   speedToMs,
@@ -12,6 +13,41 @@ interface InputsPanelProps {
   onChange: (values: FormInputs) => void;
 }
 
+/**
+ * Buffers a numeric <input>'s text separately from the committed numeric
+ * value. Without this, a fully-controlled `value={number}` input snaps back
+ * to the last committed value (undoing the user's keystroke, including the
+ * cursor position) the moment an edit passes through an invalid intermediate
+ * state -- most commonly clearing the field to retype it, since "" parses to
+ * NaN and gets rejected. We only push a change up once the typed text parses
+ * to a real number, and only re-sync from the committed value when the field
+ * isn't focused (so external changes, e.g. auto-fill, still show up).
+ */
+function useNumberField(value: number, onChange: (next: number) => void) {
+  const [text, setText] = useState(() => String(value));
+  const editingRef = useRef(false);
+
+  useEffect(() => {
+    if (!editingRef.current) setText(String(value));
+  }, [value]);
+
+  return {
+    value: text,
+    onFocus: () => {
+      editingRef.current = true;
+    },
+    onBlur: () => {
+      editingRef.current = false;
+      setText(String(value));
+    },
+    onChange: (e: ChangeEvent<HTMLInputElement>) => {
+      setText(e.target.value);
+      const next = e.target.valueAsNumber;
+      if (!Number.isNaN(next)) onChange(next);
+    },
+  };
+}
+
 interface FieldProps {
   label: string;
   hint?: string;
@@ -23,20 +59,11 @@ interface FieldProps {
 }
 
 function NumberField({ label, hint, value, step = 1, min, max, onChange }: FieldProps) {
+  const field = useNumberField(value, onChange);
   return (
     <label className="field">
       <span className="field__label">{label}</span>
-      <input
-        type="number"
-        value={Number.isFinite(value) ? value : ""}
-        step={step}
-        min={min}
-        max={max}
-        onChange={(e) => {
-          const next = e.target.valueAsNumber;
-          if (!Number.isNaN(next)) onChange(next);
-        }}
-      />
+      <input type="number" step={step} min={min} max={max} {...field} />
       {hint && <span className="field__hint">{hint}</span>}
     </label>
   );
@@ -53,20 +80,12 @@ interface SpeedFieldProps {
 const MIN_WALK_SPEED_MS = 0.1;
 
 function SpeedField({ label, valueMs, unit, onUnitChange, onChange }: SpeedFieldProps) {
-  const displayValue = speedFromMs(valueMs, unit);
+  const displayValue = Math.round(speedFromMs(valueMs, unit) * 100) / 100;
+  const field = useNumberField(displayValue, (next) => onChange(Math.max(MIN_WALK_SPEED_MS, speedToMs(next, unit))));
   return (
     <label className="field">
       <span className="field__label">{label}</span>
-      <input
-        type="number"
-        value={Number.isFinite(displayValue) ? Math.round(displayValue * 100) / 100 : ""}
-        step={0.1}
-        min={0}
-        onChange={(e) => {
-          const next = e.target.valueAsNumber;
-          if (!Number.isNaN(next)) onChange(Math.max(MIN_WALK_SPEED_MS, speedToMs(next, unit)));
-        }}
-      />
+      <input type="number" step={0.1} min={0} {...field} />
       <select
         className="field__unit-select"
         value={unit}
@@ -78,6 +97,32 @@ function SpeedField({ label, valueMs, unit, onUnitChange, onChange }: SpeedField
         <option value="minkm">min/km</option>
       </select>
     </label>
+  );
+}
+
+interface FatOxRowProps {
+  point: FatOxPoint;
+  onChange: (patch: Partial<FatOxPoint>) => void;
+  onRemove: () => void;
+}
+
+function FatOxRow({ point, onChange, onRemove }: FatOxRowProps) {
+  const paceField = useNumberField(point.paceMinPerKm, (v) => onChange({ paceMinPerKm: v }));
+  const fatField = useNumberField(point.fatGPerMin, (v) => onChange({ fatGPerMin: v }));
+  const carbField = useNumberField(point.carbGPerMin, (v) => onChange({ carbGPerMin: v }));
+
+  return (
+    <div className="fatox-row">
+      <input type="number" step={0.05} min={2} {...paceField} aria-label="Pace, minutes per km" />
+      <span className="fatox-row__unit">min/km</span>
+      <input type="number" step={0.01} min={0} {...fatField} aria-label="Fat oxidation, grams per minute" />
+      <span className="fatox-row__unit">g/min fat</span>
+      <input type="number" step={0.01} min={0} {...carbField} aria-label="Carb oxidation, grams per minute" />
+      <span className="fatox-row__unit">g/min carb</span>
+      <button type="button" className="fatox-row__remove" onClick={onRemove} aria-label="Remove point">
+        &times;
+      </button>
+    </div>
   );
 }
 
@@ -95,47 +140,7 @@ function FatOxRows({ points, onChange }: FatOxRowsProps) {
   return (
     <div className="fatox-rows">
       {points.map((p, i) => (
-        <div className="fatox-row" key={i}>
-          <input
-            type="number"
-            step={0.05}
-            min={2}
-            value={p.paceMinPerKm}
-            onChange={(e) => {
-              const v = e.target.valueAsNumber;
-              if (!Number.isNaN(v)) update(i, { paceMinPerKm: v });
-            }}
-            aria-label="Pace, minutes per km"
-          />
-          <span className="fatox-row__unit">min/km</span>
-          <input
-            type="number"
-            step={0.01}
-            min={0}
-            value={p.fatGPerMin}
-            onChange={(e) => {
-              const v = e.target.valueAsNumber;
-              if (!Number.isNaN(v)) update(i, { fatGPerMin: v });
-            }}
-            aria-label="Fat oxidation, grams per minute"
-          />
-          <span className="fatox-row__unit">g/min fat</span>
-          <input
-            type="number"
-            step={0.01}
-            min={0}
-            value={p.carbGPerMin}
-            onChange={(e) => {
-              const v = e.target.valueAsNumber;
-              if (!Number.isNaN(v)) update(i, { carbGPerMin: v });
-            }}
-            aria-label="Carb oxidation, grams per minute"
-          />
-          <span className="fatox-row__unit">g/min carb</span>
-          <button type="button" className="fatox-row__remove" onClick={() => remove(i)} aria-label="Remove point">
-            &times;
-          </button>
-        </div>
+        <FatOxRow key={i} point={p} onChange={(patch) => update(i, patch)} onRemove={() => remove(i)} />
       ))}
       <button type="button" className="fatox-add" onClick={add}>
         + Add point
