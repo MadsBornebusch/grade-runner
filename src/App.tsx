@@ -16,17 +16,14 @@ import { buildAnalysisChartPoints, buildChartPoints } from "./ui/chartData";
 import { loadFormInputs, resolveSubstrateAnchors, saveFormInputs } from "./ui/formInputs";
 import "./App.css";
 
-type AppMode = "planning" | "analysis";
+type ResultMode = "planning" | "analysis";
 
 function App() {
-  const [mode, setMode] = useState<AppMode>("planning");
+  const [resultMode, setResultMode] = useState<ResultMode>("planning");
   const [formInputs, setFormInputs] = useState(() => loadFormInputs());
 
   const [rawPoints, setRawPoints] = useState<GpxPoint[] | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
-
-  const [analysisRawPoints, setAnalysisRawPoints] = useState<GpxPoint[] | null>(null);
-  const [analysisFileName, setAnalysisFileName] = useState<string | null>(null);
 
   useEffect(() => {
     saveFormInputs(formInputs);
@@ -40,19 +37,30 @@ function App() {
     [formInputs.segmentLengthM, formInputs.smoothingWindowM],
   );
 
+  // One upload, one pipeline run -- both Planning and Analysis results derive
+  // from this, so switching between them doesn't need a fresh upload.
   const courseResult = useMemo(() => {
     if (!rawPoints) return null;
     return runPipeline(rawPoints, pipelineOptions);
   }, [rawPoints, pipelineOptions]);
 
   const rawStats = useMemo(() => (rawPoints ? rawCourseStats(rawPoints) : null), [rawPoints]);
-  const analysisRawStats = useMemo(
-    () => (analysisRawPoints ? rawCourseStats(analysisRawPoints) : null),
-    [analysisRawPoints],
+
+  const debugProcessedPoints = useMemo(
+    () =>
+      courseResult?.segments.map((s) => ({
+        distanceKm: s.cumulativeDistance3D / 1000,
+        elevationM: s.elevation,
+      })) ?? [],
+    [courseResult],
   );
 
+  // Only the selected result mode's computation runs -- not both eagerly --
+  // so editing settings doesn't pay for a solve/analysis you're not viewing.
+  // Since useMemo is synchronous, switching resultMode recomputes in the same
+  // render: no re-upload, no spinner.
   const solverInputs = useMemo<SolverInputs | null>(() => {
-    if (!courseResult || courseResult.segments.length === 0) return null;
+    if (resultMode !== "planning" || !courseResult || courseResult.segments.length === 0) return null;
     const { x0, k, intensityIsAbsolutePower } = resolveSubstrateAnchors(formInputs);
     return {
       segments: courseResult.segments,
@@ -73,7 +81,7 @@ function App() {
       forceWalkAboveGrade: formInputs.forceWalkAboveGrade ?? undefined,
       altitudeAdjustment: formInputs.altitudeAdjustment,
     };
-  }, [courseResult, formInputs]);
+  }, [resultMode, courseResult, formInputs]);
 
   const solverResult = useMemo(() => {
     if (!solverInputs) return null;
@@ -85,13 +93,13 @@ function App() {
     return buildChartPoints(courseResult.segments, solverResult.result.segments);
   }, [courseResult, solverResult]);
 
-  const analysisCourseResult = useMemo(() => {
-    if (!analysisRawPoints) return null;
-    return runPipeline(analysisRawPoints, pipelineOptions);
-  }, [analysisRawPoints, pipelineOptions]);
-
   const analysisInputs = useMemo<AnalysisInputs | null>(() => {
-    if (!analysisCourseResult || !analysisCourseResult.hasTimestamps || analysisCourseResult.segments.length === 0) {
+    if (
+      resultMode !== "analysis" ||
+      !courseResult ||
+      !courseResult.hasTimestamps ||
+      courseResult.segments.length === 0
+    ) {
       return null;
     }
     const { x0, k, intensityIsAbsolutePower } = resolveSubstrateAnchors(formInputs);
@@ -105,17 +113,17 @@ function App() {
       walkMaxMs: formInputs.walkMaxMs,
       altitudeAdjustment: formInputs.altitudeAdjustment,
     };
-  }, [analysisCourseResult, formInputs]);
+  }, [resultMode, courseResult, formInputs]);
 
   const analysisResult = useMemo(() => {
-    if (!analysisCourseResult || !analysisInputs) return null;
-    return analyzeRun(analysisCourseResult.segments, analysisInputs);
-  }, [analysisCourseResult, analysisInputs]);
+    if (!courseResult || !analysisInputs) return null;
+    return analyzeRun(courseResult.segments, analysisInputs);
+  }, [courseResult, analysisInputs]);
 
   const analysisChartPoints = useMemo(() => {
-    if (!analysisCourseResult || !analysisResult) return [];
-    return buildAnalysisChartPoints(analysisCourseResult.segments, analysisResult.segments, formInputs.walkMaxMs);
-  }, [analysisCourseResult, analysisResult, formInputs.walkMaxMs]);
+    if (!courseResult || !analysisResult) return [];
+    return buildAnalysisChartPoints(courseResult.segments, analysisResult.segments, formInputs.walkMaxMs);
+  }, [courseResult, analysisResult, formInputs.walkMaxMs]);
 
   const substratePoints = useMemo(
     () =>
@@ -132,135 +140,102 @@ function App() {
       <header className="app__header">
         <h1>Grade Runner</h1>
         <div className="mode-toggle">
-          <button type="button" className={mode === "planning" ? "active" : ""} onClick={() => setMode("planning")}>
+          <button
+            type="button"
+            className={resultMode === "planning" ? "active" : ""}
+            onClick={() => setResultMode("planning")}
+          >
             Planning
           </button>
-          <button type="button" className={mode === "analysis" ? "active" : ""} onClick={() => setMode("analysis")}>
+          <button
+            type="button"
+            className={resultMode === "analysis" ? "active" : ""}
+            onClick={() => setResultMode("analysis")}
+            disabled={courseResult !== null && !courseResult.hasTimestamps}
+          >
             Analysis
           </button>
         </div>
       </header>
 
-      {mode === "planning" ? (
-        <div className="app__layout">
-          <aside className="app__sidebar">
-            <GpxUpload
-              onLoaded={(points, name) => {
-                setRawPoints(points);
-                setFileName(name);
-              }}
-            />
-            <InputsPanel values={formInputs} onChange={setFormInputs} />
-          </aside>
+      <div className="app__layout">
+        <aside className="app__sidebar">
+          <GpxUpload
+            onLoaded={(points, name) => {
+              setRawPoints(points);
+              setFileName(name);
+            }}
+          />
+          <InputsPanel values={formInputs} onChange={setFormInputs} />
+        </aside>
 
-          <main className="app__main">
-            {!courseResult && <p className="placeholder">Upload a course GPX to get started.</p>}
+        <main className="app__main">
+          {!courseResult && <p className="placeholder">Upload a course GPX to get started.</p>}
 
-            {courseResult && (
-              <>
-                {fileName && <p className="course-name">{fileName}</p>}
-                {!courseResult.hasElevation && (
-                  <p className="warning">No elevation data found — treating the course as flat.</p>
-                )}
-                <p className="course-stats">
-                  {(courseResult.totalDistance3D / 1000).toFixed(1)} km &middot;{" "}
-                  {courseResult.totalElevationGain.toFixed(0)} m gain
-                </p>
+          {courseResult && (
+            <>
+              {fileName && <p className="course-name">{fileName}</p>}
+              {!courseResult.hasElevation && (
+                <p className="warning">No elevation data found — treating the course as flat.</p>
+              )}
+              <p className="course-stats">
+                {(courseResult.totalDistance3D / 1000).toFixed(1)} km &middot;{" "}
+                {courseResult.totalElevationGain.toFixed(0)} m gain
+              </p>
 
-                {solverResult && (
-                  <>
-                    <ResultsSummary
-                      theta={solverResult.theta}
-                      result={solverResult.result}
-                      totalDistanceM={courseResult.totalDistance3D}
-                    />
-                    {/* A handful of segments (e.g. an immediate bonk) isn't
-                        enough for a meaningful chart axis/scale. */}
-                    {chartPoints.length >= 5 && (
-                      <>
-                        <ElevationProfileChart points={chartPoints} />
-                        <FuelChart points={chartPoints} reserveG={formInputs.reserveG} />
-                        <SplitTable points={chartPoints} />
-                      </>
-                    )}
-                  </>
-                )}
-                {formInputs.showCourseDebug && rawStats && (
-                  <CourseDebugChart
-                    raw={rawStats}
-                    processed={chartPoints}
-                    processedDistanceM={courseResult.totalDistance3D}
-                    processedElevationGain={courseResult.totalElevationGain}
-                    segmentLengthM={formInputs.segmentLengthM}
-                    smoothingWindowM={formInputs.smoothingWindowM}
+              {resultMode === "planning" && solverResult && (
+                <>
+                  <ResultsSummary
+                    theta={solverResult.theta}
+                    result={solverResult.result}
+                    totalDistanceM={courseResult.totalDistance3D}
                   />
-                )}
-              </>
-            )}
-          </main>
-        </div>
-      ) : (
-        <div className="app__layout">
-          <aside className="app__sidebar">
-            <GpxUpload
-              onLoaded={(points, name) => {
-                setAnalysisRawPoints(points);
-                setAnalysisFileName(name);
-              }}
-            />
-            <InputsPanel values={formInputs} onChange={setFormInputs} />
-          </aside>
+                  {/* A handful of segments (e.g. an immediate bonk) isn't
+                      enough for a meaningful chart axis/scale. */}
+                  {chartPoints.length >= 5 && (
+                    <>
+                      <ElevationProfileChart points={chartPoints} />
+                      <FuelChart points={chartPoints} reserveG={formInputs.reserveG} />
+                      <SplitTable points={chartPoints} />
+                    </>
+                  )}
+                </>
+              )}
 
-          <main className="app__main">
-            {!analysisCourseResult && (
-              <p className="placeholder">Upload a recorded run's GPX (with timestamps) to get started.</p>
-            )}
-
-            {analysisCourseResult && (
-              <>
-                {analysisFileName && <p className="course-name">{analysisFileName}</p>}
-                {!analysisCourseResult.hasTimestamps && (
-                  <p className="warning">
-                    This GPX has no timestamps — Analysis mode needs a recorded run, not a course. Try Planning mode
-                    instead.
-                  </p>
-                )}
-                {analysisCourseResult.hasTimestamps && !analysisCourseResult.hasElevation && (
-                  <p className="warning">No elevation data found — treating the course as flat.</p>
-                )}
-                <p className="course-stats">
-                  {(analysisCourseResult.totalDistance3D / 1000).toFixed(1)} km &middot;{" "}
-                  {analysisCourseResult.totalElevationGain.toFixed(0)} m gain
+              {resultMode === "analysis" && !courseResult.hasTimestamps && (
+                <p className="warning">
+                  This GPX has no timestamps — Analysis mode needs a recorded run, not a course. Switch to Planning,
+                  or upload a run with a recorded time.
                 </p>
+              )}
+              {resultMode === "analysis" && analysisResult && (
+                <>
+                  <AnalysisSummary result={analysisResult} totalDistanceM={courseResult.totalDistance3D} />
+                  {analysisChartPoints.length >= 5 && (
+                    <>
+                      <ElevationProfileChart points={analysisChartPoints} />
+                      <FuelChart points={analysisChartPoints} reserveG={formInputs.reserveG} />
+                      <SubstrateChart points={substratePoints} />
+                      <SplitTable points={analysisChartPoints} />
+                    </>
+                  )}
+                </>
+              )}
 
-                {analysisResult && (
-                  <>
-                    <AnalysisSummary result={analysisResult} totalDistanceM={analysisCourseResult.totalDistance3D} />
-                    {analysisChartPoints.length >= 5 && (
-                      <>
-                        <ElevationProfileChart points={analysisChartPoints} />
-                        <FuelChart points={analysisChartPoints} reserveG={formInputs.reserveG} />
-                        <SubstrateChart points={substratePoints} />
-                        <SplitTable points={analysisChartPoints} />
-                      </>
-                    )}
-                  </>
-                )}
-                {formInputs.showCourseDebug && analysisRawStats && (
-                  <CourseDebugChart
-                    raw={analysisRawStats}
-                    processed={analysisChartPoints}
-                    processedDistanceM={analysisCourseResult.totalDistance3D}
-                    processedElevationGain={analysisCourseResult.totalElevationGain}
-                    segmentLengthM={formInputs.segmentLengthM}
-                    smoothingWindowM={formInputs.smoothingWindowM}
-                  />
-                )}
-              </>
-            )}
-          </main>
-        </div>
-      )}
+              {formInputs.showCourseDebug && rawStats && (
+                <CourseDebugChart
+                  raw={rawStats}
+                  processed={debugProcessedPoints}
+                  processedDistanceM={courseResult.totalDistance3D}
+                  processedElevationGain={courseResult.totalElevationGain}
+                  segmentLengthM={formInputs.segmentLengthM}
+                  smoothingWindowM={formInputs.smoothingWindowM}
+                />
+              )}
+            </>
+          )}
+        </main>
+      </div>
     </div>
   );
 }

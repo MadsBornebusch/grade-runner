@@ -30,6 +30,11 @@
   cursor: pointer;
 }
 
+.mode-toggle button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .mode-toggle button.active {
   background: var(--accent-bg);
   color: var(--text-h);
