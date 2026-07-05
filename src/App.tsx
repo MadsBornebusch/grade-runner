@@ -4,7 +4,8 @@ import { rawCourseStats, runPipeline } from "./gpx/pipeline";
 import { findSustainableTheta, type SolverInputs } from "./model/solver";
 import { analyzeRun, type AnalysisInputs } from "./model/analysis";
 import { GpxUpload } from "./ui/GpxUpload";
-import { InputsPanel } from "./ui/InputsPanel";
+import { AthleteFields, CourseProcessingFields } from "./ui/InputsPanel";
+import { PageCarousel } from "./ui/PageCarousel";
 import { ElevationProfileChart } from "./ui/ElevationProfileChart";
 import { CourseDebugChart } from "./ui/CourseDebugChart";
 import { FuelChart } from "./ui/FuelChart";
@@ -139,103 +140,119 @@ function App() {
     <div className="app">
       <header className="app__header">
         <h1>Grade Runner</h1>
-        <div className="mode-toggle">
-          <button
-            type="button"
-            className={resultMode === "planning" ? "active" : ""}
-            onClick={() => setResultMode("planning")}
-          >
-            Planning
-          </button>
-          <button
-            type="button"
-            className={resultMode === "analysis" ? "active" : ""}
-            onClick={() => setResultMode("analysis")}
-            disabled={courseResult !== null && !courseResult.hasTimestamps}
-          >
-            Analysis
-          </button>
-        </div>
       </header>
 
-      <div className="app__layout">
-        <aside className="app__sidebar">
-          <GpxUpload
-            onLoaded={(points, name) => {
-              setRawPoints(points);
-              setFileName(name);
-            }}
-          />
-          <InputsPanel values={formInputs} onChange={setFormInputs} />
-        </aside>
-
-        <main className="app__main">
-          {!courseResult && <p className="placeholder">Upload a course GPX to get started.</p>}
-
-          {courseResult && (
-            <>
-              {fileName && <p className="course-name">{fileName}</p>}
-              {!courseResult.hasElevation && (
-                <p className="warning">No elevation data found — treating the course as flat.</p>
-              )}
-              <p className="course-stats">
-                {(courseResult.totalDistance3D / 1000).toFixed(1)} km &middot;{" "}
-                {courseResult.totalElevationGain.toFixed(0)} m gain
-              </p>
-
-              {resultMode === "planning" && solverResult && (
-                <>
-                  <ResultsSummary
-                    theta={solverResult.theta}
-                    result={solverResult.result}
-                    totalDistanceM={courseResult.totalDistance3D}
-                  />
-                  {/* A handful of segments (e.g. an immediate bonk) isn't
-                      enough for a meaningful chart axis/scale. */}
-                  {chartPoints.length >= 5 && (
-                    <>
-                      <ElevationProfileChart points={chartPoints} />
-                      <FuelChart points={chartPoints} reserveG={formInputs.reserveG} />
-                      <SplitTable points={chartPoints} />
-                    </>
-                  )}
-                </>
-              )}
-
-              {resultMode === "analysis" && !courseResult.hasTimestamps && (
-                <p className="warning">
-                  This GPX has no timestamps — Analysis mode needs a recorded run, not a course. Switch to Planning,
-                  or upload a run with a recorded time.
-                </p>
-              )}
-              {resultMode === "analysis" && analysisResult && (
-                <>
-                  <AnalysisSummary result={analysisResult} totalDistanceM={courseResult.totalDistance3D} />
-                  {analysisChartPoints.length >= 5 && (
-                    <>
-                      <ElevationProfileChart points={analysisChartPoints} />
-                      <FuelChart points={analysisChartPoints} reserveG={formInputs.reserveG} />
-                      <SubstrateChart points={substratePoints} />
-                      <SplitTable points={analysisChartPoints} />
-                    </>
-                  )}
-                </>
-              )}
-
-              {formInputs.showCourseDebug && rawStats && (
-                <CourseDebugChart
-                  raw={rawStats}
-                  processed={debugProcessedPoints}
-                  processedDistanceM={courseResult.totalDistance3D}
-                  processedElevationGain={courseResult.totalElevationGain}
-                  segmentLengthM={formInputs.segmentLengthM}
-                  smoothingWindowM={formInputs.smoothingWindowM}
+      <PageCarousel
+        pages={[
+          {
+            label: "Course",
+            content: (
+              <>
+                <GpxUpload
+                  onLoaded={(points, name) => {
+                    setRawPoints(points);
+                    setFileName(name);
+                  }}
                 />
-              )}
-            </>
-          )}
-        </main>
-      </div>
+                {fileName && <p className="course-name">{fileName}</p>}
+                {courseResult && !courseResult.hasElevation && (
+                  <p className="warning">No elevation data found — treating the course as flat.</p>
+                )}
+                {courseResult && (
+                  <p className="course-stats">
+                    {(courseResult.totalDistance3D / 1000).toFixed(1)} km &middot;{" "}
+                    {courseResult.totalElevationGain.toFixed(0)} m gain
+                  </p>
+                )}
+                <CourseProcessingFields values={formInputs} onChange={setFormInputs} />
+                {formInputs.showCourseDebug && rawStats && (
+                  <CourseDebugChart
+                    raw={rawStats}
+                    processed={debugProcessedPoints}
+                    processedDistanceM={courseResult?.totalDistance3D ?? 0}
+                    processedElevationGain={courseResult?.totalElevationGain ?? 0}
+                    segmentLengthM={formInputs.segmentLengthM}
+                    smoothingWindowM={formInputs.smoothingWindowM}
+                  />
+                )}
+              </>
+            ),
+          },
+          {
+            label: "Athlete",
+            content: <AthleteFields values={formInputs} onChange={setFormInputs} />,
+          },
+          {
+            label: "Results",
+            content: (
+              <>
+                <div className="mode-toggle">
+                  <button
+                    type="button"
+                    className={resultMode === "planning" ? "active" : ""}
+                    onClick={() => setResultMode("planning")}
+                  >
+                    Planning
+                  </button>
+                  <button
+                    type="button"
+                    className={resultMode === "analysis" ? "active" : ""}
+                    onClick={() => setResultMode("analysis")}
+                    disabled={courseResult !== null && !courseResult.hasTimestamps}
+                  >
+                    Analysis
+                  </button>
+                </div>
+
+                {!courseResult && <p className="placeholder">Upload a course GPX on the Course page to get started.</p>}
+
+                {courseResult && (
+                  <>
+                    {resultMode === "planning" && solverResult && (
+                      <>
+                        <ResultsSummary
+                          theta={solverResult.theta}
+                          result={solverResult.result}
+                          totalDistanceM={courseResult.totalDistance3D}
+                        />
+                        {/* A handful of segments (e.g. an immediate bonk) isn't
+                            enough for a meaningful chart axis/scale. */}
+                        {chartPoints.length >= 5 && (
+                          <>
+                            <ElevationProfileChart points={chartPoints} />
+                            <FuelChart points={chartPoints} reserveG={formInputs.reserveG} />
+                            <SplitTable points={chartPoints} />
+                          </>
+                        )}
+                      </>
+                    )}
+
+                    {resultMode === "analysis" && !courseResult.hasTimestamps && (
+                      <p className="warning">
+                        This GPX has no timestamps — Analysis mode needs a recorded run, not a course. Switch to
+                        Planning, or upload a run with a recorded time.
+                      </p>
+                    )}
+                    {resultMode === "analysis" && analysisResult && (
+                      <>
+                        <AnalysisSummary result={analysisResult} totalDistanceM={courseResult.totalDistance3D} />
+                        {analysisChartPoints.length >= 5 && (
+                          <>
+                            <ElevationProfileChart points={analysisChartPoints} />
+                            <FuelChart points={analysisChartPoints} reserveG={formInputs.reserveG} />
+                            <SubstrateChart points={substratePoints} />
+                            <SplitTable points={analysisChartPoints} />
+                          </>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
+              </>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

@@ -40,41 +40,90 @@
   color: var(--text-h);
 }
 
-.app__layout {
-  display: grid;
-  grid-template-columns: 320px 1fr;
-  gap: 24px;
-  align-items: start;
+.page-carousel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-@media (max-width: 900px) {
-  .app__layout {
-    grid-template-columns: 1fr;
-  }
+.page-carousel__track {
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  /* Hide the horizontal scrollbar; navigation is via swipe/dots/arrows, not
+     a visible scrollbar (which would also make the page look scrollable
+     sideways at rest, which reads as broken layout, not a carousel). */
+  scrollbar-width: none;
 }
 
-.app__sidebar {
+.page-carousel__track::-webkit-scrollbar {
+  display: none;
+}
+
+.page-carousel__page {
+  flex: 0 0 100%;
+  min-width: 100%;
+  scroll-snap-align: start;
+  /* Vertical scroll happens *inside* each page; the track only ever
+     scrolls horizontally. Keeping these on separate axes/elements is what
+     lets touch swipe-to-change-page and scroll-within-a-tall-page coexist
+     without fighting each other. */
+  overflow-y: auto;
+  max-height: 80vh;
+  padding: 0 2px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  position: sticky;
-  top: 16px;
 }
 
-/* Sticky only makes sense beside a taller main column (desktop). In the
-   single-column stack the sidebar comes before main, so keeping it sticky
-   makes it overlap main as you scroll past a tall sidebar. */
-@media (max-width: 900px) {
-  .app__sidebar {
-    position: static;
-  }
-}
-
-.app__main {
-  min-width: 0;
+.page-carousel__nav {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.page-carousel__arrow {
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.page-carousel__arrow:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.page-carousel__dots {
+  display: flex;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+}
+
+.page-carousel__dot {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.page-carousel__dot.active {
+  background: var(--accent-bg);
+  color: var(--text-h);
 }
 
 .placeholder {

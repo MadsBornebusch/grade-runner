@@ -8,7 +8,7 @@ import {
   type WalkSpeedUnit,
 } from "./formInputs";
 
-interface InputsPanelProps {
+interface FieldsProps {
   values: FormInputs;
   onChange: (values: FormInputs) => void;
 }
@@ -149,7 +149,8 @@ function FatOxRows({ points, onChange }: FatOxRowsProps) {
   );
 }
 
-export function InputsPanel({ values, onChange }: InputsPanelProps) {
+/** Athlete physiology, fueling, pacing fade, and walk/run settings (Page 2). */
+export function AthleteFields({ values, onChange }: FieldsProps) {
   const set = <K extends keyof FormInputs>(key: K, value: FormInputs[K]) =>
     onChange({ ...values, [key]: value });
 
@@ -371,7 +372,17 @@ export function InputsPanel({ values, onChange }: InputsPanelProps) {
           />
         )}
       </fieldset>
+    </div>
+  );
+}
 
+/** GPX processing settings: segment length, smoothing window, and the debug chart toggle (Page 1). */
+export function CourseProcessingFields({ values, onChange }: FieldsProps) {
+  const set = <K extends keyof FormInputs>(key: K, value: FormInputs[K]) =>
+    onChange({ ...values, [key]: value });
+
+  return (
+    <div className="inputs-panel">
       <fieldset>
         <legend>Course processing</legend>
         <p className="field-group-help">
