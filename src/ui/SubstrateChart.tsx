@@ -34,10 +34,7 @@ export function SubstrateChart({ points }: SubstrateChartProps) {
             />
             <YAxis label={{ value: "g", angle: -90, position: "insideLeft" }} />
             <Tooltip
-              formatter={(value, name) => [
-                `${Number(value).toFixed(0)} g`,
-                name === "cumulativeCarbG" ? "carb" : "fat",
-              ]}
+              formatter={(value, name) => [`${Number(value).toFixed(0)} g`, name]}
               labelFormatter={(v) => `${Number(v).toFixed(2)} km`}
             />
             <Legend />
