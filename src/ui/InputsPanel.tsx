@@ -403,6 +403,14 @@ export function InputsPanel({ values, onChange }: InputsPanelProps) {
           />
           <span>Altitude adjustment</span>
         </label>
+        <label className="field field--checkbox">
+          <input
+            type="checkbox"
+            checked={values.showCourseDebug}
+            onChange={(e) => set("showCourseDebug", e.target.checked)}
+          />
+          <span>Show raw-vs-processed debug chart</span>
+        </label>
       </fieldset>
     </div>
   );

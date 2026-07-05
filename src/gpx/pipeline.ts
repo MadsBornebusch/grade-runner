@@ -114,6 +114,45 @@ export function haversineDistance(
   return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(h));
 }
 
+export interface RawPoint {
+  /** Cumulative horizontal distance from the start, in meters. */
+  distanceM: number;
+  /** Raw, unsmoothed elevation, in meters (0 if the point had none). */
+  elevation: number;
+}
+
+export interface RawCourseStats {
+  /** Point-to-point horizontal distance, no resampling/smoothing at all. */
+  distanceM: number;
+  /** Sum of positive point-to-point elevation deltas, no smoothing at all. */
+  elevationGain: number;
+  /** (distance, elevation) at every raw point, for overlaying against the processed profile. */
+  series: RawPoint[];
+}
+
+/**
+ * Point-to-point stats straight off the raw GPX points -- no resampling, no
+ * smoothing. Useful as a reference for how much processing is changing
+ * (PLAN.md §5's "let the user calibrate smoothing to a known course
+ * vertical"), not as a "true" figure: raw GPS/barometric noise inflates this
+ * gain, often substantially, so it's one endpoint of the tradeoff, not the
+ * answer.
+ */
+export function rawCourseStats(points: GpxPoint[]): RawCourseStats {
+  const series: RawPoint[] = [];
+  let distanceM = 0;
+  let elevationGain = 0;
+  if (points.length > 0) series.push({ distanceM: 0, elevation: points[0].ele ?? 0 });
+  for (let i = 1; i < points.length; i++) {
+    distanceM += haversineDistance(points[i - 1], points[i]);
+    const e0 = points[i - 1].ele ?? 0;
+    const e1 = points[i].ele ?? 0;
+    if (e1 > e0) elevationGain += e1 - e0;
+    series.push({ distanceM, elevation: e1 });
+  }
+  return { distanceM, elevationGain, series };
+}
+
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }

@@ -282,3 +282,8 @@
   padding: 12px 16px;
   overflow-x: auto;
 }
+
+.debug-stats-table {
+  margin: 12px 0;
+  font-size: 13px;
+}

@@ -35,6 +35,8 @@ export interface FormInputs {
   fatOxPoints: FatOxPoint[];
   /** Display-only unit for the max walk speed field; the value is always stored as walkMaxMs. */
   walkSpeedDisplayUnit: "ms" | "kmh" | "minkm";
+  /** Show the raw-vs-processed course debug chart. */
+  showCourseDebug: boolean;
 }
 
 export const DEFAULT_FORM_INPUTS: FormInputs = {
@@ -58,6 +60,7 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   smoothingWindowM: 150,
   fatOxPoints: [],
   walkSpeedDisplayUnit: "ms",
+  showCourseDebug: false,
 };
 
 const STORAGE_KEY = "grade-runner:inputs";

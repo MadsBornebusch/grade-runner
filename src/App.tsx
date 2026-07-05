@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import type { GpxPoint } from "./gpx/pipeline";
-import { runPipeline } from "./gpx/pipeline";
+import { rawCourseStats, runPipeline } from "./gpx/pipeline";
 import { findSustainableTheta, type SolverInputs } from "./model/solver";
 import { analyzeRun, type AnalysisInputs } from "./model/analysis";
 import { GpxUpload } from "./ui/GpxUpload";
 import { InputsPanel } from "./ui/InputsPanel";
 import { ElevationProfileChart } from "./ui/ElevationProfileChart";
+import { CourseDebugChart } from "./ui/CourseDebugChart";
 import { FuelChart } from "./ui/FuelChart";
 import { SubstrateChart } from "./ui/SubstrateChart";
 import { SplitTable } from "./ui/SplitTable";
@@ -43,6 +44,12 @@ function App() {
     if (!rawPoints) return null;
     return runPipeline(rawPoints, pipelineOptions);
   }, [rawPoints, pipelineOptions]);
+
+  const rawStats = useMemo(() => (rawPoints ? rawCourseStats(rawPoints) : null), [rawPoints]);
+  const analysisRawStats = useMemo(
+    () => (analysisRawPoints ? rawCourseStats(analysisRawPoints) : null),
+    [analysisRawPoints],
+  );
 
   const solverInputs = useMemo<SolverInputs | null>(() => {
     if (!courseResult || courseResult.segments.length === 0) return null;
@@ -178,6 +185,16 @@ function App() {
                     )}
                   </>
                 )}
+                {formInputs.showCourseDebug && rawStats && (
+                  <CourseDebugChart
+                    raw={rawStats}
+                    processed={chartPoints}
+                    processedDistanceM={courseResult.totalDistance3D}
+                    processedElevationGain={courseResult.totalElevationGain}
+                    segmentLengthM={formInputs.segmentLengthM}
+                    smoothingWindowM={formInputs.smoothingWindowM}
+                  />
+                )}
               </>
             )}
           </main>
@@ -228,6 +245,16 @@ function App() {
                       </>
                     )}
                   </>
+                )}
+                {formInputs.showCourseDebug && analysisRawStats && (
+                  <CourseDebugChart
+                    raw={analysisRawStats}
+                    processed={analysisChartPoints}
+                    processedDistanceM={analysisCourseResult.totalDistance3D}
+                    processedElevationGain={analysisCourseResult.totalElevationGain}
+                    segmentLengthM={formInputs.segmentLengthM}
+                    smoothingWindowM={formInputs.smoothingWindowM}
+                  />
                 )}
               </>
             )}

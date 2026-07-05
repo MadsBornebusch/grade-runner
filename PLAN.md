@@ -205,6 +205,37 @@ gain *after* smoothing; let the user calibrate smoothing/scale to a known course
 vertical. Missing elevation → warn / flat-course fallback. Missing timestamps →
 planning only.
 
+**On "are we losing real information to filtering" (investigated, see also the
+in-app "Course processing debug" toggle):** measured on two real recorded ultras.
+Total elevation gain has no single "true" value on rough natural terrain — it climbs
+roughly continuously as resolution increases with no clear noise-floor plateau in the
+tested range (this is the coastline paradox: real terrain has genuine roughness at
+many scales, and gain is scale-divergent by nature). But **what the model actually
+uses is not gain** — `solver.ts`/`analysis.ts` consume the per-segment gradient and
+`distance3D`, never `totalElevationGain`. Measuring the thing that actually drives
+predictions (∫ cost(gradient)·distance, a proxy for total metabolic work) shows it's
+comparatively *stable*: at a fixed, adequately-smoothed segment length, varying
+`smoothingWindowM` from 10m to 300m moved the work integral only ~1.2% even though
+displayed gain moved ~26%. That stability requires *adequate* smoothing, though — at
+`smoothingWindowM` near 0 combined with a very fine `segmentLengthM` (chasing "less
+filtering, more real detail"), gradient noise gets amplified (small elevation noise
+divided by a short segment span → large spurious gradient) and Minetti's convexity
+turns that into real inflation of predicted work — this is the actual bonk
+sensitivity a user will hit, not the gain number moving.
+
+**Distance is the other axis, and it's not scale-divergent the same way.** It
+shrinks in a straight line as `segmentLengthM` grows, because longer resample
+segments cut corners on turns/switchbacks — a real geometric effect (not noise), and
+distance enters the model linearly (`time = distance / speed` every segment). On a
+real 80km course, segment length 20→100m moved distance ~4.6% and predicted finish
+time ~7%, *even at the same, adequate smoothing window* — this is the more
+consequential number to watch, not gain. Practical takeaway: the two controls
+protect different things — smoothing protects the gradient/cost calculation,
+segment length protects distance fidelity — so there's no forced tradeoff between
+them. A finer segment length (e.g. 20-25m) paired with an adequately large smoothing
+window (not near 0) gets closer to true distance *and* keeps the cost calculation
+stable; only pushing smoothing down near 0 is what actually risks bad predictions.
+
 ---
 
 ## 6. Walk ⇄ run transition — research + recommendation

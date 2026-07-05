@@ -3,6 +3,7 @@ import {
   type GpxPoint,
   haversineDistance,
   parseGpx,
+  rawCourseStats,
   runPipeline,
 } from "./pipeline";
 
@@ -179,5 +180,32 @@ describe("runPipeline", () => {
     const ratio = fine.totalElevationGain / coarse.totalElevationGain;
     expect(ratio).toBeGreaterThan(0.8);
     expect(ratio).toBeLessThan(1.25);
+  });
+});
+
+describe("rawCourseStats", () => {
+  it("matches a simple, noise-free climb exactly (no smoothing to disagree with)", () => {
+    const grade = 0.1;
+    const points = makeLine({ n: 21, spacingM: 10, grade });
+    const stats = rawCourseStats(points);
+    expect(stats.distanceM).toBeCloseTo(200, 0);
+    expect(stats.elevationGain).toBeCloseTo(20, 0);
+    expect(stats.series).toHaveLength(21);
+    expect(stats.series[0].distanceM).toBe(0);
+    expect(stats.series[20].distanceM).toBeCloseTo(200, 0);
+  });
+
+  it("counts noisy up/down jitter as gain, unlike the smoothed pipeline", () => {
+    // Flat course with alternating +/-1m jitter: every "up" step counts
+    // toward raw gain even though the course doesn't climb at all.
+    const points = makeLine({ n: 40, spacingM: 5 }).map((p, i) => ({
+      ...p,
+      ele: i % 2 === 0 ? 1 : 0,
+    }));
+    const stats = rawCourseStats(points);
+    expect(stats.elevationGain).toBeGreaterThan(15); // ~half the 39 steps are +1m ups
+
+    const processed = runPipeline(points, { segmentLengthM: 20, smoothingWindowM: 40 });
+    expect(processed.totalElevationGain).toBeLessThan(stats.elevationGain);
   });
 });
