@@ -35,6 +35,10 @@ export interface FormInputs {
   fatOxPoints: FatOxPoint[];
   /** Display-only unit for the max walk speed field; the value is always stored as walkMaxMs. */
   walkSpeedDisplayUnit: "ms" | "kmh" | "minkm";
+  /** Display-only unit for the fat-ox curve's pace column; points are always stored as paceMinPerKm. */
+  fatOxSpeedDisplayUnit: "ms" | "kmh" | "minkm";
+  /** Display-only unit for the fat-ox curve's fat/carb columns; points are always stored as g/min. */
+  fatOxRateDisplayUnit: "gmin" | "ghour";
   /** Show the raw-vs-processed course debug chart. */
   showCourseDebug: boolean;
 }
@@ -60,6 +64,8 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   smoothingWindowM: 150,
   fatOxPoints: [],
   walkSpeedDisplayUnit: "ms",
+  fatOxSpeedDisplayUnit: "minkm",
+  fatOxRateDisplayUnit: "gmin",
   showCourseDebug: false,
 };
 
@@ -137,4 +143,30 @@ export function speedToMs(value: number, unit: WalkSpeedUnit): number {
   if (unit === "kmh") return value / 3.6;
   if (unit === "minkm") return value > 0 ? 1000 / (value * 60) : 0;
   return value;
+}
+
+/** Converts a fat-ox curve pace (stored as min/km) into the given display unit. */
+export function paceMinPerKmToDisplay(paceMinPerKm: number, unit: WalkSpeedUnit): number {
+  if (unit === "minkm") return paceMinPerKm;
+  const speedMs = paceMinPerKm > 0 ? 1000 / (paceMinPerKm * 60) : 0;
+  return speedFromMs(speedMs, unit);
+}
+
+/** Converts a fat-ox curve pace from the given display unit back into min/km. */
+export function displayToPaceMinPerKm(value: number, unit: WalkSpeedUnit): number {
+  if (unit === "minkm") return value;
+  const speedMs = speedToMs(value, unit);
+  return speedMs > 0 ? 1000 / (speedMs * 60) : 0;
+}
+
+export type FatOxRateUnit = FormInputs["fatOxRateDisplayUnit"];
+
+/** Converts a fat/carb oxidation rate (stored as g/min) into the given display unit. */
+export function rateFromGPerMin(gPerMin: number, unit: FatOxRateUnit): number {
+  return unit === "ghour" ? gPerMin * 60 : gPerMin;
+}
+
+/** Converts a fat/carb oxidation rate from the given display unit back into g/min. */
+export function rateToGPerMin(value: number, unit: FatOxRateUnit): number {
+  return unit === "ghour" ? value / 60 : value;
 }

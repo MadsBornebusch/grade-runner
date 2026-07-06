@@ -1,9 +1,14 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
+  displayToPaceMinPerKm,
+  paceMinPerKmToDisplay,
+  rateFromGPerMin,
+  rateToGPerMin,
   speedFromMs,
   speedToMs,
   suggestedFoPeakGPerMin,
   type FatOxPoint,
+  type FatOxRateUnit,
   type FormInputs,
   type WalkSpeedUnit,
 } from "./formInputs";
@@ -100,25 +105,49 @@ function SpeedField({ label, valueMs, unit, onUnitChange, onChange }: SpeedField
   );
 }
 
+const SPEED_UNIT_LABELS: Record<WalkSpeedUnit, string> = { minkm: "min/km", kmh: "km/h", ms: "m/s" };
+const RATE_UNIT_LABELS: Record<FatOxRateUnit, string> = { gmin: "g/min", ghour: "g/hour" };
+
 interface FatOxRowProps {
   point: FatOxPoint;
+  speedUnit: WalkSpeedUnit;
+  rateUnit: FatOxRateUnit;
   onChange: (patch: Partial<FatOxPoint>) => void;
   onRemove: () => void;
 }
 
-function FatOxRow({ point, onChange, onRemove }: FatOxRowProps) {
-  const paceField = useNumberField(point.paceMinPerKm, (v) => onChange({ paceMinPerKm: v }));
-  const fatField = useNumberField(point.fatGPerMin, (v) => onChange({ fatGPerMin: v }));
-  const carbField = useNumberField(point.carbGPerMin, (v) => onChange({ carbGPerMin: v }));
+function FatOxRow({ point, speedUnit, rateUnit, onChange, onRemove }: FatOxRowProps) {
+  const paceField = useNumberField(
+    Math.round(paceMinPerKmToDisplay(point.paceMinPerKm, speedUnit) * 100) / 100,
+    (v) => onChange({ paceMinPerKm: displayToPaceMinPerKm(v, speedUnit) }),
+  );
+  const fatField = useNumberField(Math.round(rateFromGPerMin(point.fatGPerMin, rateUnit) * 1000) / 1000, (v) =>
+    onChange({ fatGPerMin: rateToGPerMin(v, rateUnit) }),
+  );
+  const carbField = useNumberField(Math.round(rateFromGPerMin(point.carbGPerMin, rateUnit) * 1000) / 1000, (v) =>
+    onChange({ carbGPerMin: rateToGPerMin(v, rateUnit) }),
+  );
 
   return (
     <div className="fatox-row">
-      <input type="number" step={0.05} min={2} {...paceField} aria-label="Pace, minutes per km" />
-      <span className="fatox-row__unit">min/km</span>
-      <input type="number" step={0.01} min={0} {...fatField} aria-label="Fat oxidation, grams per minute" />
-      <span className="fatox-row__unit">g/min fat</span>
-      <input type="number" step={0.01} min={0} {...carbField} aria-label="Carb oxidation, grams per minute" />
-      <span className="fatox-row__unit">g/min carb</span>
+      <input type="number" step={0.05} min={0} {...paceField} aria-label={`Pace, ${SPEED_UNIT_LABELS[speedUnit]}`} />
+      <span className="fatox-row__unit">{SPEED_UNIT_LABELS[speedUnit]}</span>
+      <input
+        type="number"
+        step={0.01}
+        min={0}
+        {...fatField}
+        aria-label={`Fat oxidation, ${RATE_UNIT_LABELS[rateUnit]}`}
+      />
+      <span className="fatox-row__unit">{RATE_UNIT_LABELS[rateUnit]} fat</span>
+      <input
+        type="number"
+        step={0.01}
+        min={0}
+        {...carbField}
+        aria-label={`Carb oxidation, ${RATE_UNIT_LABELS[rateUnit]}`}
+      />
+      <span className="fatox-row__unit">{RATE_UNIT_LABELS[rateUnit]} carb</span>
       <button type="button" className="fatox-row__remove" onClick={onRemove} aria-label="Remove point">
         &times;
       </button>
@@ -128,10 +157,14 @@ function FatOxRow({ point, onChange, onRemove }: FatOxRowProps) {
 
 interface FatOxRowsProps {
   points: FatOxPoint[];
+  speedUnit: WalkSpeedUnit;
+  rateUnit: FatOxRateUnit;
+  onSpeedUnitChange: (unit: WalkSpeedUnit) => void;
+  onRateUnitChange: (unit: FatOxRateUnit) => void;
   onChange: (points: FatOxPoint[]) => void;
 }
 
-function FatOxRows({ points, onChange }: FatOxRowsProps) {
+function FatOxRows({ points, speedUnit, rateUnit, onSpeedUnitChange, onRateUnitChange, onChange }: FatOxRowsProps) {
   const update = (i: number, patch: Partial<FatOxPoint>) =>
     onChange(points.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
   const remove = (i: number) => onChange(points.filter((_, idx) => idx !== i));
@@ -139,8 +172,42 @@ function FatOxRows({ points, onChange }: FatOxRowsProps) {
 
   return (
     <div className="fatox-rows">
+      {points.length > 0 && (
+        <div className="fatox-units">
+          <label>
+            Pace unit
+            <select
+              className="field__unit-select"
+              value={speedUnit}
+              onChange={(e) => onSpeedUnitChange(e.target.value as WalkSpeedUnit)}
+            >
+              <option value="minkm">min/km</option>
+              <option value="kmh">km/h</option>
+              <option value="ms">m/s</option>
+            </select>
+          </label>
+          <label>
+            Fat/carb unit
+            <select
+              className="field__unit-select"
+              value={rateUnit}
+              onChange={(e) => onRateUnitChange(e.target.value as FatOxRateUnit)}
+            >
+              <option value="gmin">g/min</option>
+              <option value="ghour">g/hour</option>
+            </select>
+          </label>
+        </div>
+      )}
       {points.map((p, i) => (
-        <FatOxRow key={i} point={p} onChange={(patch) => update(i, patch)} onRemove={() => remove(i)} />
+        <FatOxRow
+          key={i}
+          point={p}
+          speedUnit={speedUnit}
+          rateUnit={rateUnit}
+          onChange={(patch) => update(i, patch)}
+          onRemove={() => remove(i)}
+        />
       ))}
       <button type="button" className="fatox-add" onClick={add}>
         + Add point
@@ -214,6 +281,10 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
         </p>
         <FatOxRows
           points={values.fatOxPoints}
+          speedUnit={values.fatOxSpeedDisplayUnit}
+          rateUnit={values.fatOxRateDisplayUnit}
+          onSpeedUnitChange={(unit) => set("fatOxSpeedDisplayUnit", unit)}
+          onRateUnitChange={(unit) => set("fatOxRateDisplayUnit", unit)}
           onChange={(fatOxPoints) => {
             const peak = suggestedFoPeakGPerMin(fatOxPoints);
             onChange({ ...values, fatOxPoints, ...(peak !== null ? { foPeakGPerMin: peak } : {}) });
@@ -221,11 +292,11 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
         />
         <NumberField
           label="Fat oxidation peak"
-          hint="g/min"
-          value={values.foPeakGPerMin}
-          step={0.05}
-          min={0.1}
-          onChange={(v) => set("foPeakGPerMin", v)}
+          hint={RATE_UNIT_LABELS[values.fatOxRateDisplayUnit]}
+          value={Math.round(rateFromGPerMin(values.foPeakGPerMin, values.fatOxRateDisplayUnit) * 1000) / 1000}
+          step={values.fatOxRateDisplayUnit === "ghour" ? 3 : 0.05}
+          min={values.fatOxRateDisplayUnit === "ghour" ? 6 : 0.1}
+          onChange={(v) => set("foPeakGPerMin", rateToGPerMin(v, values.fatOxRateDisplayUnit))}
         />
         {usingFatOxCurve && (
           <p className="field-group-note">

@@ -239,6 +239,19 @@
   gap: 6px;
 }
 
+.fatox-units {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.fatox-units label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .fatox-row {
   display: grid;
   grid-template-columns: 1fr auto 1fr auto 1fr auto auto;
