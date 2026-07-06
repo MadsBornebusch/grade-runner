@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  equivalentLT1LT2,
   resolveSubstrateAnchors,
   speedFromMs,
   speedToMs,
@@ -60,6 +61,33 @@ describe("resolveSubstrateAnchors", () => {
     });
     expect(Number.isFinite(result.x0)).toBe(true);
     expect(Number.isFinite(result.k)).toBe(true);
+  });
+});
+
+describe("equivalentLT1LT2", () => {
+  const base = { lt1Fraction: 0.65, lt2Fraction: 0.85, walkMaxMs: 2.0, vo2MaxMlPerKgPerMin: 50 };
+  const fatOxPoints = [
+    { paceMinPerKm: 7, fatGPerMin: 0.5, carbGPerMin: 0.8 },
+    { paceMinPerKm: 5, fatGPerMin: 0.3, carbGPerMin: 1.8 },
+    { paceMinPerKm: 4, fatGPerMin: 0.1, carbGPerMin: 3.0 },
+  ];
+
+  it("returns null with no fat-ox points (nothing to derive)", () => {
+    expect(equivalentLT1LT2({ ...base, fatOxPoints: [] })).toBeNull();
+  });
+
+  it("derives an equivalent LT1 below LT2, in a plausible %VO2max range", () => {
+    const result = equivalentLT1LT2({ ...base, fatOxPoints });
+    expect(result).not.toBeNull();
+    expect(result!.lt1Fraction).toBeLessThan(result!.lt2Fraction);
+    expect(result!.lt1Fraction).toBeGreaterThan(0.2);
+    expect(result!.lt2Fraction).toBeLessThan(1.5);
+  });
+
+  it("scales inversely with stated VO2max -- the same curve implies a lower %VO2max the higher VO2max is", () => {
+    const lowerVo2 = equivalentLT1LT2({ ...base, fatOxPoints, vo2MaxMlPerKgPerMin: 45 })!;
+    const higherVo2 = equivalentLT1LT2({ ...base, fatOxPoints, vo2MaxMlPerKgPerMin: 60 })!;
+    expect(higherVo2.lt1Fraction).toBeLessThan(lowerVo2.lt1Fraction);
   });
 });
 

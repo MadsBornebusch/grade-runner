@@ -120,6 +120,31 @@ export function resolveSubstrateAnchors(
 }
 
 /**
+ * When a fat-ox curve is active (overriding LT1/LT2), expresses its fitted
+ * crossover points -- in absolute W/kg, independent of VO2max -- as
+ * equivalent %VO2max fractions, using the athlete's stated VO2max purely as
+ * a reference for comparison against the manual LT1/LT2 inputs it replaces.
+ * This does NOT derive VO2max itself: a submaximal fat-ox test alone can't
+ * tell us where the athlete's true ceiling is (that's exactly the
+ * population-average assumption a personal curve is meant to avoid), so
+ * VO2max still needs its own source and continues to set the pace ceiling
+ * independently of this curve. Returns null when there's no curve, or the
+ * stated VO2max is non-positive (nothing to divide by).
+ */
+export function equivalentLT1LT2(
+  inputs: Pick<FormInputs, "lt1Fraction" | "lt2Fraction" | "fatOxPoints" | "walkMaxMs" | "vo2MaxMlPerKgPerMin">,
+): { lt1Fraction: number; lt2Fraction: number } | null {
+  if (inputs.fatOxPoints.length === 0) return null;
+  const { x0, k } = resolveSubstrateAnchors(inputs);
+  const seaLevelCeiling = maxAerobicPower(0, { vo2MaxMlPerKgPerMin: inputs.vo2MaxMlPerKgPerMin });
+  if (seaLevelCeiling <= 0) return null;
+  return {
+    lt1Fraction: x0 / seaLevelCeiling,
+    lt2Fraction: (x0 + Math.log(9) / k) / seaLevelCeiling,
+  };
+}
+
+/**
  * Suggests a fat-oxidation-peak ceiling from a fat-ox curve: the highest
  * fat-burning rate the user actually measured. Returns null with no points,
  * since there's nothing to derive it from.

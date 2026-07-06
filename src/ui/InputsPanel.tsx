@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import {
   displayToPaceMinPerKm,
+  equivalentLT1LT2,
   paceMinPerKmToDisplay,
   rateFromGPerMin,
   rateToGPerMin,
@@ -222,6 +223,7 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
     onChange({ ...values, [key]: value });
 
   const usingFatOxCurve = values.fatOxPoints.length > 0;
+  const equivalentThresholds = useMemo(() => equivalentLT1LT2(values), [values]);
 
   return (
     <div className="inputs-panel">
@@ -267,7 +269,18 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
           onChange={(v) => set("lt2Fraction", v)}
         />
         {usingFatOxCurve && (
-          <p className="field-group-note">LT1/LT2 are unused — your fat oxidation curve below is active instead.</p>
+          <p className="field-group-note">
+            LT1/LT2 are unused — your fat oxidation curve below is active instead.
+            {equivalentThresholds && (
+              <>
+                {" "}
+                For reference, your curve is equivalent to LT1 ≈ {(equivalentThresholds.lt1Fraction * 100).toFixed(0)}
+                % and LT2 ≈ {(equivalentThresholds.lt2Fraction * 100).toFixed(0)}% of the VO2max above. VO2max itself
+                isn't derived from the curve — a submaximal fat-ox test can't tell us where your true ceiling is — so
+                it still needs its own source and keeps governing your pace ceiling independently.
+              </>
+            )}
+          </p>
         )}
       </fieldset>
 
