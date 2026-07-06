@@ -14,10 +14,25 @@ interface PageCarouselProps {
  */
 export function PageCarousel({ pages }: PageCarouselProps) {
   const trackRef = useRef<HTMLDivElement>(null);
+  const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [current, setCurrent] = useState(0);
   const currentRef = useRef(current);
   currentRef.current = current;
   const scrollingFromClickRef = useRef(false);
+  // Flex items in a row default to matching the tallest sibling's height, so
+  // a short page (e.g. Course) would otherwise inherit a much taller box
+  // from a longer one (e.g. Results) once pages scroll with the page rather
+  // than in their own boxed area. Track the active page's own height instead
+  // so the carousel is only ever as tall as what's actually showing.
+  const [trackHeight, setTrackHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    const activePage = pageRefs.current[current];
+    if (!activePage) return;
+    const resizeObserver = new ResizeObserver(() => setTrackHeight(activePage.scrollHeight));
+    resizeObserver.observe(activePage);
+    return () => resizeObserver.disconnect();
+  }, [current]);
 
   useEffect(() => {
     const track = trackRef.current;
@@ -66,9 +81,19 @@ export function PageCarousel({ pages }: PageCarouselProps) {
 
   return (
     <div className="page-carousel">
-      <div className="page-carousel__track" ref={trackRef}>
-        {pages.map((page) => (
-          <div className="page-carousel__page" key={page.label}>
+      <div
+        className="page-carousel__track"
+        ref={trackRef}
+        style={trackHeight != null ? { height: `${trackHeight}px` } : undefined}
+      >
+        {pages.map((page, i) => (
+          <div
+            className="page-carousel__page"
+            key={page.label}
+            ref={(el) => {
+              pageRefs.current[i] = el;
+            }}
+          >
             {page.content}
           </div>
         ))}

@@ -1,7 +1,8 @@
-import { CartesianGrid, ComposedChart, Legend, Line, Tooltip, XAxis, YAxis } from "recharts";
+import { Brush, CartesianGrid, ComposedChart, Legend, Line, Tooltip, XAxis, YAxis } from "recharts";
 import type { RawCourseStats } from "../gpx/pipeline";
 import { downsample } from "./downsample";
 import { useContainerWidth } from "./useContainerWidth";
+import { useDomainZoom } from "./useDomainZoom";
 
 export interface ProcessedDebugPoint {
   distanceKm: number;
@@ -43,10 +44,22 @@ export function CourseDebugChart({
     800,
   );
   const processedData = downsample(processed, 800);
+  // Brush drives a shared km domain (see useDomainZoom) rather than
+  // Brush's own index-slicing, since raw/processed are two independent
+  // data arrays with different lengths -- a domain applies to both no
+  // matter which array each Line was given.
+  const { startIndex, endIndex, isZoomed, domain, onBrushChange, reset } = useDomainZoom(processedData);
 
   return (
     <div className="chart">
-      <h3>Course processing debug</h3>
+      <div className="chart__header">
+        <h3>Course processing debug</h3>
+        {isZoomed && (
+          <button type="button" className="chart__reset-zoom" onClick={reset}>
+            Reset zoom
+          </button>
+        )}
+      </div>
       <p className="field-group-help">
         Raw GPS/barometric elevation (dashed) vs. what the model actually uses after your Segment
         length / Smoothing window settings (solid). Total elevation gain is naturally scale-sensitive
@@ -57,12 +70,18 @@ export function CourseDebugChart({
       </p>
       <div className="chart__canvas" ref={containerRef}>
         {width > 0 && (
-          <ComposedChart width={width} height={HEIGHT} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
+          <ComposedChart
+            width={width}
+            height={HEIGHT}
+            data={processedData}
+            margin={{ top: 8, right: 16, bottom: 8, left: 0 }}
+          >
             <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
             <XAxis
               dataKey="distanceKm"
               type="number"
-              domain={[0, "dataMax"]}
+              domain={domain ?? [0, "dataMax"]}
+              allowDataOverflow={isZoomed}
               tickFormatter={(v: number) => v.toFixed(0)}
               label={{ value: "km", position: "insideBottomRight", offset: -4 }}
               allowDuplicatedCategory={false}
@@ -94,6 +113,17 @@ export function CourseDebugChart({
               dot={false}
               strokeWidth={2}
               isAnimationActive={false}
+            />
+            <Brush
+              dataKey="distanceKm"
+              height={22}
+              startIndex={startIndex}
+              endIndex={endIndex}
+              onChange={onBrushChange}
+              travellerWidth={10}
+              stroke="var(--accent-border)"
+              fill="var(--bg-alt)"
+              tickFormatter={(value: number) => value.toFixed(0)}
             />
           </ComposedChart>
         )}

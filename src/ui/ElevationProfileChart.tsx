@@ -1,8 +1,9 @@
-import { Area, CartesianGrid, ComposedChart, Line, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, Brush, CartesianGrid, ComposedChart, Line, Tooltip, XAxis, YAxis } from "recharts";
 import type { ChartPoint } from "./chartData";
 import { downsample } from "./downsample";
 import { formatPace } from "./format";
 import { useContainerWidth } from "./useContainerWidth";
+import { useDomainZoom } from "./useDomainZoom";
 
 interface ElevationProfileChartProps {
   points: ChartPoint[];
@@ -16,10 +17,18 @@ export function ElevationProfileChart({ points }: ElevationProfileChartProps) {
     ...p,
     paceMinPerKm: p.speedMs > 0 ? 1000 / p.speedMs / 60 : null,
   }));
+  const { startIndex, endIndex, isZoomed, domain, onBrushChange, reset } = useDomainZoom(data);
 
   return (
     <div className="chart">
-      <h3>Elevation &amp; pace</h3>
+      <div className="chart__header">
+        <h3>Elevation &amp; pace</h3>
+        {isZoomed && (
+          <button type="button" className="chart__reset-zoom" onClick={reset}>
+            Reset zoom
+          </button>
+        )}
+      </div>
       {/* isAnimationActive=false: Recharts otherwise sweeps the series in via
           an animated clip-path, which reads as a truncated chart if you
           glance at it (or screenshot it) before the ~1.5s animation finishes. */}
@@ -35,7 +44,8 @@ export function ElevationProfileChart({ points }: ElevationProfileChartProps) {
             <XAxis
               dataKey="distanceKm"
               type="number"
-              domain={[0, "dataMax"]}
+              domain={domain ?? [0, "dataMax"]}
+              allowDataOverflow={isZoomed}
               tickFormatter={(v: number) => v.toFixed(0)}
               label={{ value: "km", position: "insideBottomRight", offset: -4 }}
             />
@@ -70,6 +80,17 @@ export function ElevationProfileChart({ points }: ElevationProfileChartProps) {
               dot={false}
               strokeWidth={1.5}
               isAnimationActive={false}
+            />
+            <Brush
+              dataKey="distanceKm"
+              height={22}
+              startIndex={startIndex}
+              endIndex={endIndex}
+              onChange={onBrushChange}
+              travellerWidth={10}
+              stroke="var(--accent-border)"
+              fill="var(--bg-alt)"
+              tickFormatter={(value: number) => value.toFixed(0)}
             />
           </ComposedChart>
         )}

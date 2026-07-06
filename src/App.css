@@ -48,6 +48,11 @@
 
 .page-carousel__track {
   display: flex;
+  /* Without this, flex's default stretch would force every page to the
+     track's own height -- which is set (in JS) from the active page's
+     height, creating a feedback loop where pages can never shrink back
+     down. Each page must size to its own content instead. */
+  align-items: flex-start;
   overflow-x: auto;
   overflow-y: hidden;
   scroll-snap-type: x mandatory;
@@ -55,6 +60,10 @@
      a visible scrollbar (which would also make the page look scrollable
      sideways at rest, which reads as broken layout, not a carousel). */
   scrollbar-width: none;
+  /* Height is set inline to match the active page's real content (see
+     PageCarousel.tsx) so a short page doesn't inherit a tall one's height;
+     transition it so switching pages doesn't jump abruptly. */
+  transition: height 0.2s ease;
 }
 
 .page-carousel__track::-webkit-scrollbar {
@@ -65,12 +74,6 @@
   flex: 0 0 100%;
   min-width: 100%;
   scroll-snap-align: start;
-  /* Vertical scroll happens *inside* each page; the track only ever
-     scrolls horizontally. Keeping these on separate axes/elements is what
-     lets touch swipe-to-change-page and scroll-within-a-tall-page coexist
-     without fighting each other. */
-  overflow-y: auto;
-  max-height: 80vh;
   padding: 0 2px;
   display: flex;
   flex-direction: column;
@@ -82,6 +85,15 @@
   align-items: center;
   justify-content: center;
   gap: 12px;
+  /* Pages stretch to the height of the tallest one (flex row default), so a
+     short page's nav can land far below its own content once the page
+     scrolls natively. Sticking it to the viewport bottom keeps page
+     switching reachable without scrolling back up first. */
+  position: sticky;
+  bottom: 0;
+  background: var(--bg);
+  padding: 8px 0;
+  z-index: 5;
 }
 
 .page-carousel__arrow {
@@ -326,8 +338,35 @@
   padding: 12px 16px;
 }
 
+.chart__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chart__reset-zoom {
+  font: inherit;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--accent);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
 .chart__canvas {
   width: 100%;
+  /* Recharts re-renders (and can replace) the Brush's internal SVG nodes on
+     every drag step, so touch-action:none on those nodes doesn't reliably
+     stick for the whole gesture -- the browser re-evaluates against
+     whatever DOM node is actually live, and a mid-drag swap falls back to
+     default scroll behavior. This wrapper div is stable across renders, so
+     setting it here holds for the whole touch sequence: a drag starting
+     anywhere on a chart (not just its Brush) is treated as the chart's own
+     gesture, not the carousel's horizontal swipe underneath. */
+  touch-action: none;
 }
 
 .split-table {
