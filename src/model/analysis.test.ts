@@ -91,6 +91,22 @@ describe("analyzeRun", () => {
     expect(result.bonkIndex).toBeNull();
   });
 
+  describe("effortFraction (per segment)", () => {
+    it("is null for paused segments", () => {
+      const segments = [makeSegment({ paused: true, dtS: 60 })];
+      const result = analyzeRun(segments, baseInputs());
+      expect(result.segments[0].effortFraction).toBeNull();
+    });
+
+    it("is a positive number for moving segments, matching gross power / ceiling", () => {
+      const result = analyzeRun(makeRunningSegments(3), baseInputs());
+      for (const seg of result.segments) {
+        expect(seg.effortFraction).not.toBeNull();
+        expect(seg.effortFraction).toBeGreaterThan(0);
+      }
+    });
+  });
+
   describe("avgEffortFraction", () => {
     it("is 0 when the whole run is paused (no moving segments to average)", () => {
       const segments = [makeSegment({ paused: true, dtS: 60 })];

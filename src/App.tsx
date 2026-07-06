@@ -10,6 +10,7 @@ import { ElevationProfileChart } from "./ui/ElevationProfileChart";
 import { CourseDebugChart } from "./ui/CourseDebugChart";
 import { FuelChart } from "./ui/FuelChart";
 import { SubstrateChart } from "./ui/SubstrateChart";
+import { PaceEffortChart } from "./ui/PaceEffortChart";
 import { SplitTable } from "./ui/SplitTable";
 import { ResultsSummary } from "./ui/ResultsSummary";
 import { AnalysisSummary } from "./ui/AnalysisSummary";
@@ -56,12 +57,13 @@ function App() {
     [courseResult],
   );
 
-  // Only the selected result mode's computation runs -- not both eagerly --
-  // so editing settings doesn't pay for a solve/analysis you're not viewing.
-  // Since useMemo is synchronous, switching resultMode recomputes in the same
-  // render: no re-upload, no spinner.
+  // The solved plan is computed regardless of resultMode: Planning shows it
+  // directly, and Analysis overlays it against the recorded run (see
+  // PaceEffortChart), so both need it available at once. Since useMemo is
+  // synchronous, switching resultMode itself is still instant -- no
+  // re-upload, no spinner.
   const solverInputs = useMemo<SolverInputs | null>(() => {
-    if (resultMode !== "planning" || !courseResult || courseResult.segments.length === 0) return null;
+    if (!courseResult || courseResult.segments.length === 0) return null;
     const { x0, k, intensityIsAbsolutePower } = resolveSubstrateAnchors(formInputs);
     return {
       segments: courseResult.segments,
@@ -82,7 +84,7 @@ function App() {
       forceWalkAboveGrade: formInputs.forceWalkAboveGrade ?? undefined,
       altitudeAdjustment: formInputs.altitudeAdjustment,
     };
-  }, [resultMode, courseResult, formInputs]);
+  }, [courseResult, formInputs]);
 
   const solverResult = useMemo(() => {
     if (!solverInputs) return null;
@@ -134,6 +136,25 @@ function App() {
         cumulativeFatG: s.cumulativeFatG,
       })) ?? [],
     [analysisResult, analysisChartPoints],
+  );
+
+  const paceEffortActualPoints = useMemo(
+    () =>
+      analysisResult?.segments.map((s, i) => ({
+        distanceKm: analysisChartPoints[i]?.distanceKm ?? 0,
+        paceMinPerKm: s.speedMs > 0 ? 1000 / s.speedMs / 60 : null,
+        effortPct: s.effortFraction !== null ? s.effortFraction * 100 : null,
+      })) ?? [],
+    [analysisResult, analysisChartPoints],
+  );
+
+  const paceEffortPlannedPoints = useMemo(
+    () =>
+      chartPoints.map((p) => ({
+        distanceKm: p.distanceKm,
+        paceMinPerKm: p.speedMs > 0 ? 1000 / p.speedMs / 60 : null,
+      })),
+    [chartPoints],
   );
 
   return (
@@ -239,6 +260,13 @@ function App() {
                         {analysisChartPoints.length >= 5 && (
                           <>
                             <ElevationProfileChart points={analysisChartPoints} />
+                            {solverResult && (
+                              <PaceEffortChart
+                                actual={paceEffortActualPoints}
+                                planned={paceEffortPlannedPoints}
+                                plannedThetaFraction={solverResult.theta}
+                              />
+                            )}
                             <FuelChart points={analysisChartPoints} reserveG={formInputs.reserveG} />
                             <SubstrateChart points={substratePoints} />
                             <SplitTable points={analysisChartPoints} />

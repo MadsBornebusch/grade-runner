@@ -35,6 +35,11 @@ export interface AnalysisSegmentResult {
   cumulativeFatG: number;
   glycogenG: number;
   bonked: boolean;
+  /** Actual gross power / aerobic ceiling at this point, same basis as
+   * avgEffortFraction below. Null for paused segments (no pacing choice to
+   * measure). Above 1.0 means this stretch was run harder than the ceiling
+   * model says was sustainable for that point in the race. */
+  effortFraction: number | null;
 }
 
 export interface AnalysisResult {
@@ -92,6 +97,7 @@ export function analyzeRun(segments: CourseSegment[], inputs: AnalysisInputs): A
     const elapsedBeforeS = cumulativeElapsedTimeS;
     let speed: number;
     let grossPower: number;
+    let effortFraction: number | null = null;
 
     if (seg.paused) {
       speed = 0;
@@ -107,7 +113,8 @@ export function analyzeRun(segments: CourseSegment[], inputs: AnalysisInputs): A
         inputs.ceilingParams,
       );
       if (ceilingGross > 0) {
-        effortWeightedSum += (grossPower / ceilingGross) * dt;
+        effortFraction = grossPower / ceilingGross;
+        effortWeightedSum += effortFraction * dt;
         effortWeightS += dt;
       }
     }
@@ -140,6 +147,7 @@ export function analyzeRun(segments: CourseSegment[], inputs: AnalysisInputs): A
       cumulativeFatG,
       glycogenG: glycogen.glycogenG,
       bonked,
+      effortFraction,
     });
   }
 
