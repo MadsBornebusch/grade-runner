@@ -15,7 +15,10 @@ export function ResultsSummary({ theta, result, totalDistanceM }: ResultsSummary
 
   return (
     <div className={`results-summary ${result.feasible ? "results-summary--ok" : "results-summary--warn"}`}>
-      <div className="results-summary__stat">
+      <div
+        className="results-summary__stat"
+        title="The largest fraction of your sustainable aerobic ceiling the solver found you can hold the whole way without bonking. 100% means fueling isn't the limit — you're purely aerobically capped; below 100% means the plan backs off pace to protect your glycogen to the finish."
+      >
         <span className="results-summary__label">Effort</span>
         <span className="results-summary__value">{(theta * 100).toFixed(0)}%</span>
       </div>

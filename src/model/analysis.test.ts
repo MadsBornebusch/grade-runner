@@ -90,4 +90,30 @@ describe("analyzeRun", () => {
     expect(result.bonked).toBe(false);
     expect(result.bonkIndex).toBeNull();
   });
+
+  describe("avgEffortFraction", () => {
+    it("is 0 when the whole run is paused (no moving segments to average)", () => {
+      const segments = [makeSegment({ paused: true, dtS: 60 })];
+      const result = analyzeRun(segments, baseInputs());
+      expect(result.avgEffortFraction).toBe(0);
+    });
+
+    it("is higher for a faster-paced run than a slower one", () => {
+      const slow = analyzeRun(makeRunningSegments(20).map((s) => ({ ...s, dtS: 30 })), baseInputs());
+      const fast = analyzeRun(makeRunningSegments(20).map((s) => ({ ...s, dtS: 12 })), baseInputs());
+      expect(fast.avgEffortFraction).toBeGreaterThan(slow.avgEffortFraction);
+    });
+
+    it("excludes paused segments from the average, unlike a naive all-segment mean", () => {
+      const moving = makeRunningSegments(10);
+      const withRestStop = [...moving, makeSegment({ index: 10, paused: true, dtS: 600, cumulativeDistance3D: 500 })];
+      const withoutStop = analyzeRun(moving, baseInputs());
+      const withStop = analyzeRun(withRestStop, baseInputs());
+      // A 10-minute rest stop barely nudges elapsed-time-based ceiling decay
+      // over such a short run, so the moving effort should come out close to
+      // unaffected -- were paused time wrongly included (e.g. as ~0 effort),
+      // it would drag the average down sharply instead.
+      expect(withStop.avgEffortFraction).toBeCloseTo(withoutStop.avgEffortFraction, 1);
+    });
+  });
 });

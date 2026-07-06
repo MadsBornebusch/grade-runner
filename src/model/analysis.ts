@@ -5,7 +5,7 @@
 import type { CourseSegment } from "../gpx/pipeline";
 import { CARB_KJ_PER_G, FAT_KJ_PER_G, RESTING_METABOLISM_W_PER_KG, joulesToGrams, netToGross } from "./energetics";
 import { costOfRunning, costOfWalking } from "./minetti";
-import { type CeilingParams, maxAerobicPower } from "./ceiling";
+import { type CeilingParams, ceilingPower, maxAerobicPower } from "./ceiling";
 import { type FuelingParams, type SubstrateParams, splitPower, stepGlycogen } from "./substrate";
 
 export interface AnalysisInputs {
@@ -43,6 +43,17 @@ export interface AnalysisResult {
   totalMovingTimeS: number;
   bonked: boolean;
   bonkIndex: number | null;
+  /**
+   * Moving-time-weighted average of actual gross power / aerobic ceiling at
+   * that point in the run -- the Analysis-mode analog of Planning's solved
+   * theta, but descriptive rather than prescriptive: it's what effort you
+   * actually held, not a solved sustainable target, so it isn't bounded at
+   * 100% the way theta is (e.g. it reads over 100% if you paced harder than
+   * your ceiling model says was sustainable for that duration, which can
+   * mean either a courageous push or that your ceiling params are stale).
+   * Paused segments are excluded -- resting metabolism isn't a pacing choice.
+   */
+  avgEffortFraction: number;
 }
 
 const DEFAULT_RESERVE_G = 60;
@@ -68,6 +79,8 @@ export function analyzeRun(segments: CourseSegment[], inputs: AnalysisInputs): A
   let cumulativeCarbG = 0;
   let cumulativeFatG = 0;
   let bonkIndex: number | null = null;
+  let effortWeightedSum = 0;
+  let effortWeightS = 0;
 
   const results: AnalysisSegmentResult[] = [];
 
@@ -76,6 +89,7 @@ export function analyzeRun(segments: CourseSegment[], inputs: AnalysisInputs): A
     if (dt === null || dt <= 0) continue;
 
     const altitudeM = useAltitude ? seg.elevation : 0;
+    const elapsedBeforeS = cumulativeElapsedTimeS;
     let speed: number;
     let grossPower: number;
 
@@ -87,6 +101,15 @@ export function analyzeRun(segments: CourseSegment[], inputs: AnalysisInputs): A
       const cost = speed <= walkMaxMs ? costOfWalking(seg.gradient) : costOfRunning(seg.gradient);
       grossPower = netToGross(cost * speed);
       cumulativeMovingTimeS += dt;
+
+      const ceilingGross = ceilingPower(
+        { tMin: elapsedBeforeS / 60, altitudeM, elapsedHours: elapsedBeforeS / 3600 },
+        inputs.ceilingParams,
+      );
+      if (ceilingGross > 0) {
+        effortWeightedSum += (grossPower / ceilingGross) * dt;
+        effortWeightS += dt;
+      }
     }
     cumulativeElapsedTimeS += dt;
 
@@ -126,5 +149,6 @@ export function analyzeRun(segments: CourseSegment[], inputs: AnalysisInputs): A
     totalMovingTimeS: cumulativeMovingTimeS,
     bonked: bonkIndex !== null,
     bonkIndex,
+    avgEffortFraction: effortWeightS > 0 ? effortWeightedSum / effortWeightS : 0,
   };
 }
