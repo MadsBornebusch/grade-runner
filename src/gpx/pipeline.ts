@@ -16,6 +16,10 @@ export interface GpxPoint {
   ele: number | null;
   /** Timestamp, or null if the GPX point had none. */
   time: Date | null;
+  /** Heart rate in bpm, from a Garmin TrackPointExtension, or null. */
+  hr: number | null;
+  /** Running power in watts, from a device extension (e.g. Stryd), or null. */
+  power: number | null;
 }
 
 export interface PipelineOptions {
@@ -47,6 +51,10 @@ export interface CourseSegment {
   dtS: number | null;
   /** True if this segment's average speed fell below the pause threshold. */
   paused: boolean;
+  /** Heart rate (bpm) at the end of this segment, if the source GPX had it. */
+  heartRateBpm: number | null;
+  /** Measured running power (W) at the end of this segment, if the source GPX had it. */
+  powerWatts: number | null;
 }
 
 export interface PipelineResult {
@@ -55,6 +63,8 @@ export interface PipelineResult {
   totalElevationGain: number;
   hasElevation: boolean;
   hasTimestamps: boolean;
+  hasHeartRate: boolean;
+  hasPower: boolean;
 }
 
 const DEFAULT_SEGMENT_LENGTH_M = 50;
@@ -88,11 +98,18 @@ export function parseGpx(xml: string): GpxPoint[] {
     if (lat === null || lon === null) continue;
     const eleMatch = body.match(/<ele>\s*([-\d.]+)\s*<\/ele>/);
     const timeMatch = body.match(/<time>\s*([^<]+?)\s*<\/time>/);
+    // hr/cadence come from Garmin's TrackPointExtension (gpxtpx: namespace);
+    // power has no standard GPX extension, so devices vary -- Stryd/Garmin
+    // exports seen so far use a bare, unnamespaced <power> tag.
+    const hrMatch = body.match(/<(?:gpxtpx:)?hr>\s*(\d+)\s*<\/(?:gpxtpx:)?hr>/);
+    const powerMatch = body.match(/<(?:gpxtpx:)?power>\s*(\d+)\s*<\/(?:gpxtpx:)?power>/);
     points.push({
       lat: parseFloat(lat),
       lon: parseFloat(lon),
       ele: eleMatch ? parseFloat(eleMatch[1]) : null,
       time: timeMatch ? new Date(timeMatch[1]) : null,
+      hr: hrMatch ? parseFloat(hrMatch[1]) : null,
+      power: powerMatch ? parseFloat(powerMatch[1]) : null,
     });
   }
   return points;
@@ -158,7 +175,7 @@ function lerp(a: number, b: number, t: number): number {
 }
 
 /** Resamples raw points onto a uniform grid, spaced `spacingM` apart by
- * approximate 3D (straight-line) distance. Interpolates lat/lon/ele/time. */
+ * approximate 3D (straight-line) distance. Interpolates lat/lon/ele/time/hr/power. */
 function resample(points: GpxPoint[], spacingM: number): GpxPoint[] {
   if (points.length < 2) return points.slice();
 
@@ -194,6 +211,8 @@ function resample(points: GpxPoint[], spacingM: number): GpxPoint[] {
         p0.time !== null && p1.time !== null
           ? new Date(lerp(p0.time.getTime(), p1.time.getTime(), t))
           : (p0.time ?? p1.time),
+      hr: p0.hr !== null && p1.hr !== null ? lerp(p0.hr, p1.hr, t) : (p0.hr ?? p1.hr),
+      power: p0.power !== null && p1.power !== null ? lerp(p0.power, p1.power, t) : (p0.power ?? p1.power),
     });
   }
   // Always include the final raw point exactly, so the course endpoint is preserved.
@@ -267,6 +286,8 @@ export function runPipeline(
 
   const hasElevation = points.some((p) => p.ele !== null);
   const hasTimestamps = points.some((p) => p.time !== null);
+  const hasHeartRate = points.some((p) => p.hr !== null);
+  const hasPower = points.some((p) => p.power !== null);
 
   // Smooth on the raw points first, using a real distance window -- keeps
   // smoothing extent independent of whatever resample spacing is chosen next.
@@ -314,6 +335,8 @@ export function runPipeline(
       time: resampled[i].time,
       dtS,
       paused,
+      heartRateBpm: resampled[i].hr,
+      powerWatts: resampled[i].power,
     });
   }
 
@@ -323,5 +346,7 @@ export function runPipeline(
     totalElevationGain,
     hasElevation,
     hasTimestamps,
+    hasHeartRate,
+    hasPower,
   };
 }

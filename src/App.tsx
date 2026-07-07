@@ -12,6 +12,7 @@ import { FuelChart } from "./ui/FuelChart";
 import { SubstrateChart } from "./ui/SubstrateChart";
 import { PaceEffortChart } from "./ui/PaceEffortChart";
 import { PacingFitPanel } from "./ui/PacingFitPanel";
+import { PowerHrChart } from "./ui/PowerHrChart";
 import { SplitTable } from "./ui/SplitTable";
 import { ResultsSummary } from "./ui/ResultsSummary";
 import { AnalysisSummary } from "./ui/AnalysisSummary";
@@ -170,6 +171,20 @@ function App() {
     [chartPoints],
   );
 
+  const powerHrPoints = useMemo(
+    () =>
+      analysisResult?.segments.map((s, i) => {
+        const seg = courseResult?.segments[s.index];
+        return {
+          distanceKm: analysisChartPoints[i]?.distanceKm ?? 0,
+          measuredPowerW: seg?.powerWatts ?? null,
+          modeledPowerW: s.grossPowerWPerKg * formInputs.bodyMassKg,
+          heartRateBpm: seg?.heartRateBpm ?? null,
+        };
+      }) ?? [],
+    [analysisResult, courseResult, analysisChartPoints, formInputs.bodyMassKg],
+  );
+
   // Raw (grossPower, elapsed time, altitude) per moving segment, for
   // PacingFitPanel's tau/drift search -- effortFraction itself is computed
   // at the CURRENT tau, but the fit needs to recompute the ceiling at many
@@ -294,6 +309,13 @@ function App() {
                                 actual={paceEffortActualPoints}
                                 planned={paceEffortPlannedPoints}
                                 plannedThetaFraction={solverResult.theta}
+                              />
+                            )}
+                            {(courseResult.hasPower || courseResult.hasHeartRate) && (
+                              <PowerHrChart
+                                points={powerHrPoints}
+                                hasPower={courseResult.hasPower}
+                                hasHeartRate={courseResult.hasHeartRate}
                               />
                             )}
                             {analysisInputs && (

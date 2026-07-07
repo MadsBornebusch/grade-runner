@@ -17,6 +17,8 @@ function makeSegments(n: number, segLenM: number, gradient: number): CourseSegme
       time: null,
       dtS: null,
       paused: false,
+      heartRateBpm: null,
+      powerWatts: null,
     });
   }
   return segments;

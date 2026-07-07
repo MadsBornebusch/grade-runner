@@ -27,6 +27,8 @@ function makeLine(opts: {
       lon: 10,
       ele: ele ? distance * grade : null,
       time: speedMs ? new Date((distance / speedMs) * 1000) : null,
+      hr: null,
+      power: null,
     });
   }
   return points;
@@ -55,14 +57,57 @@ describe("parseGpx", () => {
       lon: 10.2,
       ele: 123.4,
       time: new Date("2024-01-01T10:00:00Z"),
+      hr: null,
+      power: null,
     });
     expect(points[1].lat).toBe(60.2);
     expect(points[1].ele).toBeNull();
     expect(points[1].time).toBeNull();
   });
+
+  it("parses heart rate from a namespaced gpxtpx:hr extension and power from a bare tag", () => {
+    const xml = `
+      <gpx><trk><trkseg>
+        <trkpt lat="60.1" lon="10.2">
+          <ele>123.4</ele>
+          <extensions>
+            <power>231</power>
+            <gpxtpx:TrackPointExtension>
+              <gpxtpx:hr>142</gpxtpx:hr>
+              <gpxtpx:cad>84</gpxtpx:cad>
+            </gpxtpx:TrackPointExtension>
+          </extensions>
+        </trkpt>
+        <trkpt lat="60.2" lon="10.3"></trkpt>
+      </trkseg></trk></gpx>
+    `;
+    const points = parseGpx(xml);
+    expect(points[0].hr).toBe(142);
+    expect(points[0].power).toBe(231);
+    expect(points[1].hr).toBeNull();
+    expect(points[1].power).toBeNull();
+  });
 });
 
 describe("runPipeline", () => {
+  it("propagates heart rate and power onto segments, and flags their presence", () => {
+    const points = makeLine({ n: 20, spacingM: 5 }).map((p, i) => ({
+      ...p,
+      hr: 140 + i,
+      power: 200 + i,
+    }));
+    const withData = runPipeline(points);
+    expect(withData.hasHeartRate).toBe(true);
+    expect(withData.hasPower).toBe(true);
+    expect(withData.segments.every((s) => s.heartRateBpm !== null)).toBe(true);
+    expect(withData.segments.every((s) => s.powerWatts !== null)).toBe(true);
+
+    const withoutData = runPipeline(makeLine({ n: 20, spacingM: 5 }));
+    expect(withoutData.hasHeartRate).toBe(false);
+    expect(withoutData.hasPower).toBe(false);
+    expect(withoutData.segments.every((s) => s.heartRateBpm === null)).toBe(true);
+  });
+
   it("computes gradient, total along-slope distance, and elevation gain for a steady climb", () => {
     const grade = 0.1;
     const points = makeLine({ n: 201, spacingM: 5, grade });
@@ -115,6 +160,8 @@ describe("runPipeline", () => {
       lon: lastMoving.lon,
       ele: 0,
       time: new Date(pauseStartMs + (i + 1) * 30_000), // 30s apart, 600s total
+      hr: null,
+      power: null,
     }));
 
     const resumeStartMs = pause[pause.length - 1].time!.getTime();
@@ -125,6 +172,8 @@ describe("runPipeline", () => {
         lon: lastMoving.lon,
         ele: 0,
         time: new Date(resumeStartMs + (distance / 3) * 1000),
+        hr: null,
+        power: null,
       };
     });
 

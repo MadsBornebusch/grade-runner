@@ -13,6 +13,8 @@ function makeSegment(overrides: Partial<CourseSegment>): CourseSegment {
     time: null,
     dtS: 15, // 50m in 15s => ~3.33 m/s, a running pace
     paused: false,
+    heartRateBpm: null,
+    powerWatts: null,
     ...overrides,
   };
 }
