@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { getQuery, handleErrors, redirect } from "../_lib/http.ts";
-import { requireEnv, sessionCookieHeader, type StravaSession } from "../_lib/session.ts";
+import { getQuery, handleErrors, redirect } from "../_lib/http.js";
+import { requireEnv, sessionCookieHeader, type StravaSession } from "../_lib/session.js";
 
 interface StravaTokenExchangeResponse {
   access_token: string;

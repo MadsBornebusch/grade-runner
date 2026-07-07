@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { handleErrors, readJsonBody, sendJson } from "./_lib/http.ts";
-import { getSession, getSettings, settingsCookieHeader } from "./_lib/session.ts";
+import { handleErrors, readJsonBody, sendJson } from "./_lib/http.js";
+import { getSession, getSettings, settingsCookieHeader } from "./_lib/session.js";
 
 // Cross-device settings sync is explicitly a Strava-login feature (per the
 // user's request), not a generally open endpoint -- gated on gr_session

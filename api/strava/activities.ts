@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { getQuery, handleErrors, sendJson } from "../_lib/http.ts";
-import { requireValidAccessToken } from "../_lib/session.ts";
+import { getQuery, handleErrors, sendJson } from "../_lib/http.js";
+import { requireValidAccessToken } from "../_lib/session.js";
 
 interface StravaActivitySummary {
   id: number;

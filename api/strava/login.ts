@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { baseUrl, handleErrors, redirect } from "../_lib/http.ts";
-import { requireEnv } from "../_lib/session.ts";
+import { baseUrl, handleErrors, redirect } from "../_lib/http.js";
+import { requireEnv } from "../_lib/session.js";
 
 export default handleErrors((req: IncomingMessage, res: ServerResponse) => {
   const redirectUri = `${baseUrl(req)}/api/strava/callback`;

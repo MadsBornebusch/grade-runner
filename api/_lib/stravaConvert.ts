@@ -3,7 +3,7 @@
 // uploaded file -- so every downstream consumer (runPipeline, the run
 // library) needs zero changes to accept a Strava-sourced run.
 
-import type { GpxPoint } from "../../src/gpx/pipeline.ts";
+import type { GpxPoint } from "../../src/gpx/pipeline.js";
 
 export interface StravaStreams {
   time?: { data: number[] };
