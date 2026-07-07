@@ -4,6 +4,7 @@ import { analyzeRun } from "../model/analysis";
 import { buildEffortTrendPoints, fitTauAcrossRaces, type MultiRaceTauFitResult } from "../model/pacingFit";
 import { addStoredRun, deleteStoredRun, listStoredRuns, type StoredRun } from "../storage/runLibrary";
 import type { FormInputs } from "./formInputs";
+import { StravaImport } from "./StravaImport";
 
 interface RunLibraryPanelProps {
   formInputs: FormInputs;
@@ -132,6 +133,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
           }}
         />
       </label>
+      <StravaImport onImport={(points, name) => addStoredRun(name, points).then(refresh)} />
       {error && <p className="gpx-upload__error">{error}</p>}
 
       {runs.length === 0 && <p className="placeholder">No runs stored yet.</p>}

@@ -14,12 +14,14 @@ import { PaceEffortChart } from "./ui/PaceEffortChart";
 import { PacingFitPanel } from "./ui/PacingFitPanel";
 import { PowerHrChart } from "./ui/PowerHrChart";
 import { RunLibraryPanel } from "./ui/RunLibraryPanel";
+import { StravaImport } from "./ui/StravaImport";
 import { buildEffortTrendPoints } from "./model/pacingFit";
 import { SplitTable } from "./ui/SplitTable";
 import { ResultsSummary } from "./ui/ResultsSummary";
 import { AnalysisSummary } from "./ui/AnalysisSummary";
 import { buildAnalysisChartPoints, buildChartPoints } from "./ui/chartData";
-import { loadFormInputs, resolveSubstrateAnchors, saveFormInputs } from "./ui/formInputs";
+import { loadFormInputs, resolveSubstrateAnchors, saveFormInputs, type FormInputs } from "./ui/formInputs";
+import { useStravaSession } from "./ui/useStravaSession";
 import "./App.css";
 
 type ResultMode = "planning" | "analysis";
@@ -27,6 +29,7 @@ type ResultMode = "planning" | "analysis";
 function App() {
   const [resultMode, setResultMode] = useState<ResultMode>("planning");
   const [formInputs, setFormInputs] = useState(() => loadFormInputs());
+  const { connected: stravaConnected } = useStravaSession();
 
   const [rawPoints, setRawPoints] = useState<GpxPoint[] | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -34,6 +37,32 @@ function App() {
   useEffect(() => {
     saveFormInputs(formInputs);
   }, [formInputs]);
+
+  // Cross-device settings sync, gated on being Strava-connected: pull any
+  // previously-saved settings once on connect (overriding this browser's
+  // localStorage), then push local changes back up, debounced so typing in
+  // a number field doesn't fire a request per keystroke.
+  useEffect(() => {
+    if (!stravaConnected) return;
+    fetch("/api/settings")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body: { settings: Partial<FormInputs> | null } | null) => {
+        if (body?.settings) setFormInputs((prev) => ({ ...prev, ...body.settings }));
+      })
+      .catch(() => {});
+  }, [stravaConnected]);
+
+  useEffect(() => {
+    if (!stravaConnected) return;
+    const timeout = setTimeout(() => {
+      fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formInputs),
+      }).catch(() => {});
+    }, 500);
+    return () => clearTimeout(timeout);
+  }, [stravaConnected, formInputs]);
 
   const pipelineOptions = useMemo(
     () => ({
@@ -206,6 +235,12 @@ function App() {
               <>
                 <GpxUpload
                   onLoaded={(points, name) => {
+                    setRawPoints(points);
+                    setFileName(name);
+                  }}
+                />
+                <StravaImport
+                  onImport={(points, name) => {
                     setRawPoints(points);
                     setFileName(name);
                   }}

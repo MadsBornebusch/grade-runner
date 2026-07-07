@@ -164,6 +164,34 @@
   margin-top: 8px;
 }
 
+.strava-import__connect {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 20px 12px;
+  text-align: center;
+  text-decoration: none;
+  color: var(--text);
+  margin-top: 8px;
+}
+
+.strava-import {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.strava-import__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  opacity: 0.85;
+}
+
 .inputs-panel {
   display: flex;
   flex-direction: column;
