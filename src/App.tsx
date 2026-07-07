@@ -108,7 +108,19 @@ function App() {
     const { x0, k, intensityIsAbsolutePower } = resolveSubstrateAnchors(formInputs);
     return {
       bodyMassKg: formInputs.bodyMassKg,
-      ceilingParams: { vo2MaxMlPerKgPerMin: formInputs.vo2MaxMlPerKgPerMin },
+      // Full ceilingParams, matching solverInputs below -- analyzeRun's
+      // effortFraction calls ceilingPower (not just maxAerobicPower), so it
+      // needs the pacing-fade/LT2/drift params too, not just VO2max. Passing
+      // only vo2MaxMlPerKgPerMin here silently fell back to ceiling.ts's
+      // defaults for everyone who'd customized their pacing curve.
+      ceilingParams: {
+        vo2MaxMlPerKgPerMin: formInputs.vo2MaxMlPerKgPerMin,
+        lt2Fraction: formInputs.lt2Fraction,
+        f0: formInputs.f0,
+        fInf: formInputs.fInf,
+        tauMin: formInputs.tauMin,
+        durabilityDriftPerHour: formInputs.durabilityDriftPerHour,
+      },
       substrateParams: { x0, k, intensityIsAbsolutePower, foPeakGPerMin: formInputs.foPeakGPerMin },
       fueling: { intakeGPerH: formInputs.intakeGPerH, gutMaxGPerH: formInputs.gutMaxGPerH },
       glycogenStoreG: formInputs.glycogenStoreG,
