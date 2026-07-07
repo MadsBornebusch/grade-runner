@@ -64,6 +64,20 @@ describe("fitTauMinutes", () => {
   it("returns null with no points", () => {
     expect(fitTauMinutes([], baseParams)).toBeNull();
   });
+
+  it("scales the search range up for a very long race instead of clipping at a short-race constant", () => {
+    // Regression guard: an earlier version capped the upper bound at a flat
+    // 600 minutes regardless of race length, so anything past ~4h always
+    // hit that ceiling instead of a duration-scaled one. A 26h race with a
+    // genuinely long (1800 min) fade should still be recoverable, not
+    // clipped to 600.
+    const trueTau = 1800;
+    const points = makeConstantEffortPoints({ ...baseParams, tauMin: trueTau }, 26, 15);
+    const result = fitTauMinutes(points, { ...baseParams, tauMin: 250 });
+    expect(result).not.toBeNull();
+    expect(result!.tauMin).toBeGreaterThan(1500);
+    expect(result!.hitSearchBoundary).toBeNull();
+  });
 });
 
 describe("fitDurabilityDriftPerHour", () => {

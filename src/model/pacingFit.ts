@@ -104,7 +104,12 @@ export interface TauFitResult {
  * good (near-zero) slope without meaning what it looks like it means, so
  * candidates are kept within a factor of the observed duration, which
  * structurally forces the transition to actually fall inside the window.
+ * The upper end is also floored at ABSOLUTE_MAX_TAU_MIN purely as a numerical
+ * safety net (not a physiological limit) -- it's set high enough that it
+ * shouldn't bind for any real race, multi-day events included.
  */
+const ABSOLUTE_MAX_TAU_MIN = 5000; // ~83 hours
+
 export function fitTauMinutes(
   points: EffortTrendPoint[],
   ceilingParams: CeilingParams,
@@ -119,7 +124,7 @@ export function fitTauMinutes(
   const totalMin = trimmed[trimmed.length - 1].tHours * 60;
   const resolvedRange: [number, number] = range ?? [
     Math.max(20, totalMin * 0.3),
-    Math.min(600, Math.max(totalMin * 2.5, totalMin * 0.3 + 40)),
+    Math.min(ABSOLUTE_MAX_TAU_MIN, Math.max(totalMin * 2.5, totalMin * 0.3 + 40)),
   ];
 
   const search = (lo: number, hi: number, step: number) => {
