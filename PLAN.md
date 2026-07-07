@@ -348,3 +348,99 @@ You only need this file — all equations and the model are captured above.
    §8 build steps." Begin with the Vite scaffold + `model/minetti.ts` + tests.
 3. Open decisions already made: name = **Grade Runner**; stack = Vite+React+TS,
    Dockerized; model = simulate-and-bisect (§5); walk/run = emergent speed-cap (§6).
+
+---
+
+## 11. Future work: multi-run athlete calibration ("digital twin")
+
+**Goal** (user request): use several of the athlete's *past* GPX recordings —
+plus optionally their fat/carb-ox curve — to calibrate the athlete model itself
+(VO2max/LT2, the pacing-fade curve, the fat-ox curve), rather than relying on
+manually-entered guesses, so a *new* course's plan is built from evidence, not
+just defaults. Not yet implemented; this section is the design starting point.
+
+### Why one race isn't enough (recap, ties to §5 pacingFit.ts)
+
+The tau-fit already built (`pacingFit.ts`, Analysis page) hit this directly:
+f0 lives inside the LT2-capped plateau and is masked once decay starts; fInf is
+an asymptote a single several-hour race never reaches; tau is the one thing a
+race of comparable duration actually pins. **Multiple races of genuinely
+different durations is what breaks that confound** — a short race constrains
+f0, a long one constrains fInf, and tau falls out of the shape connecting
+them. This is the main reason a multi-run calibration is worth more than
+"just fit harder on one race": it's not more data of the same kind, it's data
+that resolves what one race structurally can't.
+
+### Heart rate: what it can and can't do here (researched this session)
+
+Three standard zone models, in increasing physiological fidelity and required
+input:
+- **%HRmax** — simplest (just a max HR), but a 220-age estimate is not
+  accurate enough to anchor zones on, and individual max HR varies widely at
+  the same fitness level.
+- **%HRR (Karvonen)** — `zone = HRrest + %×(HRmax − HRrest)`. Documented as a
+  solid middle ground over %HRmax without needing lab testing; still needs a
+  real (not estimated) max HR and a resting HR.
+- **%LTHR (threshold-anchored)** — zones as a fraction of lactate/threshold
+  HR. Most consistent with how this app already thinks (LT1/LT2 as fractions
+  of VO2max) since it's anchored to a *threshold*, not an estimated ceiling.
+  Modern watches can auto-detect LTHR without a lab test, but validation
+  studies put smartwatch LTHR at ~65% "success rate" vs. lab testing, ~11bpm
+  mean error — usable, not precise.
+
+  Sources: [Garmin HR zones explained](https://www.shoulditrain.com/blog/garmin-heart-rate-zones-explained), [%LTHR zones](https://chrismooreendurancecoaching.com/understanding-garmin-heart-rate-zones-part-3-lactate-threshold/), [smartwatch LTHR validity](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC12309276/)
+
+**The important caveat, not just a footnote:** heart rate is *not* a stable
+proxy for %VO2max over ultra durations. "Cardiac drift" — HR climbing at
+constant true output, driven by rising core temperature, dehydration, and
+reduced stroke volume, not increased metabolic intensity — is well
+documented: 10–15bpm drift is typical on a long aerobic effort, 20–30bpm in
+heat/dehydration, with onset around 25km into a marathon-length effort. Source:
+[cardiac drift / decoupling research](https://www.frontiersin.org/journals/sports-and-active-living/articles/10.3389/fspor.2025.1571498/full).
+
+This is *the same trap* the tau-fit's advisor caveat already covers for
+power/pace (a negative split and a slower fade produce the same trace) —
+except for HR, the confound is worse: an upward HR trend at steady pace could
+mean rising effort, or could mean nothing metabolic at all, just heat. Naively
+feeding raw HR into the substrate/ceiling model as if it were %VO2max would
+import this confound directly into the fitted curve. **Recommendation: use HR
+mainly to build a per-athlete HR↔power/pace relationship from races that have
+both (e.g. Ecotrail, which has power+HR together), fit predominantly from the
+first ~60-70% of race duration where drift is smallest, and treat HR-only
+races as a lower-confidence input than power- or pace-anchored ones** — not
+as a direct substitute for the existing %VO2max intensity axis.
+
+### Proposed staged architecture (not yet built)
+
+1. **A run library.** Needs storage beyond the current single
+   `formInputs`-in-localStorage blob — IndexedDB, keyed per stored run. Store
+   either the raw parsed points + pipeline options (simplest, recomputable,
+   heavier) or a derived per-segment summary (lighter, needs a schema).
+   New UI: a page/section to upload, name, and manage a small set of past
+   runs (distinct from the single "current course" the app works with today).
+2. **Joint multi-race ceiling fit.** Extend `pacingFit.ts`'s single-race,
+   tau-only grid search into a joint search over (f0, fInf, tau) across all
+   selected runs at once — now identifiable because the runs span different
+   durations. Same coarse-then-fine grid approach, just a 3D search instead
+   of 1D; same duration-adaptive-range lesson applies (learned the hard way
+   this session — a fixed-constant range degenerates for long races).
+3. **HR↔power/pace calibration** (optional stage). From any stored run with
+   both power/pace *and* HR, fit a per-athlete mapping (e.g. HR zone → power
+   fraction), restricted to the early, drift-minimal portion of each race.
+   Lets a *future* HR-only run (no footpod) still get a reasonable effort
+   estimate, with lower confidence flagged.
+4. **HR zone inputs on the Athlete page.** Threshold HR and/or max HR fields,
+   a zone-model selector (%HRmax / %HRR-Karvonen / %LTHR / fully custom
+   boundaries in bpm) — mirrors the existing LT1/LT2-as-fraction pattern, so
+   it slots into the same mental model rather than introducing a competing
+   one.
+5. **Fat/carb-ox curve reuse.** Already supported as a manual input
+   (`equivalentLT1LT2`, `resolveSubstrateAnchors`); a stored run with HR could
+   optionally attach a per-point HR value to each measured fat/carb-ox point,
+   letting a future run's HR data map onto the *same* curve via the HR↔effort
+   calibration from stage 3, instead of needing power for every future run.
+
+Stages 1–2 are the highest-value, most identifiable, least confounded by the
+HR caveats above — they'd work purely from power/pace data already being
+parsed. Stages 3–5 add HR-specific value but inherit the drift caveat, so
+they're framed as "lower-confidence, HR-only fallback," not a replacement.
