@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ceilingPower, type CeilingParams } from "./ceiling";
-import { fitDurabilityDriftPerHour, fitTauMinutes, trimForPacingFit } from "./pacingFit";
+import { fitDurabilityDriftPerHour, fitTauAcrossRaces, fitTauMinutes, trimForPacingFit } from "./pacingFit";
 
 /** Builds points where actual power is a constant fraction of the ceiling
  * computed under `trueParams` -- i.e. a run that held perfectly even effort
@@ -77,6 +77,47 @@ describe("fitTauMinutes", () => {
     expect(result).not.toBeNull();
     expect(result!.tauMin).toBeGreaterThan(1500);
     expect(result!.hitSearchBoundary).toBeNull();
+  });
+});
+
+describe("fitTauAcrossRaces", () => {
+  const baseParams: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, f0: 0.94, fInf: 0.38 };
+
+  it("recovers a shared true tau from two races of different lengths", () => {
+    const trueTau = 150;
+    const raceA = makeConstantEffortPoints({ ...baseParams, tauMin: trueTau }, 4);
+    const raceB = makeConstantEffortPoints({ ...baseParams, tauMin: trueTau }, 7);
+    const result = fitTauAcrossRaces([raceA, raceB], { ...baseParams, tauMin: 400 });
+    expect(result).not.toBeNull();
+    expect(result!.tauMin).toBeGreaterThan(120);
+    expect(result!.tauMin).toBeLessThan(180);
+    expect(result!.perRace).toHaveLength(2);
+    for (const race of result!.perRace) {
+      expect(Math.abs(race.trendAtFitPctPerHour)).toBeLessThan(Math.abs(race.trendAtCurrentPctPerHour));
+    }
+  });
+
+  it("ignores a race with too few points and still fits from the rest", () => {
+    const trueTau = 150;
+    const goodRace = makeConstantEffortPoints({ ...baseParams, tauMin: trueTau }, 6);
+    const tooShort = makeConstantEffortPoints(baseParams, 0.1, 1);
+    const result = fitTauAcrossRaces([goodRace, tooShort], { ...baseParams, tauMin: 400 });
+    expect(result).not.toBeNull();
+    expect(result!.perRace).toHaveLength(1);
+  });
+
+  it("returns null when no race has enough points", () => {
+    const tooShort = makeConstantEffortPoints(baseParams, 0.1, 1);
+    expect(fitTauAcrossRaces([tooShort], baseParams)).toBeNull();
+  });
+
+  it("scales the range from the shortest and longest race in the set, not a flat constant", () => {
+    const trueTau = 1800;
+    const shortRace = makeConstantEffortPoints({ ...baseParams, tauMin: trueTau }, 3, 5);
+    const longRace = makeConstantEffortPoints({ ...baseParams, tauMin: trueTau }, 26, 15);
+    const result = fitTauAcrossRaces([shortRace, longRace], { ...baseParams, tauMin: 250 });
+    expect(result).not.toBeNull();
+    expect(result!.tauMin).toBeGreaterThan(1500);
   });
 });
 

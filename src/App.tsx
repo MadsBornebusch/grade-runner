@@ -13,6 +13,8 @@ import { SubstrateChart } from "./ui/SubstrateChart";
 import { PaceEffortChart } from "./ui/PaceEffortChart";
 import { PacingFitPanel } from "./ui/PacingFitPanel";
 import { PowerHrChart } from "./ui/PowerHrChart";
+import { RunLibraryPanel } from "./ui/RunLibraryPanel";
+import { buildEffortTrendPoints } from "./model/pacingFit";
 import { SplitTable } from "./ui/SplitTable";
 import { ResultsSummary } from "./ui/ResultsSummary";
 import { AnalysisSummary } from "./ui/AnalysisSummary";
@@ -185,20 +187,9 @@ function App() {
     [analysisResult, courseResult, analysisChartPoints, formInputs.bodyMassKg],
   );
 
-  // Raw (grossPower, elapsed time, altitude) per moving segment, for
-  // PacingFitPanel's tau/drift search -- effortFraction itself is computed
-  // at the CURRENT tau, but the fit needs to recompute the ceiling at many
-  // candidate taus, so it needs the underlying power, not just the ratio.
   const pacingFitPoints = useMemo(() => {
     if (!analysisResult || !courseResult) return [];
-    return analysisResult.segments
-      .filter((s) => s.effortFraction !== null)
-      .map((s) => ({
-        tHours: (s.cumulativeElapsedTimeS - s.timeS) / 3600,
-        grossPowerWPerKg: s.grossPowerWPerKg,
-        altitudeM: formInputs.altitudeAdjustment ? courseResult.segments[s.index]?.elevation ?? 0 : 0,
-        dtS: s.timeS,
-      }));
+    return buildEffortTrendPoints(courseResult.segments, analysisResult.segments, formInputs.altitudeAdjustment);
   }, [analysisResult, courseResult, formInputs.altitudeAdjustment]);
 
   return (
@@ -245,7 +236,15 @@ function App() {
           },
           {
             label: "Athlete",
-            content: <AthleteFields values={formInputs} onChange={setFormInputs} />,
+            content: (
+              <>
+                <AthleteFields values={formInputs} onChange={setFormInputs} />
+                <RunLibraryPanel
+                  formInputs={formInputs}
+                  onApplyTau={(tauMin) => setFormInputs({ ...formInputs, tauMin })}
+                />
+              </>
+            ),
           },
           {
             label: "Results",

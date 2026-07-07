@@ -410,20 +410,41 @@ first ~60-70% of race duration where drift is smallest, and treat HR-only
 races as a lower-confidence input than power- or pace-anchored ones** — not
 as a direct substitute for the existing %VO2max intensity axis.
 
-### Proposed staged architecture (not yet built)
+### Proposed staged architecture
 
-1. **A run library.** Needs storage beyond the current single
-   `formInputs`-in-localStorage blob — IndexedDB, keyed per stored run. Store
-   either the raw parsed points + pipeline options (simplest, recomputable,
-   heavier) or a derived per-segment summary (lighter, needs a schema).
-   New UI: a page/section to upload, name, and manage a small set of past
-   runs (distinct from the single "current course" the app works with today).
-2. **Joint multi-race ceiling fit.** Extend `pacingFit.ts`'s single-race,
-   tau-only grid search into a joint search over (f0, fInf, tau) across all
-   selected runs at once — now identifiable because the runs span different
-   durations. Same coarse-then-fine grid approach, just a 3D search instead
-   of 1D; same duration-adaptive-range lesson applies (learned the hard way
-   this session — a fixed-constant range degenerates for long races).
+1. **A run library — built.** `src/storage/runLibrary.ts` stores raw parsed
+   `GpxPoint[]` + a name/timestamp per run in IndexedDB (not a derived
+   summary, so nothing to migrate when the model changes — pipeline/analysis
+   just re-run on demand). UI lives on the Athlete page
+   (`src/ui/RunLibraryPanel.tsx`): add/name/delete runs, select a subset,
+   see each one's distance/duration.
+2. **Pooled tau-only ceiling fit — built, joint (f0, fInf, tau) fit
+   deliberately deferred.** `fitTauAcrossRaces` in `pacingFit.ts` extends the
+   single-race tau search across several selected runs at once: each race's
+   own within-race slope is computed separately and the search minimizes the
+   *sum of squared per-race slopes*, not one regression over concatenated
+   points (races run on different days at different average efforts, so a
+   pooled regression would mostly reflect cross-race effort differences, not
+   fatigue shape). The search range still scales from the shortest/longest
+   selected race's own duration, not a flat constant.
+
+   The original plan here was a joint 3D (f0, fInf, tau) search, reasoned to
+   be identifiable once races span different durations. An advisor review
+   caught two problems before that got built: (a) the within-race-slope
+   objective is scale-invariant — a flat ceiling (`fInf = f0 = c`) zeroes
+   every race's slope for *any* c, so the sustained level `c` (which is what
+   actually drives Planning's finish-time predictions) is a free direction
+   under this loss; fitting f0/fInf needs an added level-anchor term (e.g.
+   the LT2-capped plateau at the very start of a race), which doesn't exist
+   yet. (b) it needs races that actually span a wide duration range (roughly
+   2×+) to separate f0 from fInf — the two real races used to validate this
+   stage were both ~7-8.5h, so on real data today there'd be no signal for
+   the extra two parameters anyway, just extra degenerate directions. Revisit
+   the 3-param fit once both a level-anchor term exists and the library holds
+   races of meaningfully different lengths (a several-hour race plus
+   something much shorter or a multi-day one) — until then, surfacing a
+   fitted f0/fInf as authoritative would be overclaiming what the data
+   supports.
 3. **HR↔power/pace calibration** (optional stage). From any stored run with
    both power/pace *and* HR, fit a per-athlete mapping (e.g. HR zone → power
    fraction), restricted to the early, drift-minimal portion of each race.
@@ -440,7 +461,8 @@ as a direct substitute for the existing %VO2max intensity axis.
    letting a future run's HR data map onto the *same* curve via the HR↔effort
    calibration from stage 3, instead of needing power for every future run.
 
-Stages 1–2 are the highest-value, most identifiable, least confounded by the
-HR caveats above — they'd work purely from power/pace data already being
-parsed. Stages 3–5 add HR-specific value but inherit the drift caveat, so
-they're framed as "lower-confidence, HR-only fallback," not a replacement.
+Stages 1–2 are done and are the highest-value, least confounded by the HR
+caveats above — they work purely from power/pace data already being parsed.
+Stages 3–5 (not yet built) add HR-specific value but inherit the drift
+caveat, so they're framed as "lower-confidence, HR-only fallback," not a
+replacement.

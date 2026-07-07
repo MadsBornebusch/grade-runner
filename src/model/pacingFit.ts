@@ -13,6 +13,8 @@
 // drift) at whatever's currently configured and searches only the one
 // parameter a single race actually constrains.
 
+import type { CourseSegment } from "../gpx/pipeline";
+import type { AnalysisSegmentResult } from "./analysis";
 import { type CeilingParams, ceilingPower } from "./ceiling";
 
 export interface EffortTrendPoint {
@@ -22,6 +24,28 @@ export interface EffortTrendPoint {
   altitudeM: number;
   /** Segment duration, seconds -- used as the regression weight. */
   dtS: number;
+}
+
+/**
+ * Raw (grossPower, elapsed time, altitude) per moving segment, from an
+ * already-run analyzeRun() -- the fit needs to recompute the ceiling at many
+ * candidate params, so it needs the underlying power, not just the
+ * effortFraction ratio (which is pinned to whatever ceilingParams analyzeRun
+ * was called with).
+ */
+export function buildEffortTrendPoints(
+  courseSegments: CourseSegment[],
+  analysisSegments: AnalysisSegmentResult[],
+  altitudeAdjustment: boolean,
+): EffortTrendPoint[] {
+  return analysisSegments
+    .filter((s) => s.effortFraction !== null)
+    .map((s) => ({
+      tHours: (s.cumulativeElapsedTimeS - s.timeS) / 3600,
+      grossPowerWPerKg: s.grossPowerWPerKg,
+      altitudeM: altitudeAdjustment ? courseSegments[s.index]?.elevation ?? 0 : 0,
+      dtS: s.timeS,
+    }));
 }
 
 interface TrendFit {
@@ -154,6 +178,82 @@ export function fitTauMinutes(
     tauMin,
     trendAtCurrentPctPerHour: currentTrend.slopePerHour * 100,
     trendAtFitPctPerHour: fittedTrend.slopePerHour * 100,
+    hitSearchBoundary,
+  };
+}
+
+export interface MultiRaceTauFitResult {
+  tauMin: number;
+  perRace: { trendAtCurrentPctPerHour: number; trendAtFitPctPerHour: number }[];
+  hitSearchBoundary: "lower" | "upper" | null;
+}
+
+/**
+ * Same tau-only search as fitTauMinutes, but pooled across several races at
+ * once: the objective is the sum of each race's own squared within-race
+ * slope, not one regression over concatenated points (races run on
+ * different days at different average efforts, so a flat pooled regression
+ * would mostly reflect cross-race effort differences, not fatigue shape).
+ * f0/fInf still aren't fit here -- doing that from within-race slopes alone
+ * is scale-invariant (an f0=fInf flat ceiling of ANY level also zeroes every
+ * race's slope), so it needs a level-anchor term this app doesn't have yet,
+ * plus races spanning a wide duration range to pin f0 (short) separately
+ * from fInf (long). One extra race beyond the tau fit's single-race case
+ * mainly buys robustness -- one tau has to flatten several independent
+ * runs' trends at once, not just one run's idiosyncrasies.
+ */
+export function fitTauAcrossRaces(
+  races: EffortTrendPoint[][],
+  ceilingParams: CeilingParams,
+): MultiRaceTauFitResult | null {
+  const trimmed = races.map(trimForPacingFit).filter((r) => r.length >= MIN_FIT_POINTS);
+  if (trimmed.length === 0) return null;
+
+  const currentTrends = trimmed.map((r) => effortTrend(r, ceilingParams));
+  if (currentTrends.some((t) => !t)) return null;
+
+  const totalMinPerRace = trimmed.map((r) => r[r.length - 1].tHours * 60);
+  const lo = Math.max(20, Math.min(...totalMinPerRace) * 0.3);
+  const hi = Math.min(ABSOLUTE_MAX_TAU_MIN, Math.max(...totalMinPerRace) * 2.5);
+
+  const pooledSquaredSlope = (tau: number) => {
+    let sum = 0;
+    for (const r of trimmed) {
+      const trend = effortTrend(r, { ...ceilingParams, tauMin: tau });
+      if (!trend) return Infinity;
+      sum += trend.slopePerHour ** 2;
+    }
+    return sum;
+  };
+
+  const search = (searchLo: number, searchHi: number, step: number) => {
+    let bestTau = searchLo;
+    let bestScore = Infinity;
+    for (let tau = searchLo; tau <= searchHi; tau += step) {
+      const score = pooledSquaredSlope(tau);
+      if (score < bestScore) {
+        bestScore = score;
+        bestTau = tau;
+      }
+    }
+    return bestTau;
+  };
+
+  const coarseStep = Math.max(2, (hi - lo) / 40);
+  const coarse = search(lo, hi, coarseStep);
+  const fine = search(Math.max(lo, coarse - coarseStep), Math.min(hi, coarse + coarseStep), Math.max(1, coarseStep / 10));
+
+  const tauMin = Math.round(fine);
+  const fittedTrends = trimmed.map((r) => effortTrend(r, { ...ceilingParams, tauMin }));
+  if (fittedTrends.some((t) => !t)) return null;
+
+  const hitSearchBoundary = tauMin <= lo + 1 ? "lower" : tauMin >= hi - 1 ? "upper" : null;
+  return {
+    tauMin,
+    perRace: currentTrends.map((current, i) => ({
+      trendAtCurrentPctPerHour: current!.slopePerHour * 100,
+      trendAtFitPctPerHour: fittedTrends[i]!.slopePerHour * 100,
+    })),
     hitSearchBoundary,
   };
 }
