@@ -192,6 +192,26 @@
   opacity: 0.85;
 }
 
+.strava-import__link-row {
+  display: flex;
+  gap: 8px;
+}
+
+.strava-import__link-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.strava-import input[type="text"] {
+  font: inherit;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
 .inputs-panel {
   display: flex;
   flex-direction: column;

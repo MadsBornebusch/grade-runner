@@ -17,9 +17,10 @@ export default handleErrors(async (req: IncomingMessage, res: ServerResponse) =>
   const auth = await requireValidAccessToken(req, res);
   if (!auth) return;
 
-  const perPage = getQuery(req).get("per_page") ?? "20";
+  const perPage = Number(getQuery(req).get("per_page") ?? "20");
+  const page = Number(getQuery(req).get("page") ?? "1");
   const stravaRes = await fetch(
-    `https://www.strava.com/api/v3/athlete/activities?per_page=${encodeURIComponent(perPage)}`,
+    `https://www.strava.com/api/v3/athlete/activities?per_page=${perPage}&page=${page}`,
     { headers: { Authorization: `Bearer ${auth.accessToken}` } },
   );
   if (!stravaRes.ok) {
@@ -37,5 +38,9 @@ export default handleErrors(async (req: IncomingMessage, res: ServerResponse) =>
       distanceKm: a.distance / 1000,
       movingTimeS: a.moving_time,
     }));
-  sendJson(res, 200, runs);
+  // A full page of raw activities (before the run-type filter) means there's
+  // likely another page; a short page means we've hit the end of history --
+  // this has to be judged on the raw count, since filtering can otherwise
+  // shrink even a "full" page down to look empty.
+  sendJson(res, 200, { runs, hasMore: activities.length === perPage });
 });
