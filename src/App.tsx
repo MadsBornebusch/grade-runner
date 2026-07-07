@@ -11,6 +11,7 @@ import { CourseDebugChart } from "./ui/CourseDebugChart";
 import { FuelChart } from "./ui/FuelChart";
 import { SubstrateChart } from "./ui/SubstrateChart";
 import { PaceEffortChart } from "./ui/PaceEffortChart";
+import { PacingFitPanel } from "./ui/PacingFitPanel";
 import { SplitTable } from "./ui/SplitTable";
 import { ResultsSummary } from "./ui/ResultsSummary";
 import { AnalysisSummary } from "./ui/AnalysisSummary";
@@ -169,6 +170,22 @@ function App() {
     [chartPoints],
   );
 
+  // Raw (grossPower, elapsed time, altitude) per moving segment, for
+  // PacingFitPanel's tau/drift search -- effortFraction itself is computed
+  // at the CURRENT tau, but the fit needs to recompute the ceiling at many
+  // candidate taus, so it needs the underlying power, not just the ratio.
+  const pacingFitPoints = useMemo(() => {
+    if (!analysisResult || !courseResult) return [];
+    return analysisResult.segments
+      .filter((s) => s.effortFraction !== null)
+      .map((s) => ({
+        tHours: (s.cumulativeElapsedTimeS - s.timeS) / 3600,
+        grossPowerWPerKg: s.grossPowerWPerKg,
+        altitudeM: formInputs.altitudeAdjustment ? courseResult.segments[s.index]?.elevation ?? 0 : 0,
+        dtS: s.timeS,
+      }));
+  }, [analysisResult, courseResult, formInputs.altitudeAdjustment]);
+
   return (
     <div className="app">
       <header className="app__header">
@@ -277,6 +294,16 @@ function App() {
                                 actual={paceEffortActualPoints}
                                 planned={paceEffortPlannedPoints}
                                 plannedThetaFraction={solverResult.theta}
+                              />
+                            )}
+                            {analysisInputs && (
+                              <PacingFitPanel
+                                points={pacingFitPoints}
+                                ceilingParams={analysisInputs.ceilingParams ?? {}}
+                                onApplyTau={(tauMin) => setFormInputs({ ...formInputs, tauMin })}
+                                onApplyDrift={(durabilityDriftPerHour) =>
+                                  setFormInputs({ ...formInputs, durabilityDriftPerHour })
+                                }
                               />
                             )}
                             <FuelChart points={analysisChartPoints} reserveG={formInputs.reserveG} />
