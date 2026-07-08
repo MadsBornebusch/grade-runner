@@ -202,7 +202,9 @@
   min-width: 0;
 }
 
-.strava-import input[type="text"] {
+.strava-import input[type="text"],
+.strava-import input[type="date"],
+.strava-import input[type="number"] {
   font: inherit;
   font-size: 13px;
   background: var(--bg);
@@ -210,6 +212,25 @@
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 6px 8px;
+}
+
+.strava-import__or {
+  font-size: 13px;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+.strava-import__range-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  opacity: 0.85;
+  flex-wrap: wrap;
+}
+
+.strava-import__range-row input[type="number"] {
+  width: 60px;
 }
 
 .inputs-panel {

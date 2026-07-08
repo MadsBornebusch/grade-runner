@@ -36,30 +36,46 @@ function extractActivityId(input: string): string | null {
   return match ? match[1] : null;
 }
 
+/** Unix seconds for the start of the day *after* a "YYYY-MM-DD" date input
+ * -- Strava's `before` filter is exclusive, so this is what makes the
+ * chosen day itself show up in the results, not just days strictly earlier. */
+function endOfDayEpoch(dateInput: string): number {
+  return Math.floor(new Date(`${dateInput}T00:00:00`).getTime() / 1000) + 24 * 60 * 60;
+}
+
 export function StravaImport({ onImport }: StravaImportProps) {
   const { connected, athleteName, loading } = useStravaSession();
   const [activities, setActivities] = useState<StravaActivitySummary[] | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [page, setPage] = useState(1);
+  const [beforeAnchor, setBeforeAnchor] = useState<number | null>(null);
+  const [dateInput, setDateInput] = useState("");
   const [listLoading, setListLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nameFilter, setNameFilter] = useState("");
+  const [minKm, setMinKm] = useState("");
+  const [maxKm, setMaxKm] = useState("");
+  const [minHours, setMinHours] = useState("");
+  const [maxHours, setMaxHours] = useState("");
   const [linkInput, setLinkInput] = useState("");
   const [linkImporting, setLinkImporting] = useState(false);
   const [importingId, setImportingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const loadActivities = useCallback(async (pageToLoad: number, append: boolean) => {
+  const loadActivities = useCallback(async (pageToLoad: number, append: boolean, before: number | null) => {
     if (append) setLoadingMore(true);
     else setListLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/strava/activities?page=${pageToLoad}`);
+      const params = new URLSearchParams({ page: String(pageToLoad) });
+      if (before !== null) params.set("before", String(before));
+      const res = await fetch(`/api/strava/activities?${params}`);
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "Failed to load activities.");
       setActivities((prev) => (append ? [...(prev ?? []), ...body.runs] : body.runs));
       setHasMore(body.hasMore);
       setPage(pageToLoad);
+      setBeforeAnchor(before);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load activities.");
     } finally {
@@ -67,6 +83,11 @@ export function StravaImport({ onImport }: StravaImportProps) {
       else setListLoading(false);
     }
   }, []);
+
+  const jumpToDate = useCallback(() => {
+    if (!dateInput) return;
+    void loadActivities(1, false, endOfDayEpoch(dateInput));
+  }, [dateInput, loadActivities]);
 
   const importById = useCallback(
     async (id: string, fallbackName: string) => {
@@ -117,7 +138,16 @@ export function StravaImport({ onImport }: StravaImportProps) {
     );
   }
 
-  const visibleActivities = activities?.filter((a) => a.name.toLowerCase().includes(nameFilter.toLowerCase())) ?? null;
+  const visibleActivities =
+    activities?.filter((a) => {
+      if (!a.name.toLowerCase().includes(nameFilter.toLowerCase())) return false;
+      if (minKm && a.distanceKm < Number(minKm)) return false;
+      if (maxKm && a.distanceKm > Number(maxKm)) return false;
+      const hours = a.movingTimeS / 3600;
+      if (minHours && hours < Number(minHours)) return false;
+      if (maxHours && hours > Number(maxHours)) return false;
+      return true;
+    }) ?? null;
 
   return (
     <div className="strava-import">
@@ -138,11 +168,21 @@ export function StravaImport({ onImport }: StravaImportProps) {
         </button>
       </div>
 
-      {!activities && (
-        <button type="button" className="fatox-add" onClick={() => loadActivities(1, false)} disabled={listLoading}>
+      <div className="strava-import__link-row">
+        <button
+          type="button"
+          className="fatox-add"
+          onClick={() => void loadActivities(1, false, null)}
+          disabled={listLoading}
+        >
           {listLoading ? "Loading…" : "Show recent runs"}
         </button>
-      )}
+        <span className="strava-import__or">or on</span>
+        <input type="date" value={dateInput} onChange={(e) => setDateInput(e.target.value)} />
+        <button type="button" className="fatox-add" onClick={jumpToDate} disabled={!dateInput || listLoading}>
+          {listLoading ? "Loading…" : "Jump to date"}
+        </button>
+      </div>
 
       {error && <p className="gpx-upload__error">{error}</p>}
 
@@ -154,10 +194,22 @@ export function StravaImport({ onImport }: StravaImportProps) {
             value={nameFilter}
             onChange={(e) => setNameFilter(e.target.value)}
           />
+          <div className="strava-import__range-row">
+            <span>Distance</span>
+            <input type="number" min={0} placeholder="min" value={minKm} onChange={(e) => setMinKm(e.target.value)} />
+            <span>–</span>
+            <input type="number" min={0} placeholder="max" value={maxKm} onChange={(e) => setMaxKm(e.target.value)} />
+            <span>km</span>
+            <span>Duration</span>
+            <input type="number" min={0} placeholder="min" value={minHours} onChange={(e) => setMinHours(e.target.value)} />
+            <span>–</span>
+            <input type="number" min={0} placeholder="max" value={maxHours} onChange={(e) => setMaxHours(e.target.value)} />
+            <span>h</span>
+          </div>
           <div className="fatox-rows">
             {visibleActivities!.length === 0 && (
               <p className="placeholder">
-                {activities.length === 0 ? "No recent runs found on Strava." : "No loaded runs match that filter."}
+                {activities.length === 0 ? "No runs found on Strava for this range." : "No loaded runs match that filter."}
               </p>
             )}
             {visibleActivities!.map((activity) => (
@@ -178,7 +230,12 @@ export function StravaImport({ onImport }: StravaImportProps) {
             ))}
           </div>
           {hasMore && (
-            <button type="button" className="fatox-add" onClick={() => loadActivities(page + 1, true)} disabled={loadingMore}>
+            <button
+              type="button"
+              className="fatox-add"
+              onClick={() => void loadActivities(page + 1, true, beforeAnchor)}
+              disabled={loadingMore}
+            >
               {loadingMore ? "Loading…" : "Load more (further back in time)"}
             </button>
           )}

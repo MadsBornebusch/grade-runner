@@ -19,10 +19,17 @@ export default handleErrors(async (req: IncomingMessage, res: ServerResponse) =>
 
   const perPage = Number(getQuery(req).get("per_page") ?? "20");
   const page = Number(getQuery(req).get("page") ?? "1");
-  const stravaRes = await fetch(
-    `https://www.strava.com/api/v3/athlete/activities?per_page=${perPage}&page=${page}`,
-    { headers: { Authorization: `Bearer ${auth.accessToken}` } },
-  );
+  const before = getQuery(req).get("before");
+
+  const url = new URL("https://www.strava.com/api/v3/athlete/activities");
+  url.searchParams.set("per_page", String(perPage));
+  url.searchParams.set("page", String(page));
+  // Unix seconds -- Strava returns activities strictly before this cutoff,
+  // which is how "jump to a date" is implemented: fix the cutoff once, then
+  // keep paging within it.
+  if (before) url.searchParams.set("before", before);
+
+  const stravaRes = await fetch(url, { headers: { Authorization: `Bearer ${auth.accessToken}` } });
   if (!stravaRes.ok) {
     sendJson(res, stravaRes.status, { error: `Strava activities request failed: ${stravaRes.status}` });
     return;
