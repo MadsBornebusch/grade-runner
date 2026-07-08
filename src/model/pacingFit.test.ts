@@ -119,6 +119,50 @@ describe("fitTauAcrossRaces", () => {
     expect(result).not.toBeNull();
     expect(result!.tauMin).toBeGreaterThan(1500);
   });
+
+  /** Raw power trending at a fixed rate off some base level -- not a clean
+   * match to any single ceiling shape, more like real GPS/power data. */
+  function makeRealisticRace(totalMinutes: number, baseLevel: number, trendPerHour: number, stepMinutes = 5) {
+    const points = [];
+    const refCeiling = ceilingPower({ tMin: 0, altitudeM: 0, elapsedHours: 0 }, baseParams);
+    for (let t = 0; t < totalMinutes; t += stepMinutes) {
+      const hours = t / 60;
+      points.push({ tHours: hours, grossPowerWPerKg: refCeiling * (baseLevel + trendPerHour * hours), altitudeM: 0, dtS: stepMinutes * 60 });
+    }
+    return points;
+  }
+
+  describe("unresponsive flag", () => {
+    it("flags races too short to leave the LT2 cap at the fitted tau, not the long ones pooled alongside them", () => {
+      // Regression case for the actual bug report: a 10k and a 35k pooled
+      // with an 80k and a 16h backyard ultra. Real distances/paces varied
+      // here (50/270/660/960 min) with modest, differing raw-power trends --
+      // the two short ones should never be able to leave the LT2-capped
+      // plateau at whatever tau the pooled search lands on, unlike the two
+      // long ones.
+      const race50 = makeRealisticRace(50, 0.8, -0.1, 2);
+      const race270 = makeRealisticRace(270, 0.75, -0.02);
+      const race660 = makeRealisticRace(660, 0.7, 0.01);
+      const race960 = makeRealisticRace(960, 0.65, 0.008);
+
+      const result = fitTauAcrossRaces([race50, race270, race660, race960], { ...baseParams, tauMin: 250 });
+      expect(result).not.toBeNull();
+      expect(result!.perRace).toHaveLength(4);
+      expect(result!.perRace[0].unresponsive).toBe(true);
+      expect(result!.perRace[1].unresponsive).toBe(true);
+      expect(result!.perRace[2].unresponsive).toBe(false);
+      expect(result!.perRace[3].unresponsive).toBe(false);
+    });
+
+    it("does not flag a clean two-race case where both races genuinely inform the fit", () => {
+      const race700 = makeConstantEffortPoints({ ...baseParams, tauMin: 700 }, 700 / 60);
+      const race600 = makeConstantEffortPoints({ ...baseParams, tauMin: 600 }, 600 / 60);
+      const result = fitTauAcrossRaces([race700, race600], { ...baseParams, tauMin: 250 });
+      expect(result).not.toBeNull();
+      expect(result!.perRace[0].unresponsive).toBe(false);
+      expect(result!.perRace[1].unresponsive).toBe(false);
+    });
+  });
 });
 
 describe("fitDurabilityDriftPerHour", () => {

@@ -182,13 +182,15 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
           <p className="field-group-note">
             Best-fit tau across {fitResult.perRace.length} run{fitResult.perRace.length === 1 ? "" : "s"}: {fitResult.tauMin} min.
           </p>
-          <ul>
+          <ul className="run-library__fit-notes">
             {fitResult.perRace.map((race, i) => (
-              <li key={i} className="field-group-note">
+              <li key={i} className={race.unresponsive ? "warning" : "field-group-note"}>
                 Run {i + 1}: {race.trendAtCurrentPctPerHour >= 0 ? "+" : ""}
                 {race.trendAtCurrentPctPerHour.toFixed(1)}%/hour &rarr;{" "}
                 {race.trendAtFitPctPerHour >= 0 ? "+" : ""}
                 {race.trendAtFitPctPerHour.toFixed(1)}%/hour at the fitted tau.
+                {race.unresponsive &&
+                  " This run's own duration is too short (or too long) relative to the fitted tau for its modeled ceiling to move at all -- it had no real say in this result. Consider unchecking it and re-fitting."}
               </li>
             ))}
           </ul>

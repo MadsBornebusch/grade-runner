@@ -182,9 +182,32 @@ export function fitTauMinutes(
   };
 }
 
+/** Below this fractional drop in the modeled ceiling across a race's own
+ * trimmed window (at the fitted tau), the race is treated as having had no
+ * say in the result -- see MultiRaceTauFitResult.perRace's doc. Chosen from
+ * a synthetic short/long mix (0% for races too short to leave the LT2 cap
+ * vs. 5-11% for ones that do) and a clean two-race case (28-32%, nowhere
+ * near the cutoff) -- see pacingFit.test.ts. */
+const MIN_CEILING_DROP_FRACTION = 0.03;
+
 export interface MultiRaceTauFitResult {
   tauMin: number;
-  perRace: { trendAtCurrentPctPerHour: number; trendAtFitPctPerHour: number }[];
+  perRace: {
+    trendAtCurrentPctPerHour: number;
+    trendAtFitPctPerHour: number;
+    /**
+     * True if the modeled ceiling barely moves across this race's own
+     * trimmed window at the fitted tau -- i.e. it's sitting flat against the
+     * LT2 cap (tau large relative to the race) or flat at the fInf floor
+     * (tau small relative to the race) for its entire duration. Either way,
+     * tau has no effect on this race's ceiling shape at the reported value,
+     * so it had no say in *where* the fit landed even though its own
+     * trendAtFitPctPerHour above is a real number -- pooling it in just
+     * dilutes the result with a race that structurally can't inform tau.
+     * Short runs are the common case in practice.
+     */
+    unresponsive: boolean;
+  }[];
   hitSearchBoundary: "lower" | "upper" | null;
 }
 
@@ -248,11 +271,25 @@ export function fitTauAcrossRaces(
   if (fittedTrends.some((t) => !t)) return null;
 
   const hitSearchBoundary = tauMin <= lo + 1 ? "lower" : tauMin >= hi - 1 ? "upper" : null;
+
+  // Measures the saturation mechanism directly, at the fitted tau, on each
+  // race's own window -- rather than inferring it from how much the slope
+  // moves (which can look "responsive" far from tauMin while still being
+  // completely flat right where the search landed).
+  const ceilingDropFraction = (race: EffortTrendPoint[]) => {
+    const start = race[0];
+    const end = race[race.length - 1];
+    const ceilStart = ceilingPower({ tMin: start.tHours * 60, altitudeM: start.altitudeM, elapsedHours: start.tHours }, { ...ceilingParams, tauMin });
+    const ceilEnd = ceilingPower({ tMin: end.tHours * 60, altitudeM: end.altitudeM, elapsedHours: end.tHours }, { ...ceilingParams, tauMin });
+    return ceilStart > 0 ? (ceilStart - ceilEnd) / ceilStart : 0;
+  };
+
   return {
     tauMin,
     perRace: currentTrends.map((current, i) => ({
       trendAtCurrentPctPerHour: current!.slopePerHour * 100,
       trendAtFitPctPerHour: fittedTrends[i]!.slopePerHour * 100,
+      unresponsive: ceilingDropFraction(trimmed[i]) < MIN_CEILING_DROP_FRACTION,
     })),
     hitSearchBoundary,
   };
