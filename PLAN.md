@@ -466,3 +466,173 @@ caveats above — they work purely from power/pace data already being parsed.
 Stages 3–5 (not yet built) add HR-specific value but inherit the drift
 caveat, so they're framed as "lower-confidence, HR-only fallback," not a
 replacement.
+
+## 12. Future work: intensity-dependent fade, time-varying tracking, input provenance
+
+**Goal** (user request): fit the *full* athlete model (VO2max, LT2, f0/fInf/tau,
+durability) from a year or two of Strava history, with three specific asks:
+(1) does that much data even identify the model, and does the fit need to
+change to account for high-intensity races fading faster than low-intensity
+ultras; (2) let the model *adapt over time* as the athlete trains; (3) let
+manually-supplied values (VO2max, fat-ox points) carry a date and a
+source/confidence, so a lab test outweighs a watch guess. Researched via four
+literature sweeps (critical-power modeling, central/peripheral fatigue
+physiology, VO2max estimation/wearable accuracy, and time-varying athlete
+tracking) before designing anything — findings below, architecture after.
+Nothing in this section is built yet.
+
+### Q1: Is 1-2 years of Strava data enough?
+
+**For tau/durability: probably yes — duration diversity is the thing that
+matters, and a real training log has plenty of it.** Critical-power testing
+literature (Simpson & Kordi 2017) shows 2 well-chosen durations beat 3 poorly
+chosen ones; the failure mode is narrow duration *coverage* (Housh's
+long-duration-only trials overestimated sustainable power by ~2x), not raw
+count — exactly the lesson already learned the hard way in §5/§11's tau fits.
+
+**For VO2max specifically: likely a real gap, and more Strava data doesn't
+fix it.** VO2max is best constrained by short-to-moderate, near-maximal
+efforts (the CP/W′ literature calibrates on ~2-15min trials). Race-performance
+formulas degrade sharply as duration grows: at 100km, a performance-prediction
+model explained only ~49% of variance without even using VO2max (Coquart et
+al. 2023); at 166km, VO2max alone correlated r=-0.72 with performance and
+VO2max+economy explained just 62% of variance (Sabater-Pastor et al. 2023) —
+far weaker than the ~85%+ VO2max typically explains at marathon distance. An
+ultra-runner's Strava history is mostly easy aerobic miles plus a handful of
+multi-hour races — neither constrains VO2max well. **The fix isn't more
+volume, it's coverage**: flag to the athlete that a 5k-30min hard effort
+(race or time trial) is worth more for VO2max than another year of easy
+mileage, and don't report a confident VO2max fit without at least one such
+effort in the library.
+
+Sources: [Simpson & Kordi 2017](https://www.researchgate.net/publication/311450049_Comparison_of_Critical_Power_and_W'_Derived_from_Two_or_Three_Maximal_Tests), [duration-choice sensitivity](https://pubmed.ncbi.nlm.nih.gov/9923729/), [Coquart et al. 2023, 100km](https://pmc.ncbi.nlm.nih.gov/articles/PMC9980800/), [Sabater-Pastor et al. 2023, 166km](https://pubmed.ncbi.nlm.nih.gov/36754060/)
+
+### Q2: Does the fitting approach need to change?
+
+Yes, in two ways — one straightforward, one genuinely open research territory.
+
+**Straightforward: stratify by duration/intensity band instead of pooling
+everything into one fit.** Short, hard efforts should drive VO2max/LT2/f0;
+long, steady efforts should drive fInf/tau/durability. This is the same
+lesson as §11's f0/fInf non-identifiability, just applied per-parameter
+instead of per-race-duration.
+
+**Open territory: intensity — not raw duration — looks like the real axis
+for how fade sharpens, and no published model does this split.** The
+hypothesis that races fade differently at different durations is directionally
+right, but the mechanism isn't "long vs. short," it's *relative effort and
+mechanical load*. The cleanest evidence: Saugy et al. (2013) found the 330km
+Tor des Géants produced *less* neuromuscular damage than Millet et al.'s
+(2011) 166km UTMB study — half the distance, more damage — attributed to more
+conservative pacing over the longer race. Millet's UTMB data itself shows the
+signature the current model is missing: central (neural) fatigue resolved
+within 2 days, but peripheral (muscular/contractile) fatigue took ~9 days —
+two mechanisms with different time courses, not one decay curve. A marathon,
+by contrast, shows a central-dominant, peripheral-*sparing* pattern (no
+low-frequency fatigue detected) — consistent with "shorter/harder = more
+VO2max/central, longer/muscular = more peripheral," but driven by intensity
+and eccentric load (descent), not elapsed time per se. No published paper
+fits a two-component (central+peripheral) model, or an intensity-dependent
+tau, at ultra timescales — this would be novel work, grounded in real
+findings but without a formula to copy. **Recommendation: don't jump straight
+to a redesigned curve.** First build a cheap diagnostic — plot each stored
+race's own single-race tau (already computed by `fitTauMinutes`) against that
+race's average relative intensity (`avgEffortFraction`, already computed by
+`analyzeRun`) and its total descent. If a real relationship shows up in the
+athlete's *own* data, that justifies the harder work of building an
+intensity- or descent-dependent fade term next.
+
+Sources: [Saugy et al. 2013, Tor des Géants](https://pmc.ncbi.nlm.nih.gov/articles/PMC3694082/), [Millet et al. 2011, UTMB](https://pmc.ncbi.nlm.nih.gov/articles/PMC3043077/), [Temesi et al. 2014, TMS central fatigue](https://pubmed.ncbi.nlm.nih.gov/24195865/), [Tiller & Millet 2025, muscle damage as primary ultra limiter](https://pubmed.ncbi.nlm.nih.gov/39405022/), [Drake, Finke & Ferguson 2023, power-law vs. critical-power](https://pubmed.ncbi.nlm.nih.gov/37563307/), [Maunder et al. 2021, "durability" as a 4th pillar](https://link.springer.com/article/10.1007/s40279-021-01459-0)
+
+### Q3: Adapting over time, and weighting inputs by source
+
+**Avoid a Banister-style fitness/fatigue convolution (CTL/ATL/TSB) — it's a
+training-load score, not a physiological measurement, and it doesn't hold up
+well even in its home domain.** TrainingPeaks' own documentation says CTL/ATL
+are "relative indicators, not absolute predictors" that were never linked to
+specific physiological events. A 2025 Bayesian re-analysis (Marchal et al.,
+*Scientific Reports*) found the model's time constants are largely
+non-identifiable and that adding the fatigue term didn't improve
+cross-validated predictive accuracy — a textbook overfitting signature. Not a
+foundation to build VO2max-tracking on.
+
+**What real tools actually do instead is much simpler: rolling or decaying
+windows, not sophisticated filtering.** Golden Cheetah refits its critical-power
+model from the last 6 weeks; WKO5 uses a 90-day equal-weight window; Stryd
+uses a 90-day window where the most recent ~30 days count fully and weight
+decays toward zero after that. No peer-reviewed paper applies Kalman
+filtering or Bayesian state-space tracking to VO2max/CP specifically — the
+closest precedent is a within-session (not longitudinal) drift model.
+**Recommendation: extend the existing weighted-least-squares fits
+(`pacingFit.ts`) with a time-decay factor** —
+`weight *= exp(-ln(2) * daysAgo / halfLifeDays)` multiplied onto the existing
+`dtS` weight — rather than building a new estimation framework. A halfLife on
+the order of 60-90 days matches what Stryd/WKO5 use in practice, and is
+consistent with VO2max test-retest noise (CV 1-4%) being small relative to
+multi-week training gains (4-10%+) — short enough to track real adaptation,
+long enough not to chase noise.
+
+**Dated, sourced manual inputs should be treated as anchor points with a
+confidence weight, combined via inverse-variance weighting** — the standard
+statistical tool for combining measurements of known differing reliability
+(the same method used in meta-analysis and NIST metrology). Concretely,
+`vo2MaxMlPerKgPerMin` (and eventually `fatOxPoints`) becomes a dated,
+sourced history list rather than one scalar, and a resolver function
+combines entries near "now" (recency-weighted) with the athlete's own
+Strava-derived trend, each inverse-variance-weighted by source:
+- **Lab test** (gas analysis): treat as near-ground-truth, tightest weight.
+- **Race-derived (VDOT-style, from an actual maximal 5k-marathon effort)**:
+  SEE ≈ 2-5 ml/kg/min in validation studies.
+- **Wearable, moderate fitness**: MAPE ≈ 3-4% (Garmin Forerunner 245 study).
+- **Wearable, well-trained athlete**: notably *worse*, not better — the same
+  study found MAPE ≈ 9-10% (underestimating by ~6 ml/kg/min) in
+  highly-trained runners specifically, the opposite of what "better data
+  from fitter athletes" would suggest. This matters directly for an
+  ultra-runner's own Garmin number.
+- **Manual guess**: wide uncertainty, lowest weight.
+
+No existing platform (Garmin Connect, TrainingPeaks, Stryd) documents doing
+this kind of multi-source fusion for VO2max — it'd be a genuine differentiator,
+not a known pattern to copy, but the underlying statistics (inverse-variance
+weighting) are standard and low-risk to implement.
+
+Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/learn/articles/the-science-of-the-performance-manager/), [Marchal et al. 2025, Banister model non-identifiability](https://www.nature.com/articles/s41598-025-88153-7), [Stryd critical power decay](https://blog.stryd.com/2019/08/22/auto-calculated-critical-power-depreciation/), [WKO5 Power-Duration Model](https://www.wko5.com/wko-power-duration-model-v2), [Molina-Garcia et al. 2022, INTERLIVE wearable VO2max meta-analysis](https://link.springer.com/article/10.1007/s40279-021-01639-y), [Forerunner 245 fitness-dependent accuracy, 2025](https://pubmed.ncbi.nlm.nih.gov/40770433/), [Polar OwnIndex ~30% overestimate in masters athletes](https://www.mdpi.com/2411-5142/10/4/431), [NIST inverse-variance combination of measurements](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4551221/)
+
+### Proposed staged architecture (not yet built)
+
+1. **Bulk Strava backfill.** The current `api/strava/activities.ts` browses
+   one page at a time — fine for picking a handful of runs, not for pulling a
+   year+ of history. Needs a rate-limit-aware backfill flow (Strava allows
+   100 req/15min, 1000/day for the whole app) that paginates through a date
+   range in the background, with backoff. Also needs a lightweight
+   `RunSummary` index (date, distance, duration, elevation gain/loss, avg
+   effort) computed once at import and cached separately from full point
+   arrays — `RunLibraryPanel`'s current `summarize()` re-runs the whole
+   pipeline on every render, which is fine for a handful of runs and won't
+   scale to hundreds.
+2. **Time-decay weighting in the tau fit.** Add `halfLifeDays` to
+   `fitTauAcrossRaces`/`fitTauMinutes`'s weighting, defaulting to ~60-90 days.
+   Small, low-risk change to existing code — this alone delivers "the model
+   adapts as I train" for tau/durability before anything else in this list is
+   built.
+3. **Dated, sourced VO2max (and later fat-ox) history.** Replace the scalar
+   `vo2MaxMlPerKgPerMin` with a history list (`{date, value, source}[]`),
+   default source-confidence weights per the table above, and a resolver
+   that combines history entries with recent Strava-derived performance via
+   inverse-variance + recency weighting into the single number `ceilingParams`
+   actually needs.
+4. **Diagnostic: does intensity actually predict this athlete's own tau?**
+   Cheap, uses only existing functions (`fitTauMinutes`, `avgEffortFraction`,
+   already-computed descent) — plot/tabulate per-race tau vs. intensity vs.
+   descent across the library before deciding whether a model redesign is
+   justified.
+5. **Intensity- or descent-dependent fade term** (only if stage 4 shows a
+   real signal). Research territory, not an established formula — start
+   narrow (e.g. let tau shrink with average relative intensity) rather than
+   attempting a full central/peripheral two-component model in one step.
+
+Stages 1-3 are well-supported by existing literature and directly extend
+code that already exists. Stage 4 is a cheap way to test the user's own
+hypothesis on their own data before committing to stage 5, which is
+explicitly exploratory — flag any result from it as such in the UI, the same
+way the single-race tau fit already flags negative-split ambiguity.
