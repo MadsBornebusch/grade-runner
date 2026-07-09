@@ -10,6 +10,7 @@ import {
   type MultiRaceTauFitResult,
 } from "../model/pacingFit";
 import { suggestRunsForFit } from "../model/suggestRuns";
+import { dedupeStoredRuns } from "../model/dedupeRuns";
 import { filterRunsSinceDate, shouldFetchNextBackfillPage, toStoredRunSummaryInput, type BackfillPage } from "../model/stravaBackfill";
 import { computeTauDiagnostic, type RaceDiagnosticPoint } from "../model/tauDiagnostic";
 import {
@@ -99,6 +100,32 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Catches the same activity stored under two different ids -- e.g. a
+  // manual GPX upload (random id) and a later Strava backfill of the same
+  // run (stable "strava:<id>"), which the storage layer's own upsert-by-id
+  // dedup can't unify since they don't share a key. Everything below reads
+  // from `dedupedRuns`, not `runs`, so a duplicate can't silently double-
+  // count in the run list, a fit, the suggestions, or the diagnostic.
+  const { kept: dedupedRuns, duplicateGroups } = useMemo(() => dedupeStoredRuns(runs), [runs]);
+
+  const [removingDuplicates, setRemovingDuplicates] = useState(false);
+  const removeDuplicates = async () => {
+    setRemovingDuplicates(true);
+    setError(null);
+    try {
+      for (const group of duplicateGroups) {
+        for (const redundant of group.slice(1)) {
+          await deleteStoredRun(redundant.id);
+        }
+      }
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to remove duplicates.");
+    } finally {
+      setRemovingDuplicates(false);
+    }
+  };
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -194,7 +221,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
       durabilityDriftPerHour: formInputs.durabilityDriftPerHour,
     };
     const points: RaceDiagnosticPoint[] = [];
-    for (const run of runs) {
+    for (const run of dedupedRuns) {
       if (run.points === null) continue;
       const course = runPipeline(run.points);
       if (!course.hasTimestamps) continue;
@@ -220,7 +247,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
       });
     }
     return computeTauDiagnostic(points);
-  }, [runs, formInputs]);
+  }, [dedupedRuns, formInputs]);
 
   /** Fetches and persists full points for a summary-only row; a no-op if
    * they're already present. */
@@ -233,7 +260,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
   };
 
   const runFit = async () => {
-    const selectedRuns = runs.filter((r) => selected.has(r.id));
+    const selectedRuns = dedupedRuns.filter((r) => selected.has(r.id));
     const unfetchedCount = selectedRuns.filter((r) => r.points === null).length;
     if (unfetchedCount > MAX_LAZY_FETCH) {
       const estimatedMinutes = Math.ceil((unfetchedCount * 2 * 9) / 60);
@@ -277,7 +304,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
     }
   };
 
-  const suggestions = useMemo(() => suggestRunsForFit(runs), [runs]);
+  const suggestions = useMemo(() => suggestRunsForFit(dedupedRuns), [dedupedRuns]);
   const approvedSuggestions = useMemo(() => {
     // A run can appear in both lists (e.g. a short library with nothing
     // truly long) -- dedupe by id before fetching.
@@ -425,11 +452,22 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
         </div>
       )}
 
-      {runs.length === 0 && <p className="placeholder">No runs stored yet.</p>}
+      {duplicateGroups.length > 0 && (
+        <p className="warning">
+          Found {duplicateGroups.length} run{duplicateGroups.length === 1 ? "" : "s"} stored twice under different
+          ids (e.g. uploaded manually and later pulled in again via Strava backfill) -- excluded from the list,
+          fit, suggestions, and diagnostic below, but still sitting in storage.{" "}
+          <button type="button" className="fatox-add" onClick={() => void removeDuplicates()} disabled={removingDuplicates}>
+            {removingDuplicates ? "Removing…" : `Remove ${duplicateGroups.length} duplicate entr${duplicateGroups.length === 1 ? "y" : "ies"}`}
+          </button>
+        </p>
+      )}
 
-      {runs.length > 0 && (
+      {dedupedRuns.length === 0 && <p className="placeholder">No runs stored yet.</p>}
+
+      {dedupedRuns.length > 0 && (
         <div className="fatox-rows">
-          {runs.map((run) => {
+          {dedupedRuns.map((run) => {
             const summary = summarize(run);
             return (
               <div key={run.id} className="run-library-row">
@@ -454,7 +492,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
         </div>
       )}
 
-      {runs.length > 0 && (
+      {dedupedRuns.length > 0 && (
         <>
           <div className="strava-import__range-row">
             <span>Recency half-life</span>
