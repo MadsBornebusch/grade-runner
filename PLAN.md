@@ -629,15 +629,23 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    Strava effort (e.g. a VDOT-style formula, or inverting the app's own
    ceiling model) to feed the resolver alongside manual entries — a distinct,
    sizable piece of new estimation logic, worth its own pass.
-4. **Diagnostic: does intensity actually predict this athlete's own tau?**
-   Not yet built. Cheap, uses only existing functions (`fitTauMinutes`,
-   `avgEffortFraction`, already-computed descent) — plot/tabulate per-race
-   tau vs. intensity vs. descent across the library before deciding whether
-   a model redesign is justified.
-5. **Intensity- or descent-dependent fade term** (only if stage 4 shows a
-   real signal). Not yet built. Research territory, not an established
-   formula — start narrow (e.g. let tau shrink with average relative
-   intensity) rather than attempting a full central/peripheral two-component
+4. **Diagnostic: does descent load actually predict this athlete's own
+   tau?** Not yet built. Cheap, reuses `fitTauMinutes` and
+   `avgEffortFraction`; needs one small, symmetric pipeline addition
+   (`totalElevationLoss`, mirroring the existing `totalElevationGain`
+   sum — descent isn't tracked anywhere yet, despite an earlier version of
+   this note assuming it was). Tabulate per-race tau vs. descent-per-km vs.
+   intensity across already-fetched runs in the library before deciding
+   whether a model redesign is justified.
+5. **Descent/eccentric-load-dependent durability term** (only if stage 4
+   shows a real signal). Not yet built. Sharpened by an independent design
+   review (§13): key durability to cumulative descent/eccentric work
+   instead of `durabilityDriftPerHour`'s current linear-in-elapsed-time
+   form, which is collinear with tau's own exponential decay — not a vaguer
+   "intensity-dependent" redesign. Still research territory, no established
+   formula to copy; start narrow (e.g. a term that shrinks the ceiling as a
+   function of cumulative descent, alongside — not replacing — the existing
+   time-based fade) rather than a full central/peripheral two-component
    model in one step.
 
 Stages 1-3 are done and are well-supported by existing literature, directly
@@ -645,3 +653,73 @@ extending code that already existed. Stage 4 is a cheap way to test the
 user's own hypothesis on their own data before committing to stage 5, which
 is explicitly exploratory — flag any result from it as such in the UI, the
 same way the single-race tau fit already flags negative-split ambiguity.
+Stage 5's target has since been sharpened by an independent design review —
+see §13.
+
+## 13. Second-opinion design review — comparison against a mechanistic 5-layer model
+
+A separately-written design document (5 layers: terrain demand, aerobic
+supply w/ fade, W′/critical-power anaerobic buffer, substrate/glycogen, and
+mechanical/muscular fade) was compared line-by-line against what's actually
+implemented (`ceiling.ts`, `minetti.ts`, `substrate.ts`, `solver.ts`,
+`pacingFit.ts`) and against §12 above. Full comparison for reference; the
+one actionable outcome is folded into stage 5 below.
+
+**Confirms, no gap:** gait selection already goes beyond the doc's own
+"first cut" (compares achievable speed under both gaits' cost curves rather
+than a grade threshold); the descent speed cap (`maxDescentSpeedMs`) already
+exists for the same reason the doc cites (Minetti's downhill
+predicted/measured speed ratio ~3.4×, eccentric efficiency −1.2 — both
+independently confirmed in this session's own research); altitude
+correction is an exact formula match; gut-ceiling-on-oxidized-carb (not
+intake) is already correct; the tau fit already works at segment
+resolution and already regularizes by fixing lab-measured params and
+fitting only the latent coefficients — both explicitly recommended in the
+doc as if novel, already standard practice here.
+
+**Sharpens something already known to be broken (folded into stage 5):**
+PLAN.md/`pacingFit.ts` already documented that `durabilityDriftPerHour`
+(linear in elapsed time) is collinear with tau's exponential decay — both
+are functions of the same clock, so one race can't separate them. The
+design doc reaches the identical diagnosis independently and proposes a
+concrete fix: key durability to cumulative supra-threshold + eccentric
+work ("E_hard"), not wall-clock time. **Stage 5 is retargeted around this
+specifically** — descent load (proportional to cumulative eccentric work)
+is the concrete E_hard proxy to test in stage 4's diagnostic, not a vaguer
+"intensity" signal.
+
+**Genuinely new, not built or planned elsewhere:**
+- **W′/critical-power anaerobic buffer for climbs.** Nothing currently
+  represents momentarily exceeding sustainable effort on a steep climb and
+  recovering on the descent — `solver.ts` applies one fixed effort fraction
+  uniformly. Matters most for technical/mountainous courses. Real new
+  state/dynamics and its own calibration need (short hard efforts, distinct
+  from stage 3/4's VO2max-hunting).
+- **Fat-oxidation ceiling rising as glycogen depletes.** `substrate.ts`'s
+  `foPeakGPerMin` is a flat constant; established physiology says the
+  crossover shifts rightward (more fat-friendly) as glycogen falls. Not
+  modeled.
+- **Terrain roughness penalty**, especially downhill — nothing tracks
+  course technicality; Minetti's own paper flags treadmill-smooth data
+  understating real-terrain cost.
+- **Prediction intervals, not just a point estimate.** Planning mode
+  outputs one deterministic finish time. Bayesian uncertainty
+  quantification on the fade *coefficients* is a distinct idea from the
+  time-varying-tracking Bayesian approach §12 already rejected (Marchal et
+  al. 2025) — that rejection was about tracking drift over months, not
+  about uncertainty on a single calibration fit.
+- Poles/hiking economy adjustment — real but niche.
+
+**One citation flag:** the doc states Riegel's exponent runs "1.1–1.2+ for
+ultras" as if literature-established. This session's own research for §12
+checked that specific claim and found no peer-reviewed source for a
+corrected ultra exponent — those numbers "circulate only in uncited
+coaching blogs." Everything else checked (the CP 2-20min validity window,
+Maunder/durability, the Minetti downhill/eccentric findings) independently
+confirmed against sources already verified for §12.
+
+**Disposition:** W′/CP, the glycogen-dependent fat ceiling, terrain
+roughness, and prediction intervals are logged as candidate future stages,
+each its own scope of work — not folded into stage 4/5. Proceeding with
+stage 4 as scoped, testing tau against descent load specifically (not just
+generic "intensity") per the sharpened stage 5 target above.
