@@ -61,6 +61,7 @@ export interface PipelineResult {
   segments: CourseSegment[];
   totalDistance3D: number;
   totalElevationGain: number;
+  totalElevationLoss: number;
   hasElevation: boolean;
   hasTimestamps: boolean;
   hasHeartRate: boolean;
@@ -301,6 +302,7 @@ export function runPipeline(
   const segments: CourseSegment[] = [];
   let cumulativeDistance3D = 0;
   let totalElevationGain = 0;
+  let totalElevationLoss = 0;
 
   for (let i = 1; i < resampled.length; i++) {
     const distanceHorizontal = haversineDistance(resampled[i - 1], resampled[i]);
@@ -316,6 +318,7 @@ export function runPipeline(
 
     const eleDelta = smoothedEle[i] - smoothedEle[i - 1];
     if (eleDelta > 0) totalElevationGain += eleDelta;
+    else totalElevationLoss += -eleDelta;
 
     let paused = false;
     let dtS: number | null = null;
@@ -344,6 +347,7 @@ export function runPipeline(
     segments,
     totalDistance3D: cumulativeDistance3D,
     totalElevationGain,
+    totalElevationLoss,
     hasElevation,
     hasTimestamps,
     hasHeartRate,

@@ -140,6 +140,37 @@ describe("runPipeline", () => {
     }
   });
 
+  it("tracks elevation loss on a steady descent, separately from gain", () => {
+    const grade = -0.1;
+    const points = makeLine({ n: 201, spacingM: 5, grade });
+    const result = runPipeline(points);
+
+    const horizontalDistance = 200 * 5;
+    const expectedLoss = horizontalDistance * Math.abs(grade);
+    expect(result.totalElevationLoss).toBeGreaterThan(expectedLoss * 0.9);
+    expect(result.totalElevationLoss).toBeLessThan(expectedLoss * 1.05);
+    expect(result.totalElevationGain).toBeLessThan(expectedLoss * 0.1);
+  });
+
+  it("accumulates both gain and loss on an out-and-back climb", () => {
+    const up = makeLine({ n: 101, spacingM: 5, grade: 0.1 });
+    const lastUp = up[up.length - 1];
+    const down = Array.from({ length: 100 }, (_, i) => {
+      const distance = (i + 1) * 5;
+      return {
+        lat: lastUp.lat + distance * DEG_PER_M,
+        lon: lastUp.lon,
+        ele: (lastUp.ele ?? 0) - distance * 0.1,
+        time: null,
+        hr: null,
+        power: null,
+      };
+    });
+    const result = runPipeline([...up, ...down]);
+    expect(result.totalElevationGain).toBeGreaterThan(40);
+    expect(result.totalElevationLoss).toBeGreaterThan(40);
+  });
+
   it("falls back to flat (gradient 0) when elevation is missing", () => {
     const points = makeLine({ n: 50, spacingM: 5, ele: false });
     const result = runPipeline(points);

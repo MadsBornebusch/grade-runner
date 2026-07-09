@@ -2,9 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { GpxPoint } from "../gpx/pipeline";
 import { parseGpx, runPipeline } from "../gpx/pipeline";
 import { analyzeRun } from "../model/analysis";
-import { buildEffortTrendPoints, fitTauAcrossRaces, type EffortTrendPoint, type MultiRaceTauFitResult } from "../model/pacingFit";
+import {
+  buildEffortTrendPoints,
+  fitTauAcrossRaces,
+  fitTauMinutes,
+  type EffortTrendPoint,
+  type MultiRaceTauFitResult,
+} from "../model/pacingFit";
 import { suggestRunsForFit } from "../model/suggestRuns";
 import { filterRunsSinceDate, shouldFetchNextBackfillPage, toStoredRunSummaryInput, type BackfillPage } from "../model/stravaBackfill";
+import { computeTauDiagnostic, type RaceDiagnosticPoint } from "../model/tauDiagnostic";
 import {
   addStoredRun,
   deleteStoredRun,
@@ -171,6 +178,49 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
     tauMin: formInputs.tauMin,
     durabilityDriftPerHour: formInputs.durabilityDriftPerHour,
   };
+
+  // PLAN.md §12 stage 4 / §13: does descent load (or generic intensity)
+  // actually predict this athlete's own tau? Only races with full points
+  // already fetched are included -- no new Strava calls triggered just to
+  // populate a diagnostic. Races whose own single-race fit hit a search
+  // boundary are excluded too (an unreliable estimate would just add noise).
+  const tauDiagnostic = useMemo(() => {
+    const diagnosticCeilingParams = {
+      vo2MaxMlPerKgPerMin: resolveVo2Max(formInputs.vo2MaxHistory),
+      lt2Fraction: formInputs.lt2Fraction,
+      f0: formInputs.f0,
+      fInf: formInputs.fInf,
+      tauMin: formInputs.tauMin,
+      durabilityDriftPerHour: formInputs.durabilityDriftPerHour,
+    };
+    const points: RaceDiagnosticPoint[] = [];
+    for (const run of runs) {
+      if (run.points === null) continue;
+      const course = runPipeline(run.points);
+      if (!course.hasTimestamps) continue;
+      const analysis = analyzeRun(course.segments, {
+        bodyMassKg: formInputs.bodyMassKg,
+        ceilingParams: diagnosticCeilingParams,
+        fueling: { intakeGPerH: formInputs.intakeGPerH, gutMaxGPerH: formInputs.gutMaxGPerH },
+        glycogenStoreG: formInputs.glycogenStoreG,
+        reserveG: formInputs.reserveG,
+        walkMaxMs: formInputs.walkMaxMs,
+        altitudeAdjustment: formInputs.altitudeAdjustment,
+      });
+      const effortTrendPoints = buildEffortTrendPoints(course.segments, analysis.segments, formInputs.altitudeAdjustment);
+      const tauFit = fitTauMinutes(effortTrendPoints, diagnosticCeilingParams);
+      if (!tauFit || tauFit.hitSearchBoundary) continue;
+      const distanceKm = course.totalDistance3D / 1000;
+      if (distanceKm <= 0) continue;
+      points.push({
+        label: run.name,
+        tauMin: tauFit.tauMin,
+        avgIntensity: analysis.avgEffortFraction,
+        descentPerKm: course.totalElevationLoss / distanceKm,
+      });
+    }
+    return computeTauDiagnostic(points);
+  }, [runs, formInputs]);
 
   /** Fetches and persists full points for a summary-only row; a no-op if
    * they're already present. */
@@ -458,6 +508,48 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
           )}
         </>
       )}
+
+      <div className="run-library__diagnostic">
+        <p className="field-group-note">Diagnostic: does descent or intensity predict your own tau?</p>
+        <p className="field-group-help">
+          Cheap check before considering a model redesign (PLAN.md §12/§13): each already-fetched run's own
+          single-race best-fit tau, average effort, and descent per km. The stage-5 hypothesis is that harder or
+          more descent-loaded runs fade <em>faster</em> -- a <strong>negative</strong> correlation (higher
+          intensity/descent going with a <em>smaller</em> tau), not just any relationship. Runs whose own fit hit a
+          search-range boundary are excluded as unreliable.
+        </p>
+        {tauDiagnostic.points.length < 3 ? (
+          <p className="placeholder">
+            Need at least 3 runs with full data already fetched and a reliable single-race tau fit -- currently{" "}
+            {tauDiagnostic.points.length}.
+          </p>
+        ) : (
+          <>
+            <div className="fatox-rows">
+              {tauDiagnostic.points.map((p, i) => (
+                <div key={i} className="run-library-row">
+                  <span className="run-library-row__label">
+                    {p.label} &middot; tau {p.tauMin} min &middot; {(p.avgIntensity * 100).toFixed(0)}% avg effort
+                    &middot; {p.descentPerKm.toFixed(0)} m/km descent
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="field-group-note">
+              Correlation (tau vs. intensity):{" "}
+              {tauDiagnostic.intensityCorrelation !== null ? tauDiagnostic.intensityCorrelation.toFixed(2) : "n/a"}
+              {" · "}
+              Correlation (tau vs. descent):{" "}
+              {tauDiagnostic.descentCorrelation !== null ? tauDiagnostic.descentCorrelation.toFixed(2) : "n/a"}
+            </p>
+            <p className="field-group-help">
+              A meaningfully negative value (below roughly −0.5) on either supports building a descent/intensity-
+              dependent fade term. Near zero or positive means this athlete's own data doesn't show the effect --
+              not a reason to build it yet.
+            </p>
+          </>
+        )}
+      </div>
     </div>
   );
 }
