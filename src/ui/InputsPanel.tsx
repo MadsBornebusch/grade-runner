@@ -5,12 +5,15 @@ import {
   paceMinPerKmToDisplay,
   rateFromGPerMin,
   rateToGPerMin,
+  resolveVo2Max,
   speedFromMs,
   speedToMs,
   suggestedFoPeakGPerMin,
   type FatOxPoint,
   type FatOxRateUnit,
   type FormInputs,
+  type Vo2MaxEntry,
+  type Vo2MaxSource,
   type WalkSpeedUnit,
 } from "./formInputs";
 
@@ -217,6 +220,77 @@ function FatOxRows({ points, speedUnit, rateUnit, onSpeedUnitChange, onRateUnitC
   );
 }
 
+const VO2MAX_SOURCE_LABELS: Record<Vo2MaxSource, string> = {
+  lab: "Lab test",
+  race: "Race performance",
+  wearable: "Wearable estimate",
+  manual: "Manual guess",
+};
+
+interface Vo2MaxRowProps {
+  entry: Vo2MaxEntry;
+  onChange: (patch: Partial<Vo2MaxEntry>) => void;
+  onRemove: () => void;
+}
+
+function Vo2MaxRow({ entry, onChange, onRemove }: Vo2MaxRowProps) {
+  const valueField = useNumberField(entry.value, (v) => onChange({ value: v }));
+  return (
+    <div className="vo2max-row">
+      <input
+        type="date"
+        value={entry.date}
+        onChange={(e) => onChange({ date: e.target.value })}
+        aria-label="Measurement date"
+      />
+      <input type="number" step={1} min={20} {...valueField} aria-label="VO2max, ml/kg/min" />
+      <span className="fatox-row__unit">ml/kg/min</span>
+      <select
+        className="field__unit-select"
+        value={entry.source}
+        onChange={(e) => onChange({ source: e.target.value as Vo2MaxSource })}
+        aria-label="Source"
+      >
+        {Object.entries(VO2MAX_SOURCE_LABELS).map(([value, label]) => (
+          <option key={value} value={value}>
+            {label}
+          </option>
+        ))}
+      </select>
+      <button type="button" className="fatox-row__remove" onClick={onRemove} aria-label="Remove entry">
+        &times;
+      </button>
+    </div>
+  );
+}
+
+interface Vo2MaxRowsProps {
+  history: Vo2MaxEntry[];
+  onChange: (history: Vo2MaxEntry[]) => void;
+}
+
+function Vo2MaxRows({ history, onChange }: Vo2MaxRowsProps) {
+  const update = (i: number, patch: Partial<Vo2MaxEntry>) =>
+    onChange(history.map((e, idx) => (idx === i ? { ...e, ...patch } : e)));
+  const remove = (i: number) => onChange(history.filter((_, idx) => idx !== i));
+  const add = () =>
+    onChange([
+      ...history,
+      { date: new Date().toISOString().slice(0, 10), value: Math.round(resolveVo2Max(history) ?? 50), source: "manual" },
+    ]);
+
+  return (
+    <div className="fatox-rows">
+      {history.map((entry, i) => (
+        <Vo2MaxRow key={i} entry={entry} onChange={(patch) => update(i, patch)} onRemove={() => remove(i)} />
+      ))}
+      <button type="button" className="fatox-add" onClick={add}>
+        + Add entry
+      </button>
+    </div>
+  );
+}
+
 /** Athlete physiology, fueling, pacing fade, and walk/run settings (Page 2). */
 export function AthleteFields({ values, onChange }: FieldsProps) {
   const set = <K extends keyof FormInputs>(key: K, value: FormInputs[K]) =>
@@ -242,14 +316,16 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
           min={30}
           onChange={(v) => set("bodyMassKg", v)}
         />
-        <NumberField
-          label="VO2max"
-          hint="ml/kg/min"
-          value={values.vo2MaxMlPerKgPerMin}
-          step={1}
-          min={20}
-          onChange={(v) => set("vo2MaxMlPerKgPerMin", v)}
-        />
+        <p className="field-group-note">
+          Current effective VO2max: {(resolveVo2Max(values.vo2MaxHistory) ?? 50).toFixed(1)} ml/kg/min, combining{" "}
+          {values.vo2MaxHistory.length} entr{values.vo2MaxHistory.length === 1 ? "y" : "ies"}.
+        </p>
+        <p className="field-group-help">
+          Add every VO2max measurement you have, dated and with its source — a lab test outweighs a wearable guess,
+          and older entries matter less as you train (see PLAN.md §12). One entry works fine too; it's just used
+          directly.
+        </p>
+        <Vo2MaxRows history={values.vo2MaxHistory} onChange={(vo2MaxHistory) => set("vo2MaxHistory", vo2MaxHistory)} />
         <NumberField
           label="LT1"
           hint="fraction of VO2max"

@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   equivalentLT1LT2,
   resolveSubstrateAnchors,
+  resolveVo2Max,
   speedFromMs,
   speedToMs,
   substrateAnchorsFromThresholds,
   suggestedFoPeakGPerMin,
+  type Vo2MaxEntry,
 } from "./formInputs";
 
 describe("substrateAnchorsFromThresholds", () => {
@@ -64,8 +66,12 @@ describe("resolveSubstrateAnchors", () => {
   });
 });
 
+function singleVo2MaxEntry(value: number): Vo2MaxEntry[] {
+  return [{ date: "2024-01-01", value, source: "manual" }];
+}
+
 describe("equivalentLT1LT2", () => {
-  const base = { lt1Fraction: 0.65, lt2Fraction: 0.85, walkMaxMs: 2.0, vo2MaxMlPerKgPerMin: 50 };
+  const base = { lt1Fraction: 0.65, lt2Fraction: 0.85, walkMaxMs: 2.0, vo2MaxHistory: singleVo2MaxEntry(50) };
   const fatOxPoints = [
     { paceMinPerKm: 7, fatGPerMin: 0.5, carbGPerMin: 0.8 },
     { paceMinPerKm: 5, fatGPerMin: 0.3, carbGPerMin: 1.8 },
@@ -84,10 +90,46 @@ describe("equivalentLT1LT2", () => {
     expect(result!.lt2Fraction).toBeLessThan(1.5);
   });
 
-  it("scales inversely with stated VO2max -- the same curve implies a lower %VO2max the higher VO2max is", () => {
-    const lowerVo2 = equivalentLT1LT2({ ...base, fatOxPoints, vo2MaxMlPerKgPerMin: 45 })!;
-    const higherVo2 = equivalentLT1LT2({ ...base, fatOxPoints, vo2MaxMlPerKgPerMin: 60 })!;
+  it("scales inversely with resolved VO2max -- the same curve implies a lower %VO2max the higher VO2max is", () => {
+    const lowerVo2 = equivalentLT1LT2({ ...base, fatOxPoints, vo2MaxHistory: singleVo2MaxEntry(45) })!;
+    const higherVo2 = equivalentLT1LT2({ ...base, fatOxPoints, vo2MaxHistory: singleVo2MaxEntry(60) })!;
     expect(higherVo2.lt1Fraction).toBeLessThan(lowerVo2.lt1Fraction);
+  });
+});
+
+describe("resolveVo2Max", () => {
+  it("returns undefined for empty history", () => {
+    expect(resolveVo2Max([])).toBeUndefined();
+  });
+
+  it("returns the single entry's value when there's only one", () => {
+    expect(resolveVo2Max(singleVo2MaxEntry(55))).toBeCloseTo(55, 6);
+  });
+
+  it("weights a lab entry far more than a manual entry of the same age", () => {
+    const now = new Date("2025-01-01");
+    const labHigher = resolveVo2Max(
+      [
+        { date: "2024-12-01", value: 60, source: "lab" },
+        { date: "2024-12-01", value: 40, source: "manual" },
+      ],
+      now,
+    )!;
+    // Should land much closer to the lab value (60) than a plain average (50).
+    expect(labHigher).toBeGreaterThan(55);
+  });
+
+  it("weights a recent entry more than an old one of the same source", () => {
+    const now = new Date("2025-01-01");
+    const result = resolveVo2Max(
+      [
+        { date: "2024-12-25", value: 60, source: "manual" }, // 7 days ago
+        { date: "2020-01-01", value: 40, source: "manual" }, // ~5 years ago
+      ],
+      now,
+    )!;
+    // The ancient entry should be almost entirely discounted.
+    expect(result).toBeGreaterThan(58);
   });
 });
 

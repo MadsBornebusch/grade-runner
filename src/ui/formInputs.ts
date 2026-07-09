@@ -10,9 +10,23 @@ export interface FatOxPoint {
   carbGPerMin: number;
 }
 
+/** Rough confidence ordering, most to least certain -- see PLAN.md §12. */
+export type Vo2MaxSource = "lab" | "race" | "wearable" | "manual";
+
+export interface Vo2MaxEntry {
+  /** ISO date, "YYYY-MM-DD". */
+  date: string;
+  value: number;
+  source: Vo2MaxSource;
+}
+
 export interface FormInputs {
   bodyMassKg: number;
-  vo2MaxMlPerKgPerMin: number;
+  /** Dated, sourced measurements -- resolveVo2Max() combines them into the
+   * single current value the ceiling model needs. Replaces a plain scalar
+   * so a lab test can outweigh a watch guess, and old entries matter less
+   * than recent ones as the athlete trains (PLAN.md §12). */
+  vo2MaxHistory: Vo2MaxEntry[];
   lt1Fraction: number;
   lt2Fraction: number;
   f0: number;
@@ -43,9 +57,13 @@ export interface FormInputs {
   showCourseDebug: boolean;
 }
 
+// Deliberately old so a genuinely new entry naturally outweighs it via
+// recency once one is added -- see resolveVo2Max.
+const DEFAULT_VO2MAX_DATE = "2020-01-01";
+
 export const DEFAULT_FORM_INPUTS: FormInputs = {
   bodyMassKg: 70,
-  vo2MaxMlPerKgPerMin: 50,
+  vo2MaxHistory: [{ date: DEFAULT_VO2MAX_DATE, value: 50, source: "manual" }],
   lt1Fraction: 0.65,
   lt2Fraction: 0.85,
   f0: 0.94,
@@ -75,7 +93,18 @@ export function loadFormInputs(): FormInputs {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_FORM_INPUTS;
-    return { ...DEFAULT_FORM_INPUTS, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw);
+    const merged: FormInputs = { ...DEFAULT_FORM_INPUTS, ...parsed };
+    // Migrate a pre-history save (a plain vo2MaxMlPerKgPerMin scalar, no
+    // vo2MaxHistory yet) into a single manual entry dated today, so an
+    // existing profile carries its current value forward instead of
+    // silently reverting to the default.
+    if (!parsed.vo2MaxHistory && typeof parsed.vo2MaxMlPerKgPerMin === "number") {
+      merged.vo2MaxHistory = [
+        { date: new Date().toISOString().slice(0, 10), value: parsed.vo2MaxMlPerKgPerMin, source: "manual" },
+      ];
+    }
+    return merged;
   } catch {
     return DEFAULT_FORM_INPUTS;
   }
@@ -119,24 +148,66 @@ export function resolveSubstrateAnchors(
   return { x0, k, intensityIsAbsolutePower: false };
 }
 
+// Rough SEE (standard error of estimate), ml/kg/min, per source -- inverse-
+// variance weights in resolveVo2Max. Lab is treated as near-ground-truth;
+// race-derived (an actual maximal 5k-marathon effort) SEE ~2-5 in validation
+// studies; wearable is calibrated toward the well-trained-athlete end of its
+// range, since that's who this app is for and accuracy is *worse* there, not
+// better (a Forerunner 245 study found ~9-10% error in highly-trained
+// runners vs ~3-4% in moderately-trained ones); manual is a wide guess.
+// See PLAN.md §12.
+const VO2MAX_SOURCE_SIGMA: Record<Vo2MaxSource, number> = {
+  lab: 1,
+  race: 3,
+  wearable: 6,
+  manual: 10,
+};
+
+// VO2max moves over a training macrocycle, not day to day -- independent
+// constant from pacingFit.ts's tau-fit half-life (which tracks much faster
+// week-to-week fatigue/durability changes).
+const VO2MAX_RECENCY_HALF_LIFE_DAYS = 180;
+
+/**
+ * Combines dated, sourced VO2max measurements into the single current value
+ * the ceiling model needs, via inverse-variance (by source confidence)
+ * weighted by recency (older entries matter less, since VO2max genuinely
+ * changes with training) -- see PLAN.md §12. Returns undefined on empty
+ * history; CeilingParams.vo2MaxMlPerKgPerMin is already optional and
+ * defaults to 50 internally, so callers can pass this straight through.
+ */
+export function resolveVo2Max(history: Vo2MaxEntry[], now: Date = new Date()): number | undefined {
+  if (history.length === 0) return undefined;
+  let weightedSum = 0;
+  let totalWeight = 0;
+  for (const entry of history) {
+    const daysAgo = Math.max(0, (now.getTime() - new Date(entry.date).getTime()) / 86_400_000);
+    const recencyWeight = Math.exp((-Math.LN2 * daysAgo) / VO2MAX_RECENCY_HALF_LIFE_DAYS);
+    const weight = recencyWeight / VO2MAX_SOURCE_SIGMA[entry.source] ** 2;
+    weightedSum += weight * entry.value;
+    totalWeight += weight;
+  }
+  return totalWeight > 0 ? weightedSum / totalWeight : undefined;
+}
+
 /**
  * When a fat-ox curve is active (overriding LT1/LT2), expresses its fitted
  * crossover points -- in absolute W/kg, independent of VO2max -- as
- * equivalent %VO2max fractions, using the athlete's stated VO2max purely as
- * a reference for comparison against the manual LT1/LT2 inputs it replaces.
- * This does NOT derive VO2max itself: a submaximal fat-ox test alone can't
- * tell us where the athlete's true ceiling is (that's exactly the
- * population-average assumption a personal curve is meant to avoid), so
+ * equivalent %VO2max fractions, using the athlete's resolved VO2max purely
+ * as a reference for comparison against the manual LT1/LT2 inputs it
+ * replaces. This does NOT derive VO2max itself: a submaximal fat-ox test
+ * alone can't tell us where the athlete's true ceiling is (that's exactly
+ * the population-average assumption a personal curve is meant to avoid), so
  * VO2max still needs its own source and continues to set the pace ceiling
  * independently of this curve. Returns null when there's no curve, or the
- * stated VO2max is non-positive (nothing to divide by).
+ * resolved VO2max is non-positive (nothing to divide by).
  */
 export function equivalentLT1LT2(
-  inputs: Pick<FormInputs, "lt1Fraction" | "lt2Fraction" | "fatOxPoints" | "walkMaxMs" | "vo2MaxMlPerKgPerMin">,
+  inputs: Pick<FormInputs, "lt1Fraction" | "lt2Fraction" | "fatOxPoints" | "walkMaxMs" | "vo2MaxHistory">,
 ): { lt1Fraction: number; lt2Fraction: number } | null {
   if (inputs.fatOxPoints.length === 0) return null;
   const { x0, k } = resolveSubstrateAnchors(inputs);
-  const seaLevelCeiling = maxAerobicPower(0, { vo2MaxMlPerKgPerMin: inputs.vo2MaxMlPerKgPerMin });
+  const seaLevelCeiling = maxAerobicPower(0, { vo2MaxMlPerKgPerMin: resolveVo2Max(inputs.vo2MaxHistory) });
   if (seaLevelCeiling <= 0) return null;
   return {
     lt1Fraction: x0 / seaLevelCeiling,

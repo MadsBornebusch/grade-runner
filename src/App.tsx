@@ -20,7 +20,7 @@ import { SplitTable } from "./ui/SplitTable";
 import { ResultsSummary } from "./ui/ResultsSummary";
 import { AnalysisSummary } from "./ui/AnalysisSummary";
 import { buildAnalysisChartPoints, buildChartPoints } from "./ui/chartData";
-import { loadFormInputs, resolveSubstrateAnchors, saveFormInputs, type FormInputs } from "./ui/formInputs";
+import { loadFormInputs, resolveSubstrateAnchors, resolveVo2Max, saveFormInputs, type FormInputs } from "./ui/formInputs";
 import { useStravaSession } from "./ui/useStravaSession";
 import "./App.css";
 
@@ -102,7 +102,7 @@ function App() {
       segments: courseResult.segments,
       bodyMassKg: formInputs.bodyMassKg,
       ceilingParams: {
-        vo2MaxMlPerKgPerMin: formInputs.vo2MaxMlPerKgPerMin,
+        vo2MaxMlPerKgPerMin: resolveVo2Max(formInputs.vo2MaxHistory),
         lt2Fraction: formInputs.lt2Fraction,
         f0: formInputs.f0,
         fInf: formInputs.fInf,
@@ -147,7 +147,7 @@ function App() {
       // only vo2MaxMlPerKgPerMin here silently fell back to ceiling.ts's
       // defaults for everyone who'd customized their pacing curve.
       ceilingParams: {
-        vo2MaxMlPerKgPerMin: formInputs.vo2MaxMlPerKgPerMin,
+        vo2MaxMlPerKgPerMin: resolveVo2Max(formInputs.vo2MaxHistory),
         lt2Fraction: formInputs.lt2Fraction,
         f0: formInputs.f0,
         fInf: formInputs.fInf,
