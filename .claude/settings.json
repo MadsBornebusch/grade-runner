@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx vitest *)",
+      "Bash(npx tsc *)",
+      "Bash(npx oxlint *)",
+      "Bash(npm run build)",
+      "Bash(npm run dev *)",
+      "Bash(openssl rand *)"
+    ]
+  }
+}
