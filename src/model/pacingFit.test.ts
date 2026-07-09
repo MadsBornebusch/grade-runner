@@ -120,6 +120,53 @@ describe("fitTauAcrossRaces", () => {
     expect(result!.tauMin).toBeGreaterThan(1500);
   });
 
+  describe("recency weighting", () => {
+    const recentTau = 150;
+    const staleTau = 600;
+    const now = new Date("2026-01-01");
+    const recentDate = new Date("2025-12-25"); // 7 days ago
+    const staleDate = new Date("2025-01-01"); // 365 days ago
+
+    it("down-weights an old race so a recent race's own tau dominates the pooled fit", () => {
+      const recentRace = makeConstantEffortPoints({ ...baseParams, tauMin: recentTau }, 4);
+      const staleRace = makeConstantEffortPoints({ ...baseParams, tauMin: staleTau }, 4);
+      const result = fitTauAcrossRaces(
+        [recentRace, staleRace],
+        { ...baseParams, tauMin: 300 },
+        { raceDates: [recentDate, staleDate], halfLifeDays: 75, now },
+      );
+      expect(result).not.toBeNull();
+      expect(Math.abs(result!.tauMin - recentTau)).toBeLessThan(Math.abs(result!.tauMin - staleTau));
+    });
+
+    it("behaves identically to unweighted pooling when no options are given (backward compatible)", () => {
+      const raceA = makeConstantEffortPoints({ ...baseParams, tauMin: 150 }, 4);
+      const raceB = makeConstantEffortPoints({ ...baseParams, tauMin: 150 }, 7);
+      const withEmptyOpts = fitTauAcrossRaces([raceA, raceB], { ...baseParams, tauMin: 400 }, {});
+      const withoutOpts = fitTauAcrossRaces([raceA, raceB], { ...baseParams, tauMin: 400 });
+      expect(withEmptyOpts!.tauMin).toBe(withoutOpts!.tauMin);
+    });
+
+    it("does not discount a race with no known date, unlike one with a known stale date", () => {
+      const recentRace = makeConstantEffortPoints({ ...baseParams, tauMin: recentTau }, 4);
+      const staleRace = makeConstantEffortPoints({ ...baseParams, tauMin: staleTau }, 4);
+
+      const discounted = fitTauAcrossRaces(
+        [recentRace, staleRace],
+        { ...baseParams, tauMin: 300 },
+        { raceDates: [recentDate, staleDate], halfLifeDays: 75, now },
+      )!;
+      const undiscounted = fitTauAcrossRaces(
+        [recentRace, staleRace],
+        { ...baseParams, tauMin: 300 },
+        { raceDates: [recentDate, null], halfLifeDays: 75, now },
+      )!;
+      // With the stale race's date unknown (full weight), it pulls the fit toward its
+      // own larger tau more than when it's correctly recognized and discounted as old.
+      expect(undiscounted.tauMin).toBeGreaterThan(discounted.tauMin);
+    });
+  });
+
   /** Raw power trending at a fixed rate off some base level -- not a clean
    * match to any single ceiling shape, more like real GPS/power data. */
   function makeRealisticRace(totalMinutes: number, baseLevel: number, trendPerHour: number, stepMinutes = 5) {

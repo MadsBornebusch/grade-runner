@@ -211,6 +211,23 @@ export interface MultiRaceTauFitResult {
   hitSearchBoundary: "lower" | "upper" | null;
 }
 
+/** Default recency half-life for the multi-race tau fit -- mid-point of
+ * PLAN.md §12's suggested 60-90 day range. */
+const DEFAULT_RECENCY_HALF_LIFE_DAYS = 75;
+
+export interface FitTauAcrossRacesOptions {
+  /** Aligned by index with `races`. A race with no known date (or when this
+   * whole option is omitted) gets no recency discount -- weight 1. */
+  raceDates?: (Date | null)[];
+  halfLifeDays?: number;
+  /** Injectable for deterministic tests; defaults to the real current time. */
+  now?: Date;
+}
+
+function daysAgo(date: Date, now: Date): number {
+  return Math.max(0, (now.getTime() - date.getTime()) / 86_400_000);
+}
+
 /**
  * Same tau-only search as fitTauMinutes, but pooled across several races at
  * once: the objective is the sum of each race's own squared within-race
@@ -224,13 +241,36 @@ export interface MultiRaceTauFitResult {
  * from fInf (long). One extra race beyond the tau fit's single-race case
  * mainly buys robustness -- one tau has to flatten several independent
  * runs' trends at once, not just one run's idiosyncrasies.
+ *
+ * Recency weighting (opts.raceDates/halfLifeDays) is what makes this "adapt
+ * as the athlete trains" -- an older race's contribution to the pooled
+ * objective decays over opts.halfLifeDays, so recent training dominates
+ * without older races being discarded outright. This only applies here, not
+ * in fitTauMinutes: a single race has no other race to be "more recent
+ * than," so a recency weight there would just scale the whole objective by
+ * a constant and never move the optimum.
  */
 export function fitTauAcrossRaces(
   races: EffortTrendPoint[][],
   ceilingParams: CeilingParams,
+  opts: FitTauAcrossRacesOptions = {},
 ): MultiRaceTauFitResult | null {
-  const trimmed = races.map(trimForPacingFit).filter((r) => r.length >= MIN_FIT_POINTS);
-  if (trimmed.length === 0) return null;
+  const halfLifeDays = opts.halfLifeDays ?? DEFAULT_RECENCY_HALF_LIFE_DAYS;
+  const now = opts.now ?? new Date();
+
+  const trimmedWithWeight = races
+    .map((r, i) => {
+      const date = opts.raceDates?.[i] ?? null;
+      return {
+        points: trimForPacingFit(r),
+        recencyWeight: date ? Math.exp((-Math.LN2 * daysAgo(date, now)) / halfLifeDays) : 1,
+      };
+    })
+    .filter((r) => r.points.length >= MIN_FIT_POINTS);
+  if (trimmedWithWeight.length === 0) return null;
+
+  const trimmed = trimmedWithWeight.map((r) => r.points);
+  const recencyWeights = trimmedWithWeight.map((r) => r.recencyWeight);
 
   const currentTrends = trimmed.map((r) => effortTrend(r, ceilingParams));
   if (currentTrends.some((t) => !t)) return null;
@@ -241,10 +281,10 @@ export function fitTauAcrossRaces(
 
   const pooledSquaredSlope = (tau: number) => {
     let sum = 0;
-    for (const r of trimmed) {
-      const trend = effortTrend(r, { ...ceilingParams, tauMin: tau });
+    for (let i = 0; i < trimmed.length; i++) {
+      const trend = effortTrend(trimmed[i], { ...ceilingParams, tauMin: tau });
       if (!trend) return Infinity;
-      sum += trend.slopePerHour ** 2;
+      sum += recencyWeights[i] * trend.slopePerHour ** 2;
     }
     return sum;
   };

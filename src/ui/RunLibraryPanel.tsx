@@ -13,7 +13,7 @@ import {
   upsertStoredRunSummary,
   type StoredRun,
 } from "../storage/runLibrary";
-import type { FormInputs } from "./formInputs";
+import { resolveVo2Max, type FormInputs } from "./formInputs";
 import { StravaImport } from "./StravaImport";
 import { fetchStravaActivity } from "./stravaClient";
 import { useStravaSession } from "./useStravaSession";
@@ -30,10 +30,22 @@ const BACKFILL_PAGE_DELAY_MS = 300;
  * data would mean too many Strava API calls to do inline -- see PLAN.md §12. */
 const MAX_LAZY_FETCH = 8;
 
+const DEFAULT_HALF_LIFE_DAYS = 75;
+
 function oneYearAgoDateInput(): string {
   const d = new Date();
   d.setFullYear(d.getFullYear() - 1);
   return d.toISOString().slice(0, 10);
+}
+
+/** A run's own calendar date, for recency-weighting the multi-race fit --
+ * Strava summaries carry it directly; GPX-derived runs (manual upload, or a
+ * Strava run whose points have already been fetched) fall back to the
+ * first point's own timestamp. Null if neither is available. */
+function runDate(run: StoredRun): Date | null {
+  if (run.date) return new Date(run.date);
+  const firstPointTime = run.points?.[0]?.time;
+  return firstPointTime ?? null;
 }
 
 /** Summary-only rows (points === null) read their distance/duration
@@ -64,6 +76,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
   const [fitResult, setFitResult] = useState<MultiRaceTauFitResult | null>(null);
   const [fitRan, setFitRan] = useState(false);
   const [fitting, setFitting] = useState(false);
+  const [halfLifeDays, setHalfLifeDays] = useState(DEFAULT_HALF_LIFE_DAYS);
 
   const [backfillFrom, setBackfillFrom] = useState(oneYearAgoDateInput);
   const [backfilling, setBackfilling] = useState(false);
@@ -151,7 +164,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
   }, [backfillFrom, refresh]);
 
   const ceilingParams = {
-    vo2MaxMlPerKgPerMin: formInputs.vo2MaxMlPerKgPerMin,
+    vo2MaxMlPerKgPerMin: resolveVo2Max(formInputs.vo2MaxHistory),
     lt2Fraction: formInputs.lt2Fraction,
     f0: formInputs.f0,
     fInf: formInputs.fInf,
@@ -187,6 +200,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
     setError(null);
     try {
       const races: EffortTrendPoint[][] = [];
+      const raceDates: (Date | null)[] = [];
       for (const run of selectedRuns) {
         const points = await ensurePoints(run);
         const course = runPipeline(points);
@@ -201,8 +215,9 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
           altitudeAdjustment: formInputs.altitudeAdjustment,
         });
         races.push(buildEffortTrendPoints(course.segments, analysis.segments, formInputs.altitudeAdjustment));
+        raceDates.push(runDate(run));
       }
-      setFitResult(fitTauAcrossRaces(races, ceilingParams));
+      setFitResult(fitTauAcrossRaces(races, ceilingParams, { raceDates, halfLifeDays }));
       setFitRan(true);
       refresh();
     } catch (err) {
@@ -390,9 +405,21 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
       )}
 
       {runs.length > 0 && (
-        <button type="button" className="fatox-add" onClick={() => void runFit()} disabled={selectedCount === 0 || fitting}>
-          {fitting ? "Fitting…" : `Fit tau from ${selectedCount} selected run${selectedCount === 1 ? "" : "s"}`}
-        </button>
+        <>
+          <div className="strava-import__range-row">
+            <span>Recency half-life</span>
+            <input
+              type="number"
+              min={1}
+              value={halfLifeDays}
+              onChange={(e) => setHalfLifeDays(Number(e.target.value))}
+            />
+            <span>days -- older selected runs count for less</span>
+          </div>
+          <button type="button" className="fatox-add" onClick={() => void runFit()} disabled={selectedCount === 0 || fitting}>
+            {fitting ? "Fitting…" : `Fit tau from ${selectedCount} selected run${selectedCount === 1 ? "" : "s"}`}
+          </button>
+        </>
       )}
 
       {fitRan && !fitResult && (
