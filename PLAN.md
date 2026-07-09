@@ -630,13 +630,14 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    ceiling model) to feed the resolver alongside manual entries — a distinct,
    sizable piece of new estimation logic, worth its own pass.
 4. **Diagnostic: does descent load actually predict this athlete's own
-   tau?** Not yet built. Cheap, reuses `fitTauMinutes` and
-   `avgEffortFraction`; needs one small, symmetric pipeline addition
-   (`totalElevationLoss`, mirroring the existing `totalElevationGain`
-   sum — descent isn't tracked anywhere yet, despite an earlier version of
-   this note assuming it was). Tabulate per-race tau vs. descent-per-km vs.
-   intensity across already-fetched runs in the library before deciding
-   whether a model redesign is justified.
+   tau? — built.** Reuses `fitTauMinutes` and `avgEffortFraction`;
+   `totalElevationLoss` added to the pipeline (mirroring the existing
+   `totalElevationGain` sum — descent wasn't tracked anywhere before this).
+   `RunLibraryPanel` tabulates per-race tau vs. descent-per-km vs. intensity
+   across already-fetched runs, with a Pearson correlation for each — the
+   hypothesis specifically predicts a *negative* one (harder/more
+   descent-loaded runs fading faster), not just any relationship. See
+   `src/model/tauDiagnostic.ts`.
 5. **Descent/eccentric-load-dependent durability term** (only if stage 4
    shows a real signal). Not yet built. Sharpened by an independent design
    review (§13): key durability to cumulative descent/eccentric work
@@ -648,12 +649,13 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    time-based fade) rather than a full central/peripheral two-component
    model in one step.
 
-Stages 1-3 are done and are well-supported by existing literature, directly
-extending code that already existed. Stage 4 is a cheap way to test the
-user's own hypothesis on their own data before committing to stage 5, which
-is explicitly exploratory — flag any result from it as such in the UI, the
-same way the single-race tau fit already flags negative-split ambiguity.
-Stage 5's target has since been sharpened by an independent design review —
+Stages 1-4 are done and well-supported by existing literature, directly
+extending code that already existed. Stage 4's result (run it in the app —
+needs at least 3 already-fetched runs) is what decides whether stage 5,
+which is explicitly exploratory, is worth building at all — flag any result
+from it as such in the UI, the same way the single-race tau fit already
+flags negative-split ambiguity. Stage 5's target has since been sharpened by
+an independent design review —
 see §13.
 
 ## 13. Second-opinion design review — comparison against a mechanistic 5-layer model
