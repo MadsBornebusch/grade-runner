@@ -598,41 +598,50 @@ weighting) are standard and low-risk to implement.
 
 Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/learn/articles/the-science-of-the-performance-manager/), [Marchal et al. 2025, Banister model non-identifiability](https://www.nature.com/articles/s41598-025-88153-7), [Stryd critical power decay](https://blog.stryd.com/2019/08/22/auto-calculated-critical-power-depreciation/), [WKO5 Power-Duration Model](https://www.wko5.com/wko-power-duration-model-v2), [Molina-Garcia et al. 2022, INTERLIVE wearable VO2max meta-analysis](https://link.springer.com/article/10.1007/s40279-021-01639-y), [Forerunner 245 fitness-dependent accuracy, 2025](https://pubmed.ncbi.nlm.nih.gov/40770433/), [Polar OwnIndex ~30% overestimate in masters athletes](https://www.mdpi.com/2411-5142/10/4/431), [NIST inverse-variance combination of measurements](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4551221/)
 
-### Proposed staged architecture (not yet built)
+### Proposed staged architecture
 
-1. **Bulk Strava backfill.** The current `api/strava/activities.ts` browses
-   one page at a time — fine for picking a handful of runs, not for pulling a
-   year+ of history. Needs a rate-limit-aware backfill flow (Strava allows
-   100 req/15min, 1000/day for the whole app) that paginates through a date
-   range in the background, with backoff. Also needs a lightweight
-   `RunSummary` index (date, distance, duration, elevation gain/loss, avg
-   effort) computed once at import and cached separately from full point
-   arrays — `RunLibraryPanel`'s current `summarize()` re-runs the whole
-   pipeline on every render, which is fine for a handful of runs and won't
-   scale to hundreds.
-2. **Time-decay weighting in the tau fit.** Add `halfLifeDays` to
-   `fitTauAcrossRaces`/`fitTauMinutes`'s weighting, defaulting to ~60-90 days.
-   Small, low-risk change to existing code — this alone delivers "the model
-   adapts as I train" for tau/durability before anything else in this list is
-   built.
-3. **Dated, sourced VO2max (and later fat-ox) history.** Replace the scalar
-   `vo2MaxMlPerKgPerMin` with a history list (`{date, value, source}[]`),
-   default source-confidence weights per the table above, and a resolver
-   that combines history entries with recent Strava-derived performance via
-   inverse-variance + recency weighting into the single number `ceilingParams`
-   actually needs.
+1. **Bulk Strava backfill — built.** Pages through `/athlete/activities`
+   (already supports `page`/`before`) storing lightweight summaries
+   (distance, duration, elevation, avg HR/power) for a whole date range in
+   ~15-25 requests, not 300-600 — full GPS points are only fetched lazily,
+   once a run is actually selected. `suggestRunsForFit` ranks summary-only
+   runs by likely usefulness (short+intense for VO2max, longest for
+   durability) so a handful of genuinely useful runs can be approved and
+   fetched without scanning hundreds of rows or risking Strava's rate limit.
+   See `src/model/stravaBackfill.ts`, `src/model/suggestRuns.ts`,
+   `RunLibraryPanel.tsx`.
+2. **Time-decay weighting in the tau fit — built.** `fitTauAcrossRaces` takes
+   an optional `{raceDates, halfLifeDays, now}`; each race's contribution to
+   the pooled objective decays by `exp(-ln2*daysAgo/halfLifeDays)`, default
+   75 days, adjustable in the UI. Only the multi-race fit needed this — a
+   single race has no other race to be "more recent than." See
+   `src/model/pacingFit.ts`.
+3. **Dated, sourced VO2max history — built** (manual entries only; the
+   "recent Strava-derived performance" auto-blending mentioned below is
+   deferred). `FormInputs.vo2MaxHistory` replaces the old scalar;
+   `resolveVo2Max` combines entries via inverse-variance (by source
+   confidence) × recency (180-day half-life — VO2max moves over a training
+   macrocycle, not day to day) into the single number `ceilingParams` needs.
+   `loadFormInputs` migrates an existing pre-history save into one manual
+   entry. See `src/ui/formInputs.ts`, `src/ui/InputsPanel.tsx`.
+
+   *Not yet built*: auto-deriving a VO2max estimate from a recent hard
+   Strava effort (e.g. a VDOT-style formula, or inverting the app's own
+   ceiling model) to feed the resolver alongside manual entries — a distinct,
+   sizable piece of new estimation logic, worth its own pass.
 4. **Diagnostic: does intensity actually predict this athlete's own tau?**
-   Cheap, uses only existing functions (`fitTauMinutes`, `avgEffortFraction`,
-   already-computed descent) — plot/tabulate per-race tau vs. intensity vs.
-   descent across the library before deciding whether a model redesign is
-   justified.
+   Not yet built. Cheap, uses only existing functions (`fitTauMinutes`,
+   `avgEffortFraction`, already-computed descent) — plot/tabulate per-race
+   tau vs. intensity vs. descent across the library before deciding whether
+   a model redesign is justified.
 5. **Intensity- or descent-dependent fade term** (only if stage 4 shows a
-   real signal). Research territory, not an established formula — start
-   narrow (e.g. let tau shrink with average relative intensity) rather than
-   attempting a full central/peripheral two-component model in one step.
+   real signal). Not yet built. Research territory, not an established
+   formula — start narrow (e.g. let tau shrink with average relative
+   intensity) rather than attempting a full central/peripheral two-component
+   model in one step.
 
-Stages 1-3 are well-supported by existing literature and directly extend
-code that already exists. Stage 4 is a cheap way to test the user's own
-hypothesis on their own data before committing to stage 5, which is
-explicitly exploratory — flag any result from it as such in the UI, the same
-way the single-race tau fit already flags negative-split ambiguity.
+Stages 1-3 are done and are well-supported by existing literature, directly
+extending code that already existed. Stage 4 is a cheap way to test the
+user's own hypothesis on their own data before committing to stage 5, which
+is explicitly exploratory — flag any result from it as such in the UI, the
+same way the single-race tau fit already flags negative-split ambiguity.
