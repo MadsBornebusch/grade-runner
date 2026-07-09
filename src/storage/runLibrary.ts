@@ -1,8 +1,11 @@
-// Persists a small library of past runs (raw parsed GPX points) in
-// IndexedDB, keyed per run. Stores points rather than a derived summary --
-// re-running the pipeline/analysis on demand means a stored run always
-// reflects the current model, with nothing to migrate when the model
-// changes.
+// Persists a small library of past runs in IndexedDB, keyed per run.
+//
+// A run's points can be null -- "summary only", from a cheap Strava
+// activity-list backfill that never called the per-activity detail/streams
+// endpoints. Points are fetched lazily (setStoredRunPoints) only when a run
+// is actually selected for a fit. Strava-sourced runs use a stable
+// "strava:<id>" key (not a random UUID) so re-importing or re-backfilling
+// the same activity upserts one row instead of duplicating it.
 
 import type { GpxPoint } from "../gpx/pipeline";
 
@@ -10,7 +13,28 @@ export interface StoredRun {
   id: string;
   name: string;
   addedAt: number;
-  points: GpxPoint[];
+  /** null = summary only, not yet fetched from Strava. */
+  points: GpxPoint[] | null;
+  stravaId?: number;
+  /** ISO date, from Strava's start_date. Only present for summary-derived rows. */
+  date?: string;
+  distanceKm?: number;
+  /** Moving time, seconds. */
+  durationS?: number;
+  elevationGainM?: number;
+  avgHeartRate?: number | null;
+  avgWatts?: number | null;
+}
+
+export interface StravaRunSummaryInput {
+  stravaId: number;
+  name: string;
+  date: string;
+  distanceKm: number;
+  durationS: number;
+  elevationGainM: number;
+  avgHeartRate: number | null;
+  avgWatts: number | null;
 }
 
 const DB_NAME = "grade-runner";
@@ -28,8 +52,18 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-export async function addStoredRun(name: string, points: GpxPoint[]): Promise<StoredRun> {
-  const run: StoredRun = { id: crypto.randomUUID(), name, addedAt: Date.now(), points };
+/** Manual GPX upload, or a single Strava activity import -- always supplies
+ * full points immediately. Passing stravaId makes the id stable, so
+ * re-importing the same activity (or a later bulk backfill of it) upserts
+ * this row instead of creating a duplicate. */
+export async function addStoredRun(name: string, points: GpxPoint[], stravaId?: number): Promise<StoredRun> {
+  const run: StoredRun = {
+    id: stravaId !== undefined ? `strava:${stravaId}` : crypto.randomUUID(),
+    name,
+    addedAt: Date.now(),
+    points,
+    ...(stravaId !== undefined ? { stravaId } : {}),
+  };
   const db = await openDb();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
@@ -38,6 +72,56 @@ export async function addStoredRun(name: string, points: GpxPoint[]): Promise<St
     tx.onerror = () => reject(tx.error);
   });
   return run;
+}
+
+/** Backfill path: stores a lightweight Strava summary without fetching full
+ * points. Preserves an existing row's points/addedAt if one is already
+ * present under the same stable id (e.g. re-backfilling, or a prior
+ * single-import already fetched this activity's full data). */
+export async function upsertStoredRunSummary(summary: StravaRunSummaryInput): Promise<void> {
+  const id = `strava:${summary.stravaId}`;
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const getReq = store.get(id);
+    getReq.onsuccess = () => {
+      const existing = getReq.result as StoredRun | undefined;
+      const run: StoredRun = {
+        id,
+        name: summary.name,
+        addedAt: existing?.addedAt ?? Date.now(),
+        points: existing?.points ?? null,
+        stravaId: summary.stravaId,
+        date: summary.date,
+        distanceKm: summary.distanceKm,
+        durationS: summary.durationS,
+        elevationGainM: summary.elevationGainM,
+        avgHeartRate: summary.avgHeartRate,
+        avgWatts: summary.avgWatts,
+      };
+      store.put(run);
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/** Upgrades a summary-only row in place once its full points have been
+ * lazily fetched, so they're not re-fetched next time. */
+export async function setStoredRunPoints(id: string, points: GpxPoint[]): Promise<void> {
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const getReq = store.get(id);
+    getReq.onsuccess = () => {
+      const existing = getReq.result as StoredRun | undefined;
+      if (existing) store.put({ ...existing, points });
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 export async function listStoredRuns(): Promise<StoredRun[]> {

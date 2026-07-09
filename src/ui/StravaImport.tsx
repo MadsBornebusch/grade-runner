@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import type { GpxPoint } from "../gpx/pipeline";
+import { fetchStravaActivity } from "./stravaClient";
 import { useStravaSession } from "./useStravaSession";
 
 interface StravaActivitySummary {
@@ -10,20 +11,8 @@ interface StravaActivitySummary {
   movingTimeS: number;
 }
 
-/** Same fields as GpxPoint, but as it comes over the wire -- `time` is an
- * ISO string (JSON has no Date type), parsed back to a Date before this
- * reaches any caller. */
-interface WireGpxPoint {
-  lat: number;
-  lon: number;
-  ele: number | null;
-  time: string | null;
-  hr: number | null;
-  power: number | null;
-}
-
 interface StravaImportProps {
-  onImport: (points: GpxPoint[], name: string) => void;
+  onImport: (points: GpxPoint[], name: string, stravaId?: number) => void;
 }
 
 /** Accepts a bare numeric ID or a full Strava URL like
@@ -93,14 +82,8 @@ export function StravaImport({ onImport }: StravaImportProps) {
     async (id: string, fallbackName: string) => {
       setError(null);
       try {
-        const res = await fetch(`/api/strava/activity?id=${encodeURIComponent(id)}`);
-        const body = await res.json();
-        if (!res.ok) throw new Error(body.error ?? "Failed to import this activity.");
-        const points: GpxPoint[] = (body.points as WireGpxPoint[]).map((p) => ({
-          ...p,
-          time: p.time ? new Date(p.time) : null,
-        }));
-        onImport(points, body.name ?? fallbackName);
+        const { name, points } = await fetchStravaActivity(Number(id));
+        onImport(points, name ?? fallbackName, Number(id));
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to import this activity.");
       }

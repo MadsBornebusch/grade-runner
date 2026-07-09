@@ -1,20 +1,55 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { GpxPoint } from "../gpx/pipeline";
 import { parseGpx, runPipeline } from "../gpx/pipeline";
 import { analyzeRun } from "../model/analysis";
-import { buildEffortTrendPoints, fitTauAcrossRaces, type MultiRaceTauFitResult } from "../model/pacingFit";
-import { addStoredRun, deleteStoredRun, listStoredRuns, type StoredRun } from "../storage/runLibrary";
+import { buildEffortTrendPoints, fitTauAcrossRaces, type EffortTrendPoint, type MultiRaceTauFitResult } from "../model/pacingFit";
+import { suggestRunsForFit } from "../model/suggestRuns";
+import { filterRunsSinceDate, shouldFetchNextBackfillPage, toStoredRunSummaryInput, type BackfillPage } from "../model/stravaBackfill";
+import {
+  addStoredRun,
+  deleteStoredRun,
+  listStoredRuns,
+  setStoredRunPoints,
+  upsertStoredRunSummary,
+  type StoredRun,
+} from "../storage/runLibrary";
 import type { FormInputs } from "./formInputs";
 import { StravaImport } from "./StravaImport";
+import { fetchStravaActivity } from "./stravaClient";
+import { useStravaSession } from "./useStravaSession";
 
 interface RunLibraryPanelProps {
   formInputs: FormInputs;
   onApplyTau: (tauMin: number) => void;
 }
 
-/** Distance/duration summary for the run list -- cheap, so recomputed on
- * every render rather than cached alongside the stored points. */
-function summarize(points: StoredRun["points"]) {
-  const course = runPipeline(points);
+const BACKFILL_MAX_PAGES = 50;
+const BACKFILL_PER_PAGE = 100;
+const BACKFILL_PAGE_DELAY_MS = 300;
+/** Above this many summary-only runs selected for a fit, fetching full GPS
+ * data would mean too many Strava API calls to do inline -- see PLAN.md §12. */
+const MAX_LAZY_FETCH = 8;
+
+function oneYearAgoDateInput(): string {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Summary-only rows (points === null) read their distance/duration
+ * straight off the stored Strava summary -- no pipeline run needed, and
+ * it's the only data available anyway until points are fetched. Rows with
+ * full points (manual uploads, or already-fetched Strava runs) still go
+ * through the pipeline, since that's the only source of truth for those. */
+function summarize(run: StoredRun) {
+  if (run.points === null) {
+    return {
+      distanceKm: run.distanceKm ?? 0,
+      durationH: run.durationS !== undefined ? run.durationS / 3600 : null,
+      hasTimestamps: run.durationS !== undefined,
+    };
+  }
+  const course = runPipeline(run.points);
   const durationH = course.hasTimestamps
     ? course.segments.reduce((sum, s) => sum + (s.dtS ?? 0), 0) / 3600
     : null;
@@ -22,11 +57,20 @@ function summarize(points: StoredRun["points"]) {
 }
 
 export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps) {
+  const { connected: stravaConnected } = useStravaSession();
   const [runs, setRuns] = useState<StoredRun[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [fitResult, setFitResult] = useState<MultiRaceTauFitResult | null>(null);
   const [fitRan, setFitRan] = useState(false);
+  const [fitting, setFitting] = useState(false);
+
+  const [backfillFrom, setBackfillFrom] = useState(oneYearAgoDateInput);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillProgress, setBackfillProgress] = useState<string | null>(null);
+
+  const [deselectedSuggestionIds, setDeselectedSuggestionIds] = useState<Set<string>>(new Set());
+  const [fetchingSuggestions, setFetchingSuggestions] = useState(false);
 
   const refresh = useCallback(() => {
     listStoredRuns().then(setRuns).catch((err) => setError(String(err)));
@@ -74,6 +118,38 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
     refresh();
   };
 
+  const runBackfill = useCallback(async () => {
+    setBackfilling(true);
+    setError(null);
+    const targetStartDate = new Date(backfillFrom);
+    let page = 1;
+    let imported = 0;
+    try {
+      for (;;) {
+        setBackfillProgress(`Fetching page ${page}…`);
+        const res = await fetch(`/api/strava/activities?page=${page}&per_page=${BACKFILL_PER_PAGE}`);
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error ?? "Backfill failed.");
+        const pageResult = body as BackfillPage;
+
+        for (const run of filterRunsSinceDate(pageResult.runs, targetStartDate)) {
+          await upsertStoredRunSummary(toStoredRunSummaryInput(run));
+          imported++;
+        }
+
+        if (!shouldFetchNextBackfillPage(pageResult, page, targetStartDate, BACKFILL_MAX_PAGES)) break;
+        page++;
+        await new Promise((r) => setTimeout(r, BACKFILL_PAGE_DELAY_MS));
+      }
+      setBackfillProgress(`Imported ${imported} run${imported === 1 ? "" : "s"} since ${backfillFrom}.`);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Backfill failed.");
+    } finally {
+      setBackfilling(false);
+    }
+  }, [backfillFrom, refresh]);
+
   const ceilingParams = {
     vo2MaxMlPerKgPerMin: formInputs.vo2MaxMlPerKgPerMin,
     lt2Fraction: formInputs.lt2Fraction,
@@ -83,12 +159,38 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
     durabilityDriftPerHour: formInputs.durabilityDriftPerHour,
   };
 
-  const runFit = () => {
-    const races = runs
-      .filter((r) => selected.has(r.id))
-      .map((r) => {
-        const course = runPipeline(r.points);
-        if (!course.hasTimestamps) return null;
+  /** Fetches and persists full points for a summary-only row; a no-op if
+   * they're already present. */
+  const ensurePoints = async (run: StoredRun): Promise<GpxPoint[]> => {
+    if (run.points !== null) return run.points;
+    if (run.stravaId === undefined) return [];
+    const { points } = await fetchStravaActivity(run.stravaId);
+    await setStoredRunPoints(run.id, points);
+    return points;
+  };
+
+  const runFit = async () => {
+    const selectedRuns = runs.filter((r) => selected.has(r.id));
+    const unfetchedCount = selectedRuns.filter((r) => r.points === null).length;
+    if (unfetchedCount > MAX_LAZY_FETCH) {
+      const estimatedMinutes = Math.ceil((unfetchedCount * 2 * 9) / 60);
+      setError(
+        `${unfetchedCount} selected runs don't have their full GPS data yet -- fetching all of them would take ` +
+          `roughly ${estimatedMinutes} minutes and a large share of Strava's daily rate limit. Narrow your ` +
+          `selection to ${MAX_LAZY_FETCH} or fewer summary-only runs (try the suggested runs below, or the ` +
+          `filters in the Strava import panel), then fit again.`,
+      );
+      return;
+    }
+
+    setFitting(true);
+    setError(null);
+    try {
+      const races: EffortTrendPoint[][] = [];
+      for (const run of selectedRuns) {
+        const points = await ensurePoints(run);
+        const course = runPipeline(points);
+        if (!course.hasTimestamps) continue;
         const analysis = analyzeRun(course.segments, {
           bodyMassKg: formInputs.bodyMassKg,
           ceilingParams,
@@ -98,12 +200,53 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
           walkMaxMs: formInputs.walkMaxMs,
           altitudeAdjustment: formInputs.altitudeAdjustment,
         });
-        return buildEffortTrendPoints(course.segments, analysis.segments, formInputs.altitudeAdjustment);
-      })
-      .filter((r): r is NonNullable<typeof r> => r !== null);
+        races.push(buildEffortTrendPoints(course.segments, analysis.segments, formInputs.altitudeAdjustment));
+      }
+      setFitResult(fitTauAcrossRaces(races, ceilingParams));
+      setFitRan(true);
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fit failed.");
+    } finally {
+      setFitting(false);
+    }
+  };
 
-    setFitResult(fitTauAcrossRaces(races, ceilingParams));
-    setFitRan(true);
+  const suggestions = useMemo(() => suggestRunsForFit(runs), [runs]);
+  const approvedSuggestions = useMemo(() => {
+    // A run can appear in both lists (e.g. a short library with nothing
+    // truly long) -- dedupe by id before fetching.
+    const byId = new Map(
+      [...suggestions.vo2max, ...suggestions.durability]
+        .filter((r) => !deselectedSuggestionIds.has(r.id))
+        .map((r) => [r.id, r]),
+    );
+    return [...byId.values()];
+  }, [suggestions, deselectedSuggestionIds]);
+
+  const fetchApprovedSuggestions = async () => {
+    setFetchingSuggestions(true);
+    setError(null);
+    try {
+      for (const run of approvedSuggestions) {
+        await ensurePoints(run);
+      }
+      setDeselectedSuggestionIds(new Set());
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch suggested runs.");
+    } finally {
+      setFetchingSuggestions(false);
+    }
+  };
+
+  const toggleSuggestion = (id: string) => {
+    setDeselectedSuggestionIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   const selectedCount = selected.size;
@@ -133,15 +276,96 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
           }}
         />
       </label>
-      <StravaImport onImport={(points, name) => addStoredRun(name, points).then(refresh)} />
+      <StravaImport onImport={(points, name, stravaId) => addStoredRun(name, points, stravaId).then(refresh)} />
+
+      {stravaConnected && (
+        <>
+          <div className="strava-import__link-row">
+            <span>Backfill runs since</span>
+            <input type="date" value={backfillFrom} onChange={(e) => setBackfillFrom(e.target.value)} />
+            <button type="button" className="fatox-add" onClick={() => void runBackfill()} disabled={backfilling}>
+              {backfilling ? "Backfilling…" : "Backfill"}
+            </button>
+          </div>
+          <p className="field-group-help">
+            Pulls a lightweight summary (distance, duration, elevation, avg heart rate/power) for every run in this
+            range -- no full GPS data yet, so this stays cheap regardless of how far back you go. Full data for a
+            specific run is only fetched once you actually select it below.
+          </p>
+          {backfillProgress && <p className="field-group-note">{backfillProgress}</p>}
+        </>
+      )}
+
       {error && <p className="gpx-upload__error">{error}</p>}
+
+      {(suggestions.vo2max.length > 0 || suggestions.durability.length > 0) && (
+        <div className="run-library__suggestions">
+          <p className="field-group-help">
+            Suggested from the summaries above -- short, high-intensity runs are what actually constrains VO2max;
+            your longest runs are what the fatigue-fade fit needs (see PLAN.md §12). Uncheck any you don't want,
+            then fetch full data for the rest.
+          </p>
+          {suggestions.vo2max.length > 0 && (
+            <>
+              <p className="field-group-note">Likely hard efforts (VO2max):</p>
+              <div className="fatox-rows">
+                {suggestions.vo2max.map((run) => (
+                  <label key={run.id} className="run-library-row">
+                    <input
+                      type="checkbox"
+                      checked={!deselectedSuggestionIds.has(run.id)}
+                      onChange={() => toggleSuggestion(run.id)}
+                    />
+                    <span className="run-library-row__label">
+                      {run.name} &middot; {(run.distanceKm ?? 0).toFixed(1)} km &middot;{" "}
+                      {((run.durationS ?? 0) / 60).toFixed(0)} min
+                      {run.avgWatts ? ` · ${run.avgWatts.toFixed(0)} W avg` : ""}
+                      {!run.avgWatts && run.avgHeartRate ? ` · ${run.avgHeartRate.toFixed(0)} bpm avg` : ""}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
+          {suggestions.durability.length > 0 && (
+            <>
+              <p className="field-group-note">Longest runs (durability):</p>
+              <div className="fatox-rows">
+                {suggestions.durability.map((run) => (
+                  <label key={run.id} className="run-library-row">
+                    <input
+                      type="checkbox"
+                      checked={!deselectedSuggestionIds.has(run.id)}
+                      onChange={() => toggleSuggestion(run.id)}
+                    />
+                    <span className="run-library-row__label">
+                      {run.name} &middot; {(run.distanceKm ?? 0).toFixed(1)} km &middot;{" "}
+                      {((run.durationS ?? 0) / 3600).toFixed(1)} h
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
+          <button
+            type="button"
+            className="fatox-add"
+            onClick={() => void fetchApprovedSuggestions()}
+            disabled={fetchingSuggestions || approvedSuggestions.length === 0}
+          >
+            {fetchingSuggestions
+              ? "Fetching…"
+              : `Fetch ${approvedSuggestions.length} approved run${approvedSuggestions.length === 1 ? "" : "s"}`}
+          </button>
+        </div>
+      )}
 
       {runs.length === 0 && <p className="placeholder">No runs stored yet.</p>}
 
       {runs.length > 0 && (
         <div className="fatox-rows">
           {runs.map((run) => {
-            const summary = summarize(run.points);
+            const summary = summarize(run);
             return (
               <div key={run.id} className="run-library-row">
                 <input
@@ -154,6 +378,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
                   {run.name} &middot; {summary.distanceKm.toFixed(1)} km
                   {summary.durationH !== null && ` · ${summary.durationH.toFixed(1)} h`}
                   {!summary.hasTimestamps && " (no timestamps -- can't be used for a tau fit)"}
+                  {run.points === null && summary.hasTimestamps && " (summary only)"}
                 </span>
                 <button type="button" className="fatox-row__remove" onClick={() => remove(run.id)} aria-label="Remove run">
                   ×
@@ -165,8 +390,8 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
       )}
 
       {runs.length > 0 && (
-        <button type="button" className="fatox-add" onClick={runFit} disabled={selectedCount === 0}>
-          Fit tau from {selectedCount} selected run{selectedCount === 1 ? "" : "s"}
+        <button type="button" className="fatox-add" onClick={() => void runFit()} disabled={selectedCount === 0 || fitting}>
+          {fitting ? "Fitting…" : `Fit tau from ${selectedCount} selected run${selectedCount === 1 ? "" : "s"}`}
         </button>
       )}
 

@@ -9,6 +9,9 @@ interface StravaActivitySummary {
   start_date: string;
   distance: number;
   moving_time: number;
+  total_elevation_gain: number;
+  average_heartrate?: number;
+  average_watts?: number;
 }
 
 const RUN_SPORT_TYPES = new Set(["Run", "TrailRun", "VirtualRun"]);
@@ -44,6 +47,9 @@ export default handleErrors(async (req: IncomingMessage, res: ServerResponse) =>
       date: a.start_date,
       distanceKm: a.distance / 1000,
       movingTimeS: a.moving_time,
+      elevationGainM: a.total_elevation_gain,
+      avgHeartRate: a.average_heartrate ?? null,
+      avgWatts: a.average_watts ?? null,
     }));
   // A full page of raw activities (before the run-type filter) means there's
   // likely another page; a short page means we've hit the end of history --
