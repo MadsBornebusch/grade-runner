@@ -74,6 +74,18 @@ describe("suggestRunsForFit", () => {
     expect(ids).not.toContain("rolling");
   });
 
+  it("always keeps the single longest run even when diversifying the rest by descent", () => {
+    // The longest run is usually the most responsive for the tau fit -- it
+    // should never be dropped in favor of descent variety among shorter
+    // (but still long-enough) candidates.
+    const longest = makeRun({ id: "longest", durationS: 10 * 3600, distanceKm: 80, elevationGainM: 500 });
+    const others = Array.from({ length: 5 }, (_, i) =>
+      makeRun({ id: `other${i}`, durationS: 4 * 3600, distanceKm: 40, elevationGainM: i * 400 }),
+    );
+    const suggestions = suggestRunsForFit([longest, ...others], 3);
+    expect(suggestions.durability.map((r) => r.id)).toContain("longest");
+  });
+
   it("caps each list at the requested candidate count", () => {
     const runs = Array.from({ length: 10 }, (_, i) =>
       makeRun({ id: `r${i}`, durationS: 25 * 60 + i, avgHeartRate: 150 + i }),

@@ -68,10 +68,13 @@ function descentPerKmProxy(run: StoredRun): number {
 
 /** Evenly-spaced picks across a sorted array, so the result spans the full
  * range instead of clustering at one end. Dedupes by reference in case
- * rounding lands on the same index twice. */
+ * rounding lands on the same index twice. A single requested pick takes the
+ * far end of the range (the item most different from whatever else was
+ * already picked alongside it), not an arbitrary midpoint. */
 function evenlySpacedPicks<T>(items: T[], count: number): T[] {
   if (items.length === 0 || count <= 0) return [];
   if (items.length <= count) return items;
+  if (count === 1) return [items[items.length - 1]];
   const picks: T[] = [];
   for (let i = 0; i < count; i++) {
     const item = items[Math.round((i * (items.length - 1)) / (count - 1))];
@@ -89,11 +92,16 @@ export function suggestRunsForFit(runs: StoredRun[], candidateCount = DEFAULT_CA
     .slice(0, candidateCount);
 
   const longEnough = unfetched.filter((r) => (r.durationS ?? 0) >= DURABILITY_MIN_DURATION_S);
-  const longestPool = [...longEnough]
-    .sort((a, b) => (b.durationS ?? 0) - (a.durationS ?? 0))
-    .slice(0, candidateCount * DURABILITY_POOL_MULTIPLIER);
-  const byDescent = [...longestPool].sort((a, b) => descentPerKmProxy(a) - descentPerKmProxy(b));
-  const durability = evenlySpacedPicks(byDescent, candidateCount);
+  const byDurationDesc = [...longEnough].sort((a, b) => (b.durationS ?? 0) - (a.durationS ?? 0));
+  const pool = byDurationDesc.slice(0, candidateCount * DURABILITY_POOL_MULTIPLIER);
+  // The single longest run is always kept -- it's usually the most
+  // responsive for the tau fit (PLAN.md §12/§13) -- and only the *remaining*
+  // slots get diversified by descent, so descent variety never comes at the
+  // cost of dropping the most duration-informative run.
+  const durability =
+    pool.length === 0
+      ? []
+      : [pool[0], ...evenlySpacedPicks([...pool.slice(1)].sort((a, b) => descentPerKmProxy(a) - descentPerKmProxy(b)), candidateCount - 1)];
 
   return { vo2max, durability };
 }

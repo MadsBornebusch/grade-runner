@@ -42,6 +42,9 @@ const BACKFILL_PAGE_DELAY_MS = 300;
 const MAX_LAZY_FETCH = 8;
 
 const DEFAULT_HALF_LIFE_DAYS = 75;
+/** Only the strongest few estimates are shown -- see vo2MaxEstimates below
+ * for why sorting by estimate descending is itself the intensity filter. */
+const MAX_VO2MAX_ESTIMATES_SHOWN = 3;
 
 function oneYearAgoDateInput(): string {
   const d = new Date();
@@ -284,7 +287,13 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onAddVo2MaxEntry }: Ru
   // PLAN.md §12: candidate VO2max estimates from already-fetched runs whose
   // duration falls in the near-maximal-effort window vo2MaxEstimate.ts can
   // use. Surfaced for the user to review and add, not auto-applied -- GPS
-  // data alone can't confirm a run was actually paced near-maximally.
+  // data alone can't confirm a run was actually paced near-maximally. An
+  // easy run in this duration window can only *underestimate* (low observed
+  // power -> low effort fraction -> low estimate); a genuine hard effort
+  // recovers something close to the true value -- so sorting by estimate
+  // descending and showing only the top few naturally surfaces the runs
+  // most likely to have actually been run near-maximally, without needing a
+  // separate intensity signal.
   const vo2MaxEstimates = useMemo(() => {
     const estimateCeilingParams = {
       vo2MaxMlPerKgPerMin: resolveVo2Max(formInputs.vo2MaxHistory),
@@ -312,12 +321,14 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onAddVo2MaxEntry }: Ru
       if (estimateMlPerKgPerMin === null) continue;
       results.push({ run, estimateMlPerKgPerMin });
     }
-    return results;
+    return results.sort((a, b) => b.estimateMlPerKgPerMin - a.estimateMlPerKgPerMin).slice(0, MAX_VO2MAX_ESTIMATES_SHOWN);
   }, [dedupedRuns, formInputs]);
 
+  const [addedVo2MaxRunIds, setAddedVo2MaxRunIds] = useState<Set<string>>(new Set());
   const addVo2MaxEstimate = (run: StoredRun, estimateMlPerKgPerMin: number) => {
     const date = runDate(run)?.toISOString().slice(0, 10) ?? new Date().toISOString().slice(0, 10);
     onAddVo2MaxEntry({ date, value: Math.round(estimateMlPerKgPerMin), source: "race" });
+    setAddedVo2MaxRunIds((prev) => new Set(prev).add(run.id));
   };
 
   /** Fetches and persists full points for a summary-only row; a no-op if
@@ -628,27 +639,33 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onAddVo2MaxEntry }: Ru
         <div className="run-library__vo2max-estimates">
           <p className="field-group-note">Estimated VO2max from recent hard efforts</p>
           <p className="field-group-help">
-            Derived from each run's own average effort relative to the current ceiling model (PLAN.md §12) -- only
-            shown for already-fetched runs long enough to trust as a genuine near-maximal effort (roughly 20-90
-            minutes). This assumes the run really was paced near-maximally for its length; an easy run of that
-            duration would just underestimate it, so review before adding. Accepted entries land in your VO2max
-            history as a "race"-sourced measurement -- weighted less than a lab test, more than a bare guess.
+            Derived from each run's own average effort relative to the current ceiling model (PLAN.md §12), among
+            already-fetched runs long enough to trust as a genuine near-maximal effort (roughly 20-90 minutes). Only
+            the {MAX_VO2MAX_ESTIMATES_SHOWN} highest estimates are shown, highest first: an easy run in this window
+            can only <em>underestimate</em> VO2max, so the strongest readings are the ones most likely to reflect a
+            real hard effort rather than a recovery jog that happens to be this long. Review before adding --
+            accepted entries land in your VO2max history as a "race"-sourced measurement, weighted less than a lab
+            test but more than a bare guess.
           </p>
           <div className="fatox-rows">
-            {vo2MaxEstimates.map(({ run, estimateMlPerKgPerMin }) => (
-              <div key={run.id} className="run-library-row">
-                <span className="run-library-row__label">
-                  {run.name} &middot; est. VO2max {estimateMlPerKgPerMin.toFixed(1)} ml/kg/min
-                </span>
-                <button
-                  type="button"
-                  className="fatox-add"
-                  onClick={() => addVo2MaxEstimate(run, estimateMlPerKgPerMin)}
-                >
-                  Add to history
-                </button>
-              </div>
-            ))}
+            {vo2MaxEstimates.map(({ run, estimateMlPerKgPerMin }) => {
+              const added = addedVo2MaxRunIds.has(run.id);
+              return (
+                <div key={run.id} className="run-library-row">
+                  <span className="run-library-row__label">
+                    {run.name} &middot; est. VO2max {estimateMlPerKgPerMin.toFixed(1)} ml/kg/min
+                  </span>
+                  <button
+                    type="button"
+                    className="fatox-add"
+                    onClick={() => addVo2MaxEstimate(run, estimateMlPerKgPerMin)}
+                    disabled={added}
+                  >
+                    {added ? "Added" : "Add to history"}
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
