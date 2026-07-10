@@ -20,7 +20,14 @@ import { SplitTable } from "./ui/SplitTable";
 import { ResultsSummary } from "./ui/ResultsSummary";
 import { AnalysisSummary } from "./ui/AnalysisSummary";
 import { buildAnalysisChartPoints, buildChartPoints } from "./ui/chartData";
-import { loadFormInputs, resolveSubstrateAnchors, resolveVo2Max, saveFormInputs, type FormInputs } from "./ui/formInputs";
+import {
+  loadFormInputs,
+  resolveSubstrateAnchors,
+  resolveVo2Max,
+  saveFormInputs,
+  type FormInputs,
+  type Vo2MaxEntry,
+} from "./ui/formInputs";
 import { useStravaSession } from "./ui/useStravaSession";
 import "./App.css";
 
@@ -277,6 +284,9 @@ function App() {
                 <RunLibraryPanel
                   formInputs={formInputs}
                   onApplyTau={(tauMin) => setFormInputs({ ...formInputs, tauMin })}
+                  onAddVo2MaxEntry={(entry: Vo2MaxEntry) =>
+                    setFormInputs({ ...formInputs, vo2MaxHistory: [...formInputs.vo2MaxHistory, entry] })
+                  }
                 />
               </>
             ),

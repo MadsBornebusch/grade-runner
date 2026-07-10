@@ -13,6 +13,7 @@ import { suggestRunsForFit } from "../model/suggestRuns";
 import { dedupeStoredRuns } from "../model/dedupeRuns";
 import { filterRunsSinceDate, shouldFetchNextBackfillPage, toStoredRunSummaryInput, type BackfillPage } from "../model/stravaBackfill";
 import { computeTauDiagnostic, type RaceDiagnosticPoint } from "../model/tauDiagnostic";
+import { estimateVo2MaxFromRun } from "../model/vo2MaxEstimate";
 import {
   addStoredRun,
   clearStoredRuns,
@@ -22,7 +23,7 @@ import {
   upsertStoredRunSummary,
   type StoredRun,
 } from "../storage/runLibrary";
-import { resolveVo2Max, type FormInputs } from "./formInputs";
+import { resolveVo2Max, type FormInputs, type Vo2MaxEntry } from "./formInputs";
 import { StravaImport } from "./StravaImport";
 import { fetchStravaActivity } from "./stravaClient";
 import { useStravaSession } from "./useStravaSession";
@@ -30,6 +31,7 @@ import { useStravaSession } from "./useStravaSession";
 interface RunLibraryPanelProps {
   formInputs: FormInputs;
   onApplyTau: (tauMin: number) => void;
+  onAddVo2MaxEntry: (entry: Vo2MaxEntry) => void;
 }
 
 const BACKFILL_MAX_PAGES = 50;
@@ -77,7 +79,7 @@ function summarize(run: StoredRun) {
   return { distanceKm: course.totalDistance3D / 1000, durationH, hasTimestamps: course.hasTimestamps };
 }
 
-export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps) {
+export function RunLibraryPanel({ formInputs, onApplyTau, onAddVo2MaxEntry }: RunLibraryPanelProps) {
   const { connected: stravaConnected } = useStravaSession();
   const [runs, setRuns] = useState<StoredRun[]>([]);
   // Runs with full GPS data already downloaded (points !== null) are selected
@@ -278,6 +280,45 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
     }
     return computeTauDiagnostic(points);
   }, [dedupedRuns, formInputs]);
+
+  // PLAN.md §12: candidate VO2max estimates from already-fetched runs whose
+  // duration falls in the near-maximal-effort window vo2MaxEstimate.ts can
+  // use. Surfaced for the user to review and add, not auto-applied -- GPS
+  // data alone can't confirm a run was actually paced near-maximally.
+  const vo2MaxEstimates = useMemo(() => {
+    const estimateCeilingParams = {
+      vo2MaxMlPerKgPerMin: resolveVo2Max(formInputs.vo2MaxHistory),
+      lt2Fraction: formInputs.lt2Fraction,
+      f0: formInputs.f0,
+      fInf: formInputs.fInf,
+      tauMin: formInputs.tauMin,
+      durabilityDriftPerHour: formInputs.durabilityDriftPerHour,
+    };
+    const results: { run: StoredRun; estimateMlPerKgPerMin: number }[] = [];
+    for (const run of dedupedRuns) {
+      if (run.points === null) continue;
+      const course = runPipeline(run.points);
+      if (!course.hasTimestamps) continue;
+      const analysis = analyzeRun(course.segments, {
+        bodyMassKg: formInputs.bodyMassKg,
+        ceilingParams: estimateCeilingParams,
+        fueling: { intakeGPerH: formInputs.intakeGPerH, gutMaxGPerH: formInputs.gutMaxGPerH },
+        glycogenStoreG: formInputs.glycogenStoreG,
+        reserveG: formInputs.reserveG,
+        walkMaxMs: formInputs.walkMaxMs,
+        altitudeAdjustment: formInputs.altitudeAdjustment,
+      });
+      const estimateMlPerKgPerMin = estimateVo2MaxFromRun(analysis, estimateCeilingParams);
+      if (estimateMlPerKgPerMin === null) continue;
+      results.push({ run, estimateMlPerKgPerMin });
+    }
+    return results;
+  }, [dedupedRuns, formInputs]);
+
+  const addVo2MaxEstimate = (run: StoredRun, estimateMlPerKgPerMin: number) => {
+    const date = runDate(run)?.toISOString().slice(0, 10) ?? new Date().toISOString().slice(0, 10);
+    onAddVo2MaxEntry({ date, value: Math.round(estimateMlPerKgPerMin), source: "race" });
+  };
 
   /** Fetches and persists full points for a summary-only row; a no-op if
    * they're already present. */
@@ -581,6 +622,35 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
             </p>
           )}
         </>
+      )}
+
+      {vo2MaxEstimates.length > 0 && (
+        <div className="run-library__vo2max-estimates">
+          <p className="field-group-note">Estimated VO2max from recent hard efforts</p>
+          <p className="field-group-help">
+            Derived from each run's own average effort relative to the current ceiling model (PLAN.md §12) -- only
+            shown for already-fetched runs long enough to trust as a genuine near-maximal effort (roughly 20-90
+            minutes). This assumes the run really was paced near-maximally for its length; an easy run of that
+            duration would just underestimate it, so review before adding. Accepted entries land in your VO2max
+            history as a "race"-sourced measurement -- weighted less than a lab test, more than a bare guess.
+          </p>
+          <div className="fatox-rows">
+            {vo2MaxEstimates.map(({ run, estimateMlPerKgPerMin }) => (
+              <div key={run.id} className="run-library-row">
+                <span className="run-library-row__label">
+                  {run.name} &middot; est. VO2max {estimateMlPerKgPerMin.toFixed(1)} ml/kg/min
+                </span>
+                <button
+                  type="button"
+                  className="fatox-add"
+                  onClick={() => addVo2MaxEstimate(run, estimateMlPerKgPerMin)}
+                >
+                  Add to history
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       <div className="run-library__diagnostic">

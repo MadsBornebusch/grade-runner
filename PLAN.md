@@ -605,10 +605,15 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    (distance, duration, elevation, avg HR/power) for a whole date range in
    ~15-25 requests, not 300-600 — full GPS points are only fetched lazily,
    once a run is actually selected. `suggestRunsForFit` ranks summary-only
-   runs by likely usefulness (short+intense for VO2max, longest for
-   durability) so a handful of genuinely useful runs can be approved and
-   fetched without scanning hundreds of rows or risking Strava's rate limit.
-   See `src/model/stravaBackfill.ts`, `src/model/suggestRuns.ts`,
+   runs by likely usefulness: the VO2max bucket is restricted to the
+   20-90min window `vo2MaxEstimate.ts` can actually use (see stage 3 below),
+   and the durability bucket requires at least an hour (shorter runs can't
+   meaningfully move an ultra-scale tau — see the fit's own "unresponsive"
+   flag) and diversifies by descent-per-km proxy instead of just picking the
+   longest few, since descent variety is what stage 4's diagnostic needs. A
+   handful of genuinely useful runs can be approved and fetched without
+   scanning hundreds of rows or risking Strava's rate limit. See
+   `src/model/stravaBackfill.ts`, `src/model/suggestRuns.ts`,
    `RunLibraryPanel.tsx`.
 2. **Time-decay weighting in the tau fit — built.** `fitTauAcrossRaces` takes
    an optional `{raceDates, halfLifeDays, now}`; each race's contribution to
@@ -616,19 +621,31 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    75 days, adjustable in the UI. Only the multi-race fit needed this — a
    single race has no other race to be "more recent than." See
    `src/model/pacingFit.ts`.
-3. **Dated, sourced VO2max history — built** (manual entries only; the
-   "recent Strava-derived performance" auto-blending mentioned below is
-   deferred). `FormInputs.vo2MaxHistory` replaces the old scalar;
-   `resolveVo2Max` combines entries via inverse-variance (by source
-   confidence) × recency (180-day half-life — VO2max moves over a training
-   macrocycle, not day to day) into the single number `ceilingParams` needs.
-   `loadFormInputs` migrates an existing pre-history save into one manual
-   entry. See `src/ui/formInputs.ts`, `src/ui/InputsPanel.tsx`.
+3. **Dated, sourced VO2max history — built**, including auto-derived
+   estimates from a recent hard effort. `FormInputs.vo2MaxHistory` replaces
+   the old scalar; `resolveVo2Max` combines entries via inverse-variance (by
+   source confidence) × recency (180-day half-life — VO2max moves over a
+   training macrocycle, not day to day) into the single number
+   `ceilingParams` needs. `loadFormInputs` migrates an existing pre-history
+   save into one manual entry. See `src/ui/formInputs.ts`,
+   `src/ui/InputsPanel.tsx`.
 
-   *Not yet built*: auto-deriving a VO2max estimate from a recent hard
-   Strava effort (e.g. a VDOT-style formula, or inverting the app's own
-   ceiling model) to feed the resolver alongside manual entries — a distinct,
-   sizable piece of new estimation logic, worth its own pass.
+   `src/model/vo2MaxEstimate.ts` derives a candidate estimate from a single
+   already-fetched run by inverting the app's own ceiling curve, rather than
+   an external formula (e.g. Daniels-Gilbert) never validated against this
+   app's Minetti-based cost model: `ceilingPower` is exactly linear in
+   `vo2MaxMlPerKgPerMin`, so `avgEffortFraction` (from `analyzeRun`, computed
+   against whatever vo2max is currently assumed) times that assumed vo2max
+   recovers the true one — invariant to what was assumed, as long as the run
+   was genuinely paced near-maximally for its own duration. Restricted to a
+   20-90 minute window (below it the model's duration curve is flat at the
+   LT2 cap; above it a run is endurance-paced, not near-maximal — shared with
+   `suggestRunsForFit`'s VO2max bucket, which was previously an inconsistent
+   120-minute cutoff despite its own comment citing 2-15min trials).
+   Surfaced in `RunLibraryPanel` as a reviewable suggestion (adds a
+   "race"-sourced history entry), never auto-applied — GPS data alone can't
+   confirm a run was actually run near-maximally, only that its duration
+   makes the assumption defensible.
 4. **Diagnostic: does descent load actually predict this athlete's own
    tau? — built.** Reuses `fitTauMinutes` and `avgEffortFraction`;
    `totalElevationLoss` added to the pipeline (mirroring the existing
