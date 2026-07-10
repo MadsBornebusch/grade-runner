@@ -15,6 +15,7 @@ import { filterRunsSinceDate, shouldFetchNextBackfillPage, toStoredRunSummaryInp
 import { computeTauDiagnostic, type RaceDiagnosticPoint } from "../model/tauDiagnostic";
 import {
   addStoredRun,
+  clearStoredRuns,
   deleteStoredRun,
   listStoredRuns,
   setStoredRunPoints,
@@ -79,7 +80,11 @@ function summarize(run: StoredRun) {
 export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps) {
   const { connected: stravaConnected } = useStravaSession();
   const [runs, setRuns] = useState<StoredRun[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Runs with full GPS data already downloaded (points !== null) are selected
+  // for the fit by default -- no manual scrolling/checking needed for the
+  // common case. This map only records *departures* from that default (a
+  // user unchecking a fetched run, or opting a summary-only one in).
+  const [selectionOverrides, setSelectionOverrides] = useState<Map<string, boolean>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [fitResult, setFitResult] = useState<MultiRaceTauFitResult | null>(null);
   const [fitRan, setFitRan] = useState(false);
@@ -146,23 +151,48 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
     [refresh],
   );
 
-  const toggleSelected = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+  const isSelected = useCallback(
+    (run: StoredRun) => selectionOverrides.get(run.id) ?? run.points !== null,
+    [selectionOverrides],
+  );
+
+  const toggleSelected = (run: StoredRun) => {
+    setSelectionOverrides((prev) => {
+      const next = new Map(prev);
+      next.set(run.id, !isSelected(run));
       return next;
     });
   };
 
   const remove = async (id: string) => {
     await deleteStoredRun(id);
-    setSelected((prev) => {
-      const next = new Set(prev);
+    setSelectionOverrides((prev) => {
+      const next = new Map(prev);
       next.delete(id);
       return next;
     });
     refresh();
+  };
+
+  const [clearing, setClearing] = useState(false);
+  const clearAll = async () => {
+    if (!window.confirm("Delete every stored run? This clears the whole local run library and can't be undone.")) {
+      return;
+    }
+    setClearing(true);
+    setError(null);
+    try {
+      await clearStoredRuns();
+      setSelectionOverrides(new Map());
+      setFitResult(null);
+      setFitRan(false);
+      setDeselectedSuggestionIds(new Set());
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to clear the run library.");
+    } finally {
+      setClearing(false);
+    }
   };
 
   const runBackfill = useCallback(async () => {
@@ -260,7 +290,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
   };
 
   const runFit = async () => {
-    const selectedRuns = dedupedRuns.filter((r) => selected.has(r.id));
+    const selectedRuns = dedupedRuns.filter(isSelected);
     const unfetchedCount = selectedRuns.filter((r) => r.points === null).length;
     if (unfetchedCount > MAX_LAZY_FETCH) {
       const estimatedMinutes = Math.ceil((unfetchedCount * 2 * 9) / 60);
@@ -341,12 +371,17 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
     });
   };
 
-  const selectedCount = selected.size;
+  const selectedCount = dedupedRuns.filter(isSelected).length;
 
   return (
     <div className="chart">
       <div className="chart__header">
         <h3>Run library</h3>
+        {dedupedRuns.length > 0 && (
+          <button type="button" className="chart__reset-zoom" onClick={() => void clearAll()} disabled={clearing}>
+            {clearing ? "Clearing…" : "Clear all stored runs"}
+          </button>
+        )}
       </div>
       <p className="field-group-help">
         Store past runs here and fit one shared fade time constant (tau) across several of them at once, instead of
@@ -354,7 +389,8 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
         selected race's own effort trend simultaneously, not just one run's idiosyncrasies. It doesn't separately
         identify f0 or fInf: that needs races spanning a much wider range of durations than a typical library, plus
         an anchor on the ceiling's absolute level that this fit doesn't have. Runs without a recorded timestamp can't
-        be used here.
+        be used here. Runs with full GPS data already downloaded are selected for the fit automatically -- uncheck
+        any you want to leave out.
       </p>
 
       <label className="gpx-upload__control">
@@ -473,9 +509,9 @@ export function RunLibraryPanel({ formInputs, onApplyTau }: RunLibraryPanelProps
               <div key={run.id} className="run-library-row">
                 <input
                   type="checkbox"
-                  checked={selected.has(run.id)}
+                  checked={isSelected(run)}
                   disabled={!summary.hasTimestamps}
-                  onChange={() => toggleSelected(run.id)}
+                  onChange={() => toggleSelected(run)}
                 />
                 <span className="run-library-row__label">
                   {run.name} &middot; {summary.distanceKm.toFixed(1)} km

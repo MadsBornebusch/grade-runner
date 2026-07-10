@@ -143,3 +143,15 @@ export async function deleteStoredRun(id: string): Promise<void> {
     tx.onerror = () => reject(tx.error);
   });
 }
+
+/** Wipes the entire run library. Irreversible -- callers should confirm with
+ * the user before invoking this. */
+export async function clearStoredRuns(): Promise<void> {
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    tx.objectStore(STORE_NAME).clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
