@@ -39,17 +39,49 @@ describe("suggestRunsForFit", () => {
     expect(suggestions.vo2max.map((r) => r.id)).toEqual(["5k"]);
   });
 
+  it("excludes intervals too short to trust as a near-maximal effort for their own duration", () => {
+    const tooShort = makeRun({ id: "sprint", durationS: 5 * 60, avgWatts: 350 });
+    const estimable = makeRun({ id: "tempo", durationS: 25 * 60, avgWatts: 300 });
+    const suggestions = suggestRunsForFit([tooShort, estimable]);
+    expect(suggestions.vo2max.map((r) => r.id)).toEqual(["tempo"]);
+  });
+
   it("ranks durability candidates by duration alone, regardless of intensity signal", () => {
     const longEasy = makeRun({ id: "long", durationS: 6 * 3600, avgHeartRate: 120 });
-    const shortHard = makeRun({ id: "short", durationS: 1200, avgHeartRate: 180 });
+    const shortHard = makeRun({ id: "short", durationS: 20 * 60, avgHeartRate: 180 });
     const suggestions = suggestRunsForFit([shortHard, longEasy]);
     expect(suggestions.durability[0].id).toBe("long");
   });
 
+  it("excludes runs too short to ever meaningfully inform an ultra-scale tau", () => {
+    const genuinelyLong = makeRun({ id: "long", durationS: 3 * 3600 });
+    const stillTooShortForTau = makeRun({ id: "short", durationS: 45 * 60 });
+    const suggestions = suggestRunsForFit([genuinelyLong, stillTooShortForTau]);
+    expect(suggestions.durability.map((r) => r.id)).toEqual(["long"]);
+  });
+
+  it("diversifies durability candidates by descent instead of just picking the longest", () => {
+    // All well above the duration floor and within a similar duration range,
+    // but spanning flat to heavily descending -- the pick should span that
+    // range, not collapse to whichever few are longest overall.
+    const flat = makeRun({ id: "flat", durationS: 4 * 3600, distanceKm: 40, elevationGainM: 100 });
+    const rolling = makeRun({ id: "rolling", durationS: 4 * 3600, distanceKm: 40, elevationGainM: 800 });
+    const mountainous = makeRun({ id: "mountainous", durationS: 4 * 3600, distanceKm: 40, elevationGainM: 2400 });
+    const suggestions = suggestRunsForFit([flat, rolling, mountainous], 2);
+    const ids = suggestions.durability.map((r) => r.id);
+    expect(ids).toContain("flat");
+    expect(ids).toContain("mountainous");
+    expect(ids).not.toContain("rolling");
+  });
+
   it("caps each list at the requested candidate count", () => {
-    const runs = Array.from({ length: 10 }, (_, i) => makeRun({ id: `r${i}`, durationS: 1800 + i, avgHeartRate: 150 + i }));
+    const runs = Array.from({ length: 10 }, (_, i) =>
+      makeRun({ id: `r${i}`, durationS: 25 * 60 + i, avgHeartRate: 150 + i }),
+    );
     const suggestions = suggestRunsForFit(runs, 3);
     expect(suggestions.vo2max).toHaveLength(3);
-    expect(suggestions.durability).toHaveLength(3);
+
+    const longRuns = Array.from({ length: 10 }, (_, i) => makeRun({ id: `long${i}`, durationS: 3 * 3600 + i }));
+    expect(suggestRunsForFit(longRuns, 3).durability).toHaveLength(3);
   });
 });
