@@ -445,6 +445,14 @@ as a direct substitute for the existing %VO2max intensity axis.
    something much shorter or a multi-day one) — until then, surfacing a
    fitted f0/fInf as authoritative would be overclaiming what the data
    supports.
+
+   The "races of meaningfully different lengths" precondition doesn't need
+   the fit to exist first — `suggestRunsForFit`'s `durationSpread` bucket
+   (`suggestRuns.ts`) surfaces candidates for it now: the single longest
+   available race plus others at least ~2x shorter (and long enough to be a
+   genuine race effort, not a sprint interval), so the library accumulates
+   the duration range this fit will need before the level-anchor term
+   exists to make it runnable.
 3. **HR↔power/pace calibration** (optional stage). From any stored run with
    both power/pace *and* HR, fit a per-athlete mapping (e.g. HR zone → power
    fraction), restricted to the early, drift-minimal portion of each race.
@@ -610,9 +618,19 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    and the durability bucket requires at least an hour (shorter runs can't
    meaningfully move an ultra-scale tau — see the fit's own "unresponsive"
    flag) and diversifies by descent-per-km proxy instead of just picking the
-   longest few, since descent variety is what stage 4's diagnostic needs. A
-   handful of genuinely useful runs can be approved and fetched without
-   scanning hundreds of rows or risking Strava's rate limit. See
+   longest few, since descent variety is what stage 4's diagnostic needs
+   (that same bucket feeds both — there's no separate stage-5 bucket, since
+   an advisor review flagged that spreading picks across duration/intensity
+   wouldn't actually *decorrelate* them: this athlete's real training data
+   sits on a diagonal, short-and-hard vs. long-and-moderate, so maximizing
+   spread on a mixed-unit intensity axis would just re-pick the diagonal's
+   extremes, not break the confound — the honest, buildable win is more
+   races and descent variety, not manufactured decorrelation). A third
+   `durationSpread` bucket preps for §11's still-unbuilt joint (f0, fInf,
+   tau) fit: the single longest race plus others at least ~2x shorter, kept
+   duration-only and unmixed with intensity for the same reason. A handful
+   of genuinely useful runs can be approved and fetched without scanning
+   hundreds of rows or risking Strava's rate limit. See
    `src/model/stravaBackfill.ts`, `src/model/suggestRuns.ts`,
    `RunLibraryPanel.tsx`.
 2. **Time-decay weighting in the tau fit — built.** `fitTauAcrossRaces` takes

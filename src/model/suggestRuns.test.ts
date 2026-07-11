@@ -96,4 +96,40 @@ describe("suggestRunsForFit", () => {
     const longRuns = Array.from({ length: 10 }, (_, i) => makeRun({ id: `long${i}`, durationS: 3 * 3600 + i }));
     expect(suggestRunsForFit(longRuns, 3).durability).toHaveLength(3);
   });
+
+  describe("durationSpread", () => {
+    it("picks the longest race plus a meaningfully shorter one", () => {
+      const ultra = makeRun({ id: "ultra", durationS: 20 * 3600 });
+      const marathon = makeRun({ id: "marathon", durationS: 4 * 3600 });
+      const suggestions = suggestRunsForFit([ultra, marathon]);
+      expect(suggestions.durationSpread.map((r) => r.id)).toEqual(["ultra", "marathon"]);
+    });
+
+    it("excludes races too close in duration to the longest to give real spread", () => {
+      const longest = makeRun({ id: "longest", durationS: 10 * 3600 });
+      const almostAsLong = makeRun({ id: "similar", durationS: 8 * 3600 });
+      const suggestions = suggestRunsForFit([longest, almostAsLong]);
+      expect(suggestions.durationSpread.map((r) => r.id)).toEqual(["longest"]);
+    });
+
+    it("excludes a shorter candidate that's too brief to be a genuine race effort", () => {
+      const longest = makeRun({ id: "longest", durationS: 10 * 3600 });
+      const tooShort = makeRun({ id: "sprint", durationS: 5 * 60 });
+      const suggestions = suggestRunsForFit([longest, tooShort]);
+      expect(suggestions.durationSpread.map((r) => r.id)).toEqual(["longest"]);
+    });
+
+    it("returns nothing when there's no unfetched run at all", () => {
+      const fetched = makeRun({ id: "already-fetched", points: [], durationS: 10 * 3600 });
+      expect(suggestRunsForFit([fetched]).durationSpread).toEqual([]);
+    });
+
+    it("prefers the longest among qualifying shorter candidates, for maximum signal", () => {
+      const ultra = makeRun({ id: "ultra", durationS: 20 * 3600 });
+      const shortA = makeRun({ id: "shortA", durationS: 2 * 3600 });
+      const shortB = makeRun({ id: "shortB", durationS: 4 * 3600 });
+      const suggestions = suggestRunsForFit([ultra, shortA, shortB], 2);
+      expect(suggestions.durationSpread.map((r) => r.id)).toEqual(["ultra", "shortB"]);
+    });
+  });
 });

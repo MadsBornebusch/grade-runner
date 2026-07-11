@@ -28,11 +28,27 @@ const DURABILITY_MIN_DURATION_S = 60 * 60;
  * (PLAN.md §12/§13) actually needs, not raw duration alone. */
 const DURABILITY_POOL_MULTIPLIER = 3;
 
+/** For the joint (f0, fInf, tau) fit (PLAN.md §11) -- not runnable yet (still
+ * needs a level-anchor term), but it needs races spanning a genuinely wide
+ * duration range (roughly 2x+) to separate f0 from fInf at all, so it's
+ * worth surfacing candidates now rather than only once the fit exists.
+ * "Meaningfully shorter" means an actual ratio, not just the next-longest
+ * run of similar length. */
+const DURATION_SPREAD_MIN_RATIO = 2;
+/** Floor for a "shorter" duration-spread candidate -- long enough to be a
+ * genuine race effort, not a sprint interval. */
+const DURATION_SPREAD_MIN_DURATION_S = 20 * 60;
+
 const DEFAULT_CANDIDATE_COUNT = 4;
 
 export interface RunSuggestions {
   vo2max: StoredRun[];
   durability: StoredRun[];
+  /** Candidates for a future joint (f0, fInf, tau) fit -- the single longest
+   * available race plus others at least DURATION_SPREAD_MIN_RATIO shorter,
+   * so the fit (once buildable) has real duration range to separate the
+   * three parameters instead of races clustered at one length. */
+  durationSpread: StoredRun[];
 }
 
 function avgSpeedKmh(run: StoredRun): number {
@@ -83,6 +99,23 @@ function evenlySpacedPicks<T>(items: T[], count: number): T[] {
   return picks;
 }
 
+/** See RunSuggestions.durationSpread. Picks the single longest available
+ * race, then the longest-among-the-qualifying-shorter races (still gives
+ * the fit the most signal per race) that are at least
+ * DURATION_SPREAD_MIN_RATIO shorter than it. */
+function findDurationSpreadCandidates(unfetched: StoredRun[], candidateCount: number): StoredRun[] {
+  const byDurationDesc = [...unfetched].sort((a, b) => (b.durationS ?? 0) - (a.durationS ?? 0));
+  const longest = byDurationDesc[0];
+  if (!longest) return [];
+  const longestDuration = longest.durationS ?? 0;
+  const shorter = byDurationDesc
+    .slice(1)
+    .filter((r) => (r.durationS ?? 0) >= DURATION_SPREAD_MIN_DURATION_S)
+    .filter((r) => longestDuration / (r.durationS ?? Infinity) >= DURATION_SPREAD_MIN_RATIO)
+    .sort((a, b) => (b.durationS ?? 0) - (a.durationS ?? 0));
+  return [longest, ...shorter.slice(0, candidateCount - 1)];
+}
+
 export function suggestRunsForFit(runs: StoredRun[], candidateCount = DEFAULT_CANDIDATE_COUNT): RunSuggestions {
   const unfetched = runs.filter((r) => r.points === null && r.durationS !== undefined);
 
@@ -97,11 +130,16 @@ export function suggestRunsForFit(runs: StoredRun[], candidateCount = DEFAULT_CA
   // The single longest run is always kept -- it's usually the most
   // responsive for the tau fit (PLAN.md §12/§13) -- and only the *remaining*
   // slots get diversified by descent, so descent variety never comes at the
-  // cost of dropping the most duration-informative run.
+  // cost of dropping the most duration-informative run. These same runs,
+  // once fetched, are also what feeds stage 5's tau-vs-descent diagnostic --
+  // there's no separate bucket for that, since it needs the same "long
+  // enough, descent-diverse" candidates this one already targets.
   const durability =
     pool.length === 0
       ? []
       : [pool[0], ...evenlySpacedPicks([...pool.slice(1)].sort((a, b) => descentPerKmProxy(a) - descentPerKmProxy(b)), candidateCount - 1)];
 
-  return { vo2max, durability };
+  const durationSpread = findDurationSpreadCandidates(unfetched, candidateCount);
+
+  return { vo2max, durability, durationSpread };
 }

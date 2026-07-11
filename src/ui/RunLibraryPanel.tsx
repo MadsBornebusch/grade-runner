@@ -388,10 +388,11 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onAddVo2MaxEntry }: Ru
 
   const suggestions = useMemo(() => suggestRunsForFit(dedupedRuns), [dedupedRuns]);
   const approvedSuggestions = useMemo(() => {
-    // A run can appear in both lists (e.g. a short library with nothing
-    // truly long) -- dedupe by id before fetching.
+    // A run can appear in more than one bucket (e.g. the single longest run
+    // is both a durability and a duration-spread candidate) -- dedupe by id
+    // before fetching, so it isn't counted or fetched twice.
     const byId = new Map(
-      [...suggestions.vo2max, ...suggestions.durability]
+      [...suggestions.vo2max, ...suggestions.durability, ...suggestions.durationSpread]
         .filter((r) => !deselectedSuggestionIds.has(r.id))
         .map((r) => [r.id, r]),
     );
@@ -478,12 +479,15 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onAddVo2MaxEntry }: Ru
 
       {error && <p className="gpx-upload__error">{error}</p>}
 
-      {(suggestions.vo2max.length > 0 || suggestions.durability.length > 0) && (
+      {(suggestions.vo2max.length > 0 ||
+        suggestions.durability.length > 0 ||
+        suggestions.durationSpread.length > 0) && (
         <div className="run-library__suggestions">
           <p className="field-group-help">
             Suggested from the summaries above -- short, high-intensity runs are what actually constrains VO2max;
-            your longest runs are what the fatigue-fade fit needs (see PLAN.md §12). Uncheck any you don't want,
-            then fetch full data for the rest.
+            your longest runs are what the fatigue-fade fit (and stage 5's diagnostic) need; a few runs spanning a
+            wide duration range prep for a future joint fit (see PLAN.md §12). Uncheck any you don't want, then
+            fetch full data for the rest.
           </p>
           {suggestions.vo2max.length > 0 && (
             <>
@@ -509,9 +513,34 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onAddVo2MaxEntry }: Ru
           )}
           {suggestions.durability.length > 0 && (
             <>
-              <p className="field-group-note">Longest runs (durability):</p>
+              <p className="field-group-note">Longest runs (durability + stage-5 diagnostic):</p>
               <div className="fatox-rows">
                 {suggestions.durability.map((run) => (
+                  <label key={run.id} className="run-library-row">
+                    <input
+                      type="checkbox"
+                      checked={!deselectedSuggestionIds.has(run.id)}
+                      onChange={() => toggleSuggestion(run.id)}
+                    />
+                    <span className="run-library-row__label">
+                      {run.name} &middot; {(run.distanceKm ?? 0).toFixed(1)} km &middot;{" "}
+                      {((run.durationS ?? 0) / 3600).toFixed(1)} h
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
+          {suggestions.durationSpread.length > 0 && (
+            <>
+              <p className="field-group-note">Duration spread (prep for a future joint f0/fInf/tau fit):</p>
+              <p className="field-group-help">
+                That fit isn't buildable yet -- it also needs a level-anchor term this app doesn't have (PLAN.md
+                §11) -- but it'll need races spanning a wide duration range once it exists, so it's worth having
+                these on hand already.
+              </p>
+              <div className="fatox-rows">
+                {suggestions.durationSpread.map((run) => (
                   <label key={run.id} className="run-library-row">
                     <input
                       type="checkbox"
