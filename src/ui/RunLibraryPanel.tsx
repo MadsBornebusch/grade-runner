@@ -100,6 +100,10 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
   const [fitRan, setFitRan] = useState(false);
   const [fitting, setFitting] = useState(false);
   const [halfLifeDays, setHalfLifeDays] = useState(DEFAULT_HALF_LIFE_DAYS);
+  // Display-only filter for the run list below -- a large backfilled library
+  // is mostly summary-only rows; this doesn't affect selection, the fit, or
+  // the diagnostic, which all still operate on the full dedupedRuns.
+  const [showOnlyFetched, setShowOnlyFetched] = useState(false);
 
   const [backfillFrom, setBackfillFrom] = useState(oneYearAgoDateInput);
   const [backfilling, setBackfilling] = useState(false);
@@ -123,6 +127,11 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
   // from `dedupedRuns`, not `runs`, so a duplicate can't silently double-
   // count in the run list, a fit, the suggestions, or the diagnostic.
   const { kept: dedupedRuns, duplicateGroups } = useMemo(() => dedupeStoredRuns(runs), [runs]);
+
+  const visibleRuns = useMemo(
+    () => (showOnlyFetched ? dedupedRuns.filter((r) => r.points !== null) : dedupedRuns),
+    [dedupedRuns, showOnlyFetched],
+  );
 
   const [removingDuplicates, setRemovingDuplicates] = useState(false);
   const removeDuplicates = async () => {
@@ -592,8 +601,19 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
       {dedupedRuns.length === 0 && <p className="placeholder">No runs stored yet.</p>}
 
       {dedupedRuns.length > 0 && (
+        <label className="strava-import__range-row">
+          <input type="checkbox" checked={showOnlyFetched} onChange={(e) => setShowOnlyFetched(e.target.checked)} />
+          <span>Only show downloaded runs ({dedupedRuns.filter((r) => r.points !== null).length} of {dedupedRuns.length})</span>
+        </label>
+      )}
+
+      {dedupedRuns.length > 0 && visibleRuns.length === 0 && (
+        <p className="placeholder">No downloaded runs yet -- fetch some above, or uncheck the filter.</p>
+      )}
+
+      {visibleRuns.length > 0 && (
         <div className="fatox-rows">
-          {dedupedRuns.map((run) => {
+          {visibleRuns.map((run) => {
             const summary = summarize(run);
             return (
               <div key={run.id} className="run-library-row">
