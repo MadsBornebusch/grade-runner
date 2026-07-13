@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CourseSegment } from "../gpx/pipeline";
-import { descentImpact } from "./descentImpact";
+import { descentImpact, descentImpactSquared } from "./descentImpact";
 
 function segment(overrides: Partial<CourseSegment> = {}): CourseSegment {
   return {
@@ -80,5 +80,44 @@ describe("descentImpact", () => {
     const segments = [segment({ elevation: -10, gradient: -0.2, distanceHorizontal: 50, distance3D: 50, dtS: 25 })];
     // gradient x distanceHorizontal = -0.2 * 50 = -10m descent, speed = 50/25 = 2 m/s -> impact 20
     expect(descentImpact(segments)).toBeCloseTo(20, 6);
+  });
+});
+
+describe("descentImpactSquared", () => {
+  it("is zero on a flat course", () => {
+    const segments = [segment({ elevation: 0 }), segment({ elevation: 0 }), segment({ elevation: 0 })];
+    expect(descentImpactSquared(segments)).toBe(0);
+  });
+
+  it("is zero on a pure climb", () => {
+    const segments = [segment({ elevation: 10 }), segment({ elevation: 25 }), segment({ elevation: 45 })];
+    expect(descentImpactSquared(segments)).toBe(0);
+  });
+
+  it("accumulates descent meters times speed-squared on a downhill stretch", () => {
+    const segments = [
+      segment({ elevation: 100 }),
+      segment({ elevation: 90, distance3D: 50, dtS: 25 }), // 10m drop, speed 2 m/s -> 10 * 2^2 = 40
+    ];
+    expect(descentImpactSquared(segments)).toBeCloseTo(40, 6);
+  });
+
+  it("excludes paused segments and segments without timing data", () => {
+    const paused = [segment({ elevation: 100 }), segment({ elevation: 50, distance3D: 50, dtS: 5, paused: true })];
+    const untimed = [segment({ elevation: 100 }), segment({ elevation: 50, dtS: null })];
+    expect(descentImpactSquared(paused)).toBe(0);
+    expect(descentImpactSquared(untimed)).toBe(0);
+  });
+
+  it("scales quadratically with speed, not linearly like descentImpact does", () => {
+    // Same 10m drop, but at 2x the speed (half the dtS): descentImpact should
+    // exactly double, descentImpactSquared should exactly quadruple. Locks in
+    // that the two functions are genuinely computing different things, not
+    // one accidentally aliasing the other.
+    const baseline = [segment({ elevation: 100 }), segment({ elevation: 90, distance3D: 50, dtS: 25 })]; // 2 m/s
+    const doubleSpeed = [segment({ elevation: 100 }), segment({ elevation: 90, distance3D: 50, dtS: 12.5 })]; // 4 m/s
+
+    expect(descentImpact(doubleSpeed) / descentImpact(baseline)).toBeCloseTo(2, 6);
+    expect(descentImpactSquared(doubleSpeed) / descentImpactSquared(baseline)).toBeCloseTo(4, 6);
   });
 });

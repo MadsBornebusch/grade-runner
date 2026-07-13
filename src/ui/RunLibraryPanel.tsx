@@ -13,7 +13,7 @@ import { suggestRunsForFit } from "../model/suggestRuns";
 import { dedupeStoredRuns } from "../model/dedupeRuns";
 import { filterRunsSinceDate, shouldFetchNextBackfillPage, toStoredRunSummaryInput, type BackfillPage } from "../model/stravaBackfill";
 import { computeTauDiagnostic, type RaceDiagnosticPoint } from "../model/tauDiagnostic";
-import { descentImpact } from "../model/descentImpact";
+import { descentImpact, descentImpactSquared } from "../model/descentImpact";
 import { estimateVo2MaxFromRun } from "../model/vo2MaxEstimate";
 import {
   addStoredRun,
@@ -281,6 +281,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onAddVo2MaxEntry }: Ru
         avgIntensity: analysis.avgEffortFraction,
         descentPerKm: course.totalElevationLoss / distanceKm,
         descentImpactPerKm: descentImpact(course.segments) / distanceKm,
+        descentImpactSquaredPerKm: descentImpactSquared(course.segments) / distanceKm,
       });
     }
     return computeTauDiagnostic(points);
@@ -705,10 +706,10 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onAddVo2MaxEntry }: Ru
         <p className="field-group-note">Diagnostic: does descent (or descent covered fast) or intensity predict your own tau?</p>
         <p className="field-group-help">
           Cheap check before considering a model redesign (PLAN.md §12/§13): each already-fetched run's own
-          single-race best-fit tau, average effort, descent per km, and descent <em>impact</em> per km --
-          descent-impact weights each descending stretch by how fast it was run (descent meters &times; that
-          stretch's own speed, summed and normalized per km), on the theory that eccentric-loading damage tracks
-          how fast you hit the downhills, not just how much elevation you lost overall. The stage-5 hypothesis is
+          single-race best-fit tau, average effort, descent per km, and two descent-<em>impact</em> variants per
+          km -- weighting each descending stretch by how fast it was run (descent meters &times; speed, or
+          &times; speed&sup2; for a kinetic-energy-proportional reading) instead of by elevation loss alone, on
+          the theory that eccentric-loading damage tracks how fast you hit the downhills. The stage-5 hypothesis is
           that harder, more descent-loaded, or faster-descended runs fade <em>faster</em> -- a{" "}
           <strong>negative</strong> correlation (higher intensity/descent/impact going with a <em>smaller</em>{" "}
           tau), not just any relationship. Runs whose own fit hit a search-range boundary are excluded as unreliable.
@@ -726,7 +727,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onAddVo2MaxEntry }: Ru
                   <span className="run-library-row__label">
                     {p.label} &middot; tau {p.tauMin} min &middot; {(p.avgIntensity * 100).toFixed(0)}% avg effort
                     &middot; {p.descentPerKm.toFixed(0)} m/km descent &middot; {p.descentImpactPerKm.toFixed(0)}{" "}
-                    descent impact/km
+                    impact/km &middot; {p.descentImpactSquaredPerKm.toFixed(0)} impact&sup2;/km
                   </span>
                 </div>
               ))}
@@ -742,15 +743,24 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onAddVo2MaxEntry }: Ru
               {tauDiagnostic.descentImpactCorrelation !== null
                 ? tauDiagnostic.descentImpactCorrelation.toFixed(2)
                 : "n/a"}
+              {" · "}
+              Correlation (tau vs. descent impact&sup2;):{" "}
+              {tauDiagnostic.descentImpactSquaredCorrelation !== null
+                ? tauDiagnostic.descentImpactSquaredCorrelation.toFixed(2)
+                : "n/a"}
             </p>
             <p className="field-group-help">
               A meaningfully negative value (below roughly −0.5) on any of these supports building that
               signal into a fade term. Near zero or positive means this athlete's own data doesn't show the effect
-              -- not a reason to build it yet. Watch descent impact against <em>intensity</em>, not against raw
-              descent: impact has speed baked directly into it, so it'll tend to beat raw descent for reasons that
-              have nothing to do with descent -- a fast race scores high on both impact and intensity together.
-              The real test of whether descent-at-speed is its own effect is whether impact explains tau any
-              better than intensity alone already does, not whether it beats descent alone.
+              -- not a reason to build it yet. Watch both descent-impact variants against <em>intensity</em>, not
+              against raw descent: both have speed baked directly into them, so they'll tend to beat raw descent
+              for reasons that have nothing to do with descent -- a fast race scores high on impact and intensity
+              together. The real test of whether descent-at-speed is its own effect is whether either impact
+              variant explains tau any better than intensity alone already does, not whether it beats descent
+              alone. Comparing the two impact variants against each other is also informative: if the squared
+              version tracks tau meaningfully better than the linear one, that favors a kinetic-energy-style
+              relationship over a linear one -- if they're about equally (un)correlated, the exponent isn't
+              distinguishing anything with this library yet.
             </p>
           </>
         )}

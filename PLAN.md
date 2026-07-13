@@ -689,11 +689,19 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    raw descent (impact will tend to beat raw descent for reasons that have
    nothing to do with descent at all, purely from the speed term).
 
-   Other variants considered but not built, worth a follow-up if the linear
-   speed-weighting doesn't show a clean signal: **speed²-weighted impact**
-   (kinetic-energy-proportional — impact/eccentric loading forces are often
-   modeled as scaling with kinetic energy rather than linearly with speed,
-   at least as defensible as the linear version); **steep-grade-only
+   **Speed²-weighted variant also built** (`descentImpactSquared` in the
+   same file): kinetic-energy-proportional rather than linear-in-speed —
+   impact/eccentric loading forces are often modeled as scaling with
+   kinetic energy, at least as defensible as the linear version. Offered
+   as a second, independent reading rather than a replacement (there's no
+   established result saying which scaling is correct here); the diagnostic
+   reports both variants' correlations side by side, plus a note that
+   comparing the two against *each other* tells you whether the exponent
+   matters at all — if they're about equally (un)correlated with tau, the
+   library doesn't yet distinguish linear from quadratic.
+
+   Other variants considered but not built, worth a follow-up if neither
+   speed-weighted form shows a clean signal: **steep-grade-only
    thresholding** (only count descent below some grade, e.g. -8-10%, on the
    theory that gentle downhill roads don't load eccentrically the way
    steep technical trail does); and, if this ever feeds an actual

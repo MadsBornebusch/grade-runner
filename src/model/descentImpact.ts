@@ -5,18 +5,24 @@
 // costs very different amounts of muscle damage, which descent-per-km alone
 // can't distinguish -- speed is exactly the missing factor.
 //
-// Computed per-segment (descent meters x that segment's own speed, summed
-// across the race) rather than total descent x whole-race average pace, so
-// a fast downhill stretch and a slow flat/uphill stretch in the same race
-// don't get blended into a number that reflects neither.
+// Computed per-segment (descent meters x a function of that segment's own
+// speed, summed across the race) rather than total descent x whole-race
+// average pace, so a fast downhill stretch and a slow flat/uphill stretch
+// in the same race don't get blended into a number that reflects neither.
+//
+// Both variants below have speed baked directly into them, so they're
+// confounded with avgIntensity the same way a fast race reads as both
+// "intense" and "high impact" -- the meaningful comparison for either is
+// against intensity, not against raw descentPerKm (they'll tend to beat raw
+// descent for reasons that have nothing to do with descent at all, purely
+// from the speed term).
 
 import type { CourseSegment } from "../gpx/pipeline";
 
 /**
- * Sum of (descent meters x speed m/s) across all non-paused, descending
- * segments. Units are m^2/s -- not a standard physiological quantity, just
- * an internally-consistent relative score for comparing races against each
- * other, the same role descent-per-km plays for raw descent.
+ * Sums `descentMeters * speedWeight(speedMs)` across all non-paused,
+ * descending segments. Shared by the linear and speed^2 variants below so a
+ * fix to the elevation-delta/pause-exclusion logic can't drift between them.
  *
  * Elevation delta is derived from consecutive segments' own smoothed
  * `elevation` (matching how the pipeline's own totalElevationGain/Loss are
@@ -25,7 +31,7 @@ import type { CourseSegment } from "../gpx/pipeline";
  * `gradient x distanceHorizontal`. That approximation touches at most one
  * out of typically hundreds/thousands of segments, a negligible edge effect.
  */
-export function descentImpact(segments: CourseSegment[]): number {
+function sumDescentWeightedBySpeed(segments: CourseSegment[], speedWeight: (speedMs: number) => number): number {
   let impact = 0;
   let previousElevation: number | null = null;
   for (const seg of segments) {
@@ -36,7 +42,31 @@ export function descentImpact(segments: CourseSegment[]): number {
     if (seg.paused || seg.dtS === null || seg.dtS <= 0 || eleDelta >= 0) continue;
     const descentM = -eleDelta;
     const speedMs = seg.distance3D / seg.dtS;
-    impact += descentM * speedMs;
+    impact += descentM * speedWeight(speedMs);
   }
   return impact;
+}
+
+/**
+ * Sum of (descent meters x speed m/s) across all non-paused, descending
+ * segments. Units are m^2/s -- not a standard physiological quantity, just
+ * an internally-consistent relative score for comparing races against each
+ * other, the same role descent-per-km plays for raw descent.
+ */
+export function descentImpact(segments: CourseSegment[]): number {
+  return sumDescentWeightedBySpeed(segments, (v) => v);
+}
+
+/**
+ * Speed-squared variant: sum of (descent meters x speed^2), proportional to
+ * the kinetic energy being carried into each footstrike rather than speed
+ * itself. Impact/eccentric-loading forces are often modeled as scaling with
+ * kinetic energy, so this is at least as physiologically defensible as the
+ * linear version -- offered as a second, independent reading rather than a
+ * replacement, since there's no established result saying which scaling is
+ * correct for this app's purposes. Units are m^3/s^2, same "relative score
+ * only" caveat as descentImpact.
+ */
+export function descentImpactSquared(segments: CourseSegment[]): number {
+  return sumDescentWeightedBySpeed(segments, (v) => v * v);
 }

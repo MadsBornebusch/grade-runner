@@ -19,6 +19,11 @@ export interface RaceDiagnosticPoint {
    * descentPerKm (impact will tend to beat raw descent for reasons that
    * have nothing to do with descent at all). */
   descentImpactPerKm: number;
+  /** descentImpact.ts's speed^2-weighted variant, normalized per km --
+   * kinetic-energy-proportional rather than linear-in-speed, offered as a
+   * second, independent reading. Same confound caveat as
+   * descentImpactPerKm: compare against avgIntensity, not descentPerKm. */
+  descentImpactSquaredPerKm: number;
 }
 
 export interface TauDiagnosticResult {
@@ -32,6 +37,7 @@ export interface TauDiagnosticResult {
   intensityCorrelation: number | null;
   descentCorrelation: number | null;
   descentImpactCorrelation: number | null;
+  descentImpactSquaredCorrelation: number | null;
 }
 
 const MIN_POINTS_FOR_CORRELATION = 3;
@@ -70,6 +76,10 @@ export function computeTauDiagnostic(points: RaceDiagnosticPoint[]): TauDiagnost
     descentImpactCorrelation: pearsonCorrelation(
       tauValues,
       points.map((p) => p.descentImpactPerKm),
+    ),
+    descentImpactSquaredCorrelation: pearsonCorrelation(
+      tauValues,
+      points.map((p) => p.descentImpactSquaredPerKm),
     ),
   };
 }
