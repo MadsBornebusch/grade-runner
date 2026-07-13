@@ -4,9 +4,11 @@ import { parseGpx, runPipeline } from "../gpx/pipeline";
 import { analyzeRun } from "../model/analysis";
 import {
   buildEffortTrendPoints,
+  fitFInfAndTauAcrossRaces,
   fitTauAcrossRaces,
   fitTauMinutes,
   type EffortTrendPoint,
+  type FInfTauFitResult,
   type MultiRaceTauFitResult,
 } from "../model/pacingFit";
 import { suggestRunsForFit } from "../model/suggestRuns";
@@ -32,6 +34,7 @@ import { useStravaSession } from "./useStravaSession";
 interface RunLibraryPanelProps {
   formInputs: FormInputs;
   onApplyTau: (tauMin: number) => void;
+  onApplyFInf: (fInf: number) => void;
   onAddVo2MaxEntry: (entry: Vo2MaxEntry) => void;
 }
 
@@ -83,7 +86,7 @@ function summarize(run: StoredRun) {
   return { distanceKm: course.totalDistance3D / 1000, durationH, hasTimestamps: course.hasTimestamps };
 }
 
-export function RunLibraryPanel({ formInputs, onApplyTau, onAddVo2MaxEntry }: RunLibraryPanelProps) {
+export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2MaxEntry }: RunLibraryPanelProps) {
   const { connected: stravaConnected } = useStravaSession();
   const [runs, setRuns] = useState<StoredRun[]>([]);
   // Runs with full GPS data already downloaded (points !== null) are selected
@@ -93,6 +96,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onAddVo2MaxEntry }: Ru
   const [selectionOverrides, setSelectionOverrides] = useState<Map<string, boolean>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [fitResult, setFitResult] = useState<MultiRaceTauFitResult | null>(null);
+  const [fInfFitResult, setFInfFitResult] = useState<FInfTauFitResult | null>(null);
   const [fitRan, setFitRan] = useState(false);
   const [fitting, setFitting] = useState(false);
   const [halfLifeDays, setHalfLifeDays] = useState(DEFAULT_HALF_LIFE_DAYS);
@@ -191,6 +195,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onAddVo2MaxEntry }: Ru
       await clearStoredRuns();
       setSelectionOverrides(new Map());
       setFitResult(null);
+      setFInfFitResult(null);
       setFitRan(false);
       setDeselectedSuggestionIds(new Set());
       refresh();
@@ -380,6 +385,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onAddVo2MaxEntry }: Ru
         raceDates.push(runDate(run));
       }
       setFitResult(fitTauAcrossRaces(races, ceilingParams, { raceDates, halfLifeDays }));
+      setFInfFitResult(fitFInfAndTauAcrossRaces(races, ceilingParams, { raceDates, halfLifeDays }));
       setFitRan(true);
       refresh();
     } catch (err) {
@@ -665,6 +671,56 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onAddVo2MaxEntry }: Ru
             </p>
           )}
         </>
+      )}
+
+      {fInfFitResult && (
+        <div className="run-library__experimental-fit">
+          <p className="field-group-note">Experimental: joint fInf/tau fit (PLAN.md §11)</p>
+          <p className="field-group-help">
+            Fits fInf and tau together from the same selected runs above, holding VO2max and f0 fixed -- fixing f0 is
+            what makes this well-posed rather than an unbounded search (verified with a synthetic recovery test, not
+            just assumed). This does <strong>not</strong> independently verify VO2max or f0: fInf comes out relative
+            to whatever those currently are, and absorbs error in both. Treat this as "the fit is runnable," not "fInf
+            is now a trustworthy, independently-measured number."
+          </p>
+          <p className={fInfFitResult.durationDiversityRatio < 2 ? "warning" : "field-group-note"}>
+            Duration range across selected races: {fInfFitResult.durationDiversityRatio.toFixed(1)}x (longest ÷
+            shortest).{" "}
+            {fInfFitResult.durationDiversityRatio < 2
+              ? "PLAN.md recommends at least ~2x for fInf to be separable from tau -- treat this result as a rough guess, not a firm number."
+              : "At or above the ~2x PLAN.md recommends for separating fInf from tau."}
+          </p>
+          <p className="field-group-note">
+            Best fit: fInf {fInfFitResult.fInf.toFixed(2)}, tau {fInfFitResult.tauMin} min, across{" "}
+            {fInfFitResult.perRace.length} run{fInfFitResult.perRace.length === 1 ? "" : "s"}.
+          </p>
+          <ul className="run-library__fit-notes">
+            {fInfFitResult.perRace.map((race, i) => (
+              <li key={i} className={race.unresponsive ? "warning" : "field-group-note"}>
+                Run {i + 1}: {race.trendAtCurrentPctPerHour >= 0 ? "+" : ""}
+                {race.trendAtCurrentPctPerHour.toFixed(1)}%/hour &rarr;{" "}
+                {race.trendAtFitPctPerHour >= 0 ? "+" : ""}
+                {race.trendAtFitPctPerHour.toFixed(1)}%/hour at the fitted (fInf, tau).
+                {race.unresponsive && " Too short (or too long) relative to the fit for its ceiling to move -- no real say in this result."}
+              </li>
+            ))}
+          </ul>
+          <button type="button" className="fatox-add" onClick={() => onApplyFInf(fInfFitResult.fInf)}>
+            Apply fInf = {fInfFitResult.fInf.toFixed(2)}
+          </button>
+          {(fInfFitResult.hitSearchBoundary.fInf || fInfFitResult.hitSearchBoundary.tau) && (
+            <p className="field-group-note">
+              Hit a search boundary on{" "}
+              {[
+                fInfFitResult.hitSearchBoundary.fInf && `fInf (${fInfFitResult.hitSearchBoundary.fInf})`,
+                fInfFitResult.hitSearchBoundary.tau && `tau (${fInfFitResult.hitSearchBoundary.tau})`,
+              ]
+                .filter(Boolean)
+                .join(" and ")}{" "}
+              -- treat as a bound, not a precise value.
+            </p>
+          )}
+        </div>
       )}
 
       {vo2MaxEstimates.length > 0 && (

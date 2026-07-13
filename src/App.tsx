@@ -284,6 +284,7 @@ function App() {
                 <RunLibraryPanel
                   formInputs={formInputs}
                   onApplyTau={(tauMin) => setFormInputs({ ...formInputs, tauMin })}
+                  onApplyFInf={(fInf) => setFormInputs({ ...formInputs, fInf })}
                   onAddVo2MaxEntry={(entry: Vo2MaxEntry) =>
                     setFormInputs({ ...formInputs, vo2MaxHistory: [...formInputs.vo2MaxHistory, entry] })
                   }

@@ -418,15 +418,15 @@ as a direct substitute for the existing %VO2max intensity axis.
    just re-run on demand). UI lives on the Athlete page
    (`src/ui/RunLibraryPanel.tsx`): add/name/delete runs, select a subset,
    see each one's distance/duration.
-2. **Pooled tau-only ceiling fit — built, joint (f0, fInf, tau) fit
-   deliberately deferred.** `fitTauAcrossRaces` in `pacingFit.ts` extends the
-   single-race tau search across several selected runs at once: each race's
-   own within-race slope is computed separately and the search minimizes the
-   *sum of squared per-race slopes*, not one regression over concatenated
-   points (races run on different days at different average efforts, so a
-   pooled regression would mostly reflect cross-race effort differences, not
-   fatigue shape). The search range still scales from the shortest/longest
-   selected race's own duration, not a flat constant.
+2. **Pooled tau-only ceiling fit — built.** `fitTauAcrossRaces` in
+   `pacingFit.ts` extends the single-race tau search across several
+   selected runs at once: each race's own within-race slope is computed
+   separately and the search minimizes the *sum of squared per-race
+   slopes*, not one regression over concatenated points (races run on
+   different days at different average efforts, so a pooled regression
+   would mostly reflect cross-race effort differences, not fatigue shape).
+   The search range still scales from the shortest/longest selected
+   race's own duration, not a flat constant.
 
    The original plan here was a joint 3D (f0, fInf, tau) search, reasoned to
    be identifiable once races span different durations. An advisor review
@@ -435,24 +435,61 @@ as a direct substitute for the existing %VO2max intensity axis.
    every race's slope for *any* c, so the sustained level `c` (which is what
    actually drives Planning's finish-time predictions) is a free direction
    under this loss; fitting f0/fInf needs an added level-anchor term (e.g.
-   the LT2-capped plateau at the very start of a race), which doesn't exist
-   yet. (b) it needs races that actually span a wide duration range (roughly
-   2×+) to separate f0 from fInf — the two real races used to validate this
-   stage were both ~7-8.5h, so on real data today there'd be no signal for
-   the extra two parameters anyway, just extra degenerate directions. Revisit
-   the 3-param fit once both a level-anchor term exists and the library holds
-   races of meaningfully different lengths (a several-hour race plus
-   something much shorter or a multi-day one) — until then, surfacing a
-   fitted f0/fInf as authoritative would be overclaiming what the data
-   supports.
+   the LT2-capped plateau at the very start of a race). (b) it needs races
+   that actually span a wide duration range (roughly 2×+) to separate f0
+   from fInf — the two real races used to validate this stage were both
+   ~7-8.5h, so on real data today there'd be no signal for the extra two
+   parameters anyway, just extra degenerate directions.
 
-   The "races of meaningfully different lengths" precondition doesn't need
-   the fit to exist first — `suggestRunsForFit`'s `durationSpread` bucket
-   (`suggestRuns.ts`) surfaces candidates for it now: the single longest
-   available race plus others at least ~2x shorter (and long enough to be a
-   genuine race effort, not a sprint interval), so the library accumulates
-   the duration range this fit will need before the level-anchor term
-   exists to make it runnable.
+   **(a) is now resolved — `fitFInfAndTauAcrossRaces` (also in
+   `pacingFit.ts`) jointly fits (fInf, tau), built after re-deriving the
+   actual source of the degeneracy rather than building the originally-
+   imagined loss term.** The degeneracy specifically requires f0 *and* fInf
+   to move *together* (ceilingPower is exactly linear in a joint rescaling
+   of both) — holding f0 fixed (exactly as the tau-only fit already does,
+   not a new restriction) and searching only (fInf, tau) breaks that
+   specific unbounded direction, since scaling fInf alone no longer scales
+   the whole curve by a matching constant. Verified with a throwaway
+   synthetic-recovery test (deleted after use, same discipline as the
+   VO2max estimator's invariance check) before writing any production code
+   — races built to follow a known (f0=0.94, fInf=0.55, tau=300) ceiling
+   exactly, fit with f0 held fixed:
+
+   | Scenario | Recovered fInf (true 0.55) | Recovered tau (true 300) |
+   |---|---|---|
+   | Durations [60, 180, 360, 600, 900] min (wide spread) | 0.560 | 300 (exact) |
+   | Durations [420, 450, 480, 510] min (clustered) | 0.530 | 340 |
+   | Single 900min race only | 0.530 | 420 |
+
+   No scenario ran away to a search boundary — confirms fixing f0 alone
+   makes the *mechanism* well-posed; precision clearly degrades without
+   duration diversity (matching (b) below) but gracefully, not
+   catastrophically. `vo2MaxMlPerKgPerMin` is held fixed for the same
+   reason f0 is (it's an equally-linear multiplier on the whole curve) —
+   both are load-bearing constraints, not incidental defaults, now that
+   fInf floats. The fInf search range is also bounded strictly below
+   `lt2Fraction`: above it, `sustainableFraction`'s own cap makes any
+   fInf ≥ lt2Fraction behave identically (flat at the cap), reopening a
+   version of the same degeneracy in a different corner.
+
+   **Important framing, carried into the UI (`RunLibraryPanel.tsx`'s
+   "Experimental" section) and worth restating here:** this makes the fit
+   *runnable*, it does not give fInf independent empirical grounding.
+   `vo2MaxMlPerKgPerMin` (from the VO2max estimator or manual entry), `f0`
+   (a manual constant), and `fInf` (the thing being fit) are three coupled
+   quantities — fInf comes out relative to whatever the other two
+   currently are, and absorbs error in both. A real empirical anchor
+   (tying the model to *observed* early-race power via an actual new loss
+   term — the originally-imagined fix for (a)) is a separate, larger piece
+   of work, deliberately deferred; it would give f0/VO2max themselves
+   genuine grounding, which this doesn't attempt.
+
+   (b) is unblocked but not resolved by data yet: `suggestRunsForFit`'s
+   `durationSpread` bucket (`suggestRuns.ts`) surfaces candidates for the
+   duration range this fit needs (the single longest available race plus
+   others at least ~2x shorter), and the new fit reports
+   `durationDiversityRatio` directly so the UI can flag when today's
+   result is a rough guess rather than a firm number.
 3. **HR↔power/pace calibration** (optional stage). From any stored run with
    both power/pace *and* HR, fit a per-athlete mapping (e.g. HR zone → power
    fraction), restricted to the early, drift-minimal portion of each race.

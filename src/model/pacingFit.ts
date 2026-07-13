@@ -234,13 +234,14 @@ function daysAgo(date: Date, now: Date): number {
  * slope, not one regression over concatenated points (races run on
  * different days at different average efforts, so a flat pooled regression
  * would mostly reflect cross-race effort differences, not fatigue shape).
- * f0/fInf still aren't fit here -- doing that from within-race slopes alone
- * is scale-invariant (an f0=fInf flat ceiling of ANY level also zeroes every
- * race's slope), so it needs a level-anchor term this app doesn't have yet,
- * plus races spanning a wide duration range to pin f0 (short) separately
- * from fInf (long). One extra race beyond the tau fit's single-race case
- * mainly buys robustness -- one tau has to flatten several independent
- * runs' trends at once, not just one run's idiosyncrasies.
+ * f0 still isn't fit here (this function holds both f0 and fInf fixed) --
+ * see fitFInfAndTauAcrossRaces below for jointly fitting (fInf, tau), which
+ * only became well-posed once f0 stays pinned (fitting f0 *and* fInf
+ * together from within-race slopes alone is scale-invariant: an f0=fInf
+ * flat ceiling of any level zeroes every race's slope). One extra race
+ * beyond the tau fit's single-race case mainly buys robustness -- one tau
+ * has to flatten several independent runs' trends at once, not just one
+ * run's idiosyncrasies.
  *
  * Recency weighting (opts.raceDates/halfLifeDays) is what makes this "adapt
  * as the athlete trains" -- an older race's contribution to the pooled
@@ -332,6 +333,159 @@ export function fitTauAcrossRaces(
       unresponsive: ceilingDropFraction(trimmed[i]) < MIN_CEILING_DROP_FRACTION,
     })),
     hitSearchBoundary,
+  };
+}
+
+/** Mirrors ceiling.ts's own DEFAULTS.lt2Fraction -- not exported from there,
+ * so restated here for the fInf search range below. */
+const DEFAULT_LT2_FRACTION = 0.85;
+/** fInf is the *more* fatigued, asymptotic fraction -- it should sit below
+ * the LT2-anchored plateau, not at or above it. Practically, letting the
+ * search reach lt2Fraction also reopens a version of the scale-invariance
+ * problem fixing f0 was meant to close: sustainableFraction's own
+ * Math.min(fraction, lt2Fraction) cap makes any fInf >= lt2Fraction behave
+ * identically (flat at the cap), so that region is unidentifiable, not just
+ * physiologically implausible. */
+const MIN_FINF = 0.1;
+const FINF_UPPER_MARGIN = 0.02;
+
+export interface FInfTauFitResult {
+  fInf: number;
+  tauMin: number;
+  /** Longest / shortest trimmed race duration among the races used in this
+   * fit -- operationalizes PLAN.md §11's "~2x+ duration range" precondition
+   * for separating fInf from tau as a visible number rather than a
+   * guideline. Below ~2, the fit still runs (validated with a synthetic
+   * recovery test -- it degrades gracefully, not catastrophically) but is
+   * markedly less precise. */
+  durationDiversityRatio: number;
+  perRace: {
+    trendAtCurrentPctPerHour: number;
+    trendAtFitPctPerHour: number;
+    unresponsive: boolean;
+  }[];
+  hitSearchBoundary: { fInf: "lower" | "upper" | null; tau: "lower" | "upper" | null };
+}
+
+/**
+ * Jointly fits (fInf, tau) across several races -- f0 and vo2MaxMlPerKgPerMin
+ * are held fixed at whatever's in `ceilingParams`, exactly as
+ * fitTauAcrossRaces already does for f0/fInf today. That's not an arbitrary
+ * restriction: within-race-slope objectives are scale-invariant under a
+ * *joint* rescaling of f0 and fInf (any f0=fInf flat ceiling of any level
+ * zeroes every race's slope), which is what made a 3-parameter joint fit
+ * ill-posed. Holding f0 fixed breaks that specific degeneracy -- rescaling
+ * fInf alone, with f0 pinned, no longer rescales the whole curve by a
+ * matching constant. Validated with a synthetic recovery test (known
+ * f0/fInf/tau, races built to follow that ceiling exactly) rather than
+ * trusted from derivation alone -- see PLAN.md §11 for the numbers and the
+ * framing caveat: this makes the *search* well-posed, it does not give fInf
+ * independent empirical grounding. fInf comes out relative to whatever f0
+ * and vo2MaxMlPerKgPerMin currently are, and absorbs error in both -- three
+ * coupled quantities, not an independently-verified one.
+ *
+ * Meaningfully lower-confidence than fitTauAcrossRaces: real precision
+ * depends on durationDiversityRatio, which most libraries won't have yet.
+ * Report it, don't hide it -- callers should surface it plainly rather than
+ * presenting fInf as a settled number regardless of that ratio.
+ */
+export function fitFInfAndTauAcrossRaces(
+  races: EffortTrendPoint[][],
+  ceilingParams: CeilingParams,
+  opts: FitTauAcrossRacesOptions = {},
+): FInfTauFitResult | null {
+  const halfLifeDays = opts.halfLifeDays ?? DEFAULT_RECENCY_HALF_LIFE_DAYS;
+  const now = opts.now ?? new Date();
+
+  const trimmedWithWeight = races
+    .map((r, i) => {
+      const date = opts.raceDates?.[i] ?? null;
+      return {
+        points: trimForPacingFit(r),
+        recencyWeight: date ? Math.exp((-Math.LN2 * daysAgo(date, now)) / halfLifeDays) : 1,
+      };
+    })
+    .filter((r) => r.points.length >= MIN_FIT_POINTS);
+  if (trimmedWithWeight.length === 0) return null;
+
+  const trimmed = trimmedWithWeight.map((r) => r.points);
+  const recencyWeights = trimmedWithWeight.map((r) => r.recencyWeight);
+
+  const currentTrends = trimmed.map((r) => effortTrend(r, ceilingParams));
+  if (currentTrends.some((t) => !t)) return null;
+
+  const totalMinPerRace = trimmed.map((r) => r[r.length - 1].tHours * 60);
+  const tauLo = Math.max(20, Math.min(...totalMinPerRace) * 0.3);
+  const tauHi = Math.min(ABSOLUTE_MAX_TAU_MIN, Math.max(...totalMinPerRace) * 2.5);
+
+  const lt2Fraction = ceilingParams.lt2Fraction ?? DEFAULT_LT2_FRACTION;
+  const fInfLo = MIN_FINF;
+  const fInfHi = Math.max(fInfLo + 0.01, lt2Fraction - FINF_UPPER_MARGIN);
+
+  const pooledSquaredSlope = (fInf: number, tau: number) => {
+    let sum = 0;
+    for (let i = 0; i < trimmed.length; i++) {
+      const trend = effortTrend(trimmed[i], { ...ceilingParams, fInf, tauMin: tau });
+      if (!trend) return Infinity;
+      sum += recencyWeights[i] * trend.slopePerHour ** 2;
+    }
+    return sum;
+  };
+
+  const search = (fLo: number, fHi: number, fStep: number, tLo: number, tHi: number, tStep: number) => {
+    let best = { fInf: fLo, tau: tLo, score: Infinity };
+    for (let fInf = fLo; fInf <= fHi; fInf += fStep) {
+      for (let tau = tLo; tau <= tHi; tau += tStep) {
+        const score = pooledSquaredSlope(fInf, tau);
+        if (score < best.score) best = { fInf, tau, score };
+      }
+    }
+    return best;
+  };
+
+  const coarseFStep = Math.max(0.01, (fInfHi - fInfLo) / 25);
+  const coarseTStep = Math.max(2, (tauHi - tauLo) / 25);
+  const coarse = search(fInfLo, fInfHi, coarseFStep, tauLo, tauHi, coarseTStep);
+
+  const fine = search(
+    Math.max(fInfLo, coarse.fInf - coarseFStep),
+    Math.min(fInfHi, coarse.fInf + coarseFStep),
+    Math.max(0.001, coarseFStep / 10),
+    Math.max(tauLo, coarse.tau - coarseTStep),
+    Math.min(tauHi, coarse.tau + coarseTStep),
+    Math.max(1, coarseTStep / 10),
+  );
+
+  const fInf = Math.round(fine.fInf * 1000) / 1000;
+  const tauMin = Math.round(fine.tau);
+
+  const fittedTrends = trimmed.map((r) => effortTrend(r, { ...ceilingParams, fInf, tauMin }));
+  if (fittedTrends.some((t) => !t)) return null;
+
+  // Same saturation-at-the-fitted-params measurement fitTauAcrossRaces uses
+  // for its own unresponsive flag, just at (fInf, tau) instead of tau alone.
+  const ceilingDropFraction = (race: EffortTrendPoint[]) => {
+    const start = race[0];
+    const end = race[race.length - 1];
+    const params = { ...ceilingParams, fInf, tauMin };
+    const ceilStart = ceilingPower({ tMin: start.tHours * 60, altitudeM: start.altitudeM, elapsedHours: start.tHours }, params);
+    const ceilEnd = ceilingPower({ tMin: end.tHours * 60, altitudeM: end.altitudeM, elapsedHours: end.tHours }, params);
+    return ceilStart > 0 ? (ceilStart - ceilEnd) / ceilStart : 0;
+  };
+
+  return {
+    fInf,
+    tauMin,
+    durationDiversityRatio: Math.max(...totalMinPerRace) / Math.min(...totalMinPerRace),
+    perRace: currentTrends.map((current, i) => ({
+      trendAtCurrentPctPerHour: current!.slopePerHour * 100,
+      trendAtFitPctPerHour: fittedTrends[i]!.slopePerHour * 100,
+      unresponsive: ceilingDropFraction(trimmed[i]) < MIN_CEILING_DROP_FRACTION,
+    })),
+    hitSearchBoundary: {
+      fInf: fInf <= fInfLo + 0.005 ? "lower" : fInf >= fInfHi - 0.005 ? "upper" : null,
+      tau: tauMin <= tauLo + 1 ? "lower" : tauMin >= tauHi - 1 ? "upper" : null,
+    },
   };
 }
 

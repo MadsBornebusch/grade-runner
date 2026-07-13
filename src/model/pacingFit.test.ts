@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { ceilingPower, type CeilingParams } from "./ceiling";
-import { fitDurabilityDriftPerHour, fitTauAcrossRaces, fitTauMinutes, trimForPacingFit } from "./pacingFit";
+import {
+  fitDurabilityDriftPerHour,
+  fitFInfAndTauAcrossRaces,
+  fitTauAcrossRaces,
+  fitTauMinutes,
+  trimForPacingFit,
+} from "./pacingFit";
 
 /** Builds points where actual power is a constant fraction of the ceiling
  * computed under `trueParams` -- i.e. a run that held perfectly even effort
@@ -209,6 +215,61 @@ describe("fitTauAcrossRaces", () => {
       expect(result!.perRace[0].unresponsive).toBe(false);
       expect(result!.perRace[1].unresponsive).toBe(false);
     });
+  });
+});
+
+describe("fitFInfAndTauAcrossRaces", () => {
+  // fInf deliberately distinct from the app's own default (0.38) so a
+  // "recovery" isn't just landing back on whatever ceiling.ts already
+  // assumes.
+  const trueParams: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, f0: 0.94, fInf: 0.55, tauMin: 300 };
+
+  it("recovers fInf and tau reasonably well when races span a wide duration range", () => {
+    const races = [1, 3, 6, 10, 15].map((h) => makeConstantEffortPoints(trueParams, h));
+    const result = fitFInfAndTauAcrossRaces(races, trueParams);
+    expect(result).not.toBeNull();
+    expect(result!.fInf).toBeCloseTo(0.55, 1);
+    expect(result!.tauMin).toBeGreaterThan(250);
+    expect(result!.tauMin).toBeLessThan(350);
+    // Ratio is computed from *trimmed* durations (trimForPacingFit clips a
+    // few minutes off each end, proportionally more for longer races), so
+    // it won't exactly match the raw 15h/1h -- just confirm it's clearly wide.
+    expect(result!.durationDiversityRatio).toBeGreaterThan(10);
+    expect(result!.hitSearchBoundary.fInf).toBeNull();
+    expect(result!.hitSearchBoundary.tau).toBeNull();
+  });
+
+  it("still returns a result with durations clustered near one length, but with a low diversity ratio", () => {
+    const races = [7, 7.5, 8, 8.5].map((h) => makeConstantEffortPoints(trueParams, h));
+    const result = fitFInfAndTauAcrossRaces(races, trueParams);
+    expect(result).not.toBeNull();
+    expect(result!.durationDiversityRatio).toBeLessThan(1.3);
+  });
+
+  it("never returns an fInf at or above lt2Fraction, even for a pacing pattern that never leaves the cap", () => {
+    // Flat-at-the-cap pacing (f0 === fInf === lt2Fraction, so the ceiling
+    // never decays at all) -- an unconstrained search could push fInf up to
+    // or past lt2Fraction and fit this just as well, since sustainableFraction's
+    // own cap makes any fInf >= lt2Fraction behave identically. Confirms the
+    // search range itself, not just typical data, keeps fInf below the cap.
+    const cappedParams = { ...trueParams, f0: trueParams.lt2Fraction!, fInf: trueParams.lt2Fraction! };
+    const races = [2, 4, 6].map((h) => makeConstantEffortPoints(cappedParams, h));
+    const result = fitFInfAndTauAcrossRaces(races, trueParams);
+    expect(result).not.toBeNull();
+    expect(result!.fInf).toBeLessThan(trueParams.lt2Fraction!);
+  });
+
+  it("returns null when no race has enough trimmed points", () => {
+    const tooShort = makeConstantEffortPoints(trueParams, 0.1, 1);
+    expect(fitFInfAndTauAcrossRaces([tooShort], trueParams)).toBeNull();
+  });
+
+  it("reports per-race trend and unresponsive flags the same shape as fitTauAcrossRaces", () => {
+    const races = [1, 3, 6, 10, 15].map((h) => makeConstantEffortPoints(trueParams, h));
+    const result = fitFInfAndTauAcrossRaces(races, trueParams);
+    expect(result).not.toBeNull();
+    expect(result!.perRace).toHaveLength(5);
+    expect(result!.perRace[0].unresponsive).toBe(true); // the 1h race can't leave the cap at tau~300
   });
 });
 
