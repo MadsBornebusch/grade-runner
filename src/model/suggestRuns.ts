@@ -39,7 +39,7 @@ const DURATION_SPREAD_MIN_RATIO = 2;
  * genuine race effort, not a sprint interval. */
 const DURATION_SPREAD_MIN_DURATION_S = 20 * 60;
 
-const DEFAULT_CANDIDATE_COUNT = 4;
+const DEFAULT_CANDIDATE_COUNT = 10;
 
 export interface RunSuggestions {
   vo2max: StoredRun[];
