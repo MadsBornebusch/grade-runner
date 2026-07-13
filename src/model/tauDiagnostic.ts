@@ -9,6 +9,16 @@ export interface RaceDiagnosticPoint {
   tauMin: number;
   avgIntensity: number;
   descentPerKm: number;
+  /** descentImpact.ts's descent-meters-times-speed metric, normalized per km
+   * so races of different lengths are comparable -- the hypothesis being
+   * tested alongside raw descentPerKm is that it's descent *covered fast*,
+   * not descent alone, that drives eccentric-load fatigue. Speed is baked
+   * directly into this metric, so it's confounded with avgIntensity the
+   * same way a fast race is both "intense" and "high impact" -- the
+   * meaningful comparison is against avgIntensity, not against
+   * descentPerKm (impact will tend to beat raw descent for reasons that
+   * have nothing to do with descent at all). */
+  descentImpactPerKm: number;
 }
 
 export interface TauDiagnosticResult {
@@ -21,6 +31,7 @@ export interface TauDiagnosticResult {
    */
   intensityCorrelation: number | null;
   descentCorrelation: number | null;
+  descentImpactCorrelation: number | null;
 }
 
 const MIN_POINTS_FOR_CORRELATION = 3;
@@ -55,6 +66,10 @@ export function computeTauDiagnostic(points: RaceDiagnosticPoint[]): TauDiagnost
     descentCorrelation: pearsonCorrelation(
       tauValues,
       points.map((p) => p.descentPerKm),
+    ),
+    descentImpactCorrelation: pearsonCorrelation(
+      tauValues,
+      points.map((p) => p.descentImpactPerKm),
     ),
   };
 }

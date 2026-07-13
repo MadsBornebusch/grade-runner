@@ -673,6 +673,34 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    hypothesis specifically predicts a *negative* one (harder/more
    descent-loaded runs fading faster), not just any relationship. See
    `src/model/tauDiagnostic.ts`.
+
+   Also added: `src/model/descentImpact.ts`, testing a sharper version of
+   the descent hypothesis — that it's descent *covered fast* (eccentric
+   loading/impact forces), not descent alone, that drives fade. Computed
+   per-segment as descent-meters × that segment's own speed, summed and
+   normalized per km (not total-descent × whole-race average pace, which
+   would blend a fast downhill stretch and a slow flat stretch into one
+   meaningless number). Kept alongside — not replacing — raw
+   `descentPerKm`, so the two can be compared rather than assuming the
+   sharper metric is automatically better. Important caveat surfaced in the
+   UI: speed is baked directly into this metric, so it's confounded with
+   `avgIntensity` the same way a fast race is both "intense" and "high
+   impact" — the meaningful comparison is against intensity, not against
+   raw descent (impact will tend to beat raw descent for reasons that have
+   nothing to do with descent at all, purely from the speed term).
+
+   Other variants considered but not built, worth a follow-up if the linear
+   speed-weighting doesn't show a clean signal: **speed²-weighted impact**
+   (kinetic-energy-proportional — impact/eccentric loading forces are often
+   modeled as scaling with kinetic energy rather than linearly with speed,
+   at least as defensible as the linear version); **steep-grade-only
+   thresholding** (only count descent below some grade, e.g. -8-10%, on the
+   theory that gentle downhill roads don't load eccentrically the way
+   steep technical trail does); and, if this ever feeds an actual
+   durability *model* rather than just this diagnostic, a **cumulative**
+   (running-total-so-far) form rather than a single race-level summary —
+   the same way `durabilityDriftPerHour` would need to key off cumulative
+   descent-impact-so-far, not a whole-race total, at each point in a race.
 5. **Descent/eccentric-load-dependent durability term** (only if stage 4
    shows a real signal). Not yet built. Sharpened by an independent design
    review (§13): key durability to cumulative descent/eccentric work
