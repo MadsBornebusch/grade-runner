@@ -21,12 +21,8 @@ import { fileURLToPath } from "node:url";
 import type { GpxPoint } from "../src/gpx/pipeline.ts";
 import { runPipeline } from "../src/gpx/pipeline.ts";
 import { analyzeRun } from "../src/model/analysis.ts";
-import {
-  buildEffortTrendPoints,
-  fitFInfAndTauAcrossRaces,
-  fitTauAcrossRaces,
-  type EffortTrendPoint,
-} from "../src/model/pacingFit.ts";
+import { buildEffortTrendPoints, fitFInfAndTauAcrossRaces, fitTauAcrossRaces, type EffortTrendPoint } from "../src/model/pacingFit.ts";
+import { buildRaceDiagnosticPoint } from "../src/model/raceDiagnosticPoint.ts";
 import {
   filterRunsSinceDate,
   shouldFetchNextBackfillPage,
@@ -34,6 +30,7 @@ import {
   type BackfillPage,
 } from "../src/model/stravaBackfill.ts";
 import { suggestRunsForFit } from "../src/model/suggestRuns.ts";
+import { computeTauDiagnostic, type RaceDiagnosticPoint } from "../src/model/tauDiagnostic.ts";
 import type { StoredRun } from "../src/storage/runLibrary.ts";
 import { DEFAULT_FORM_INPUTS, resolveVo2Max } from "../src/ui/formInputs.ts";
 
@@ -148,6 +145,7 @@ async function main() {
 
   const races: EffortTrendPoint[][] = [];
   const raceDates: (Date | null)[] = [];
+  const diagnosticPoints: RaceDiagnosticPoint[] = [];
   for (const run of candidates) {
     if (run.stravaId === undefined) continue;
     const { points } = await fetchActivityPoints(cookie, run.stravaId);
@@ -156,7 +154,7 @@ async function main() {
       console.log(`  skipped (no timestamps): ${run.name}`);
       continue;
     }
-    const analysis = analyzeRun(course.segments, {
+    const analysisInputs = {
       bodyMassKg: formInputs.bodyMassKg,
       ceilingParams,
       fueling: { intakeGPerH: formInputs.intakeGPerH, gutMaxGPerH: formInputs.gutMaxGPerH },
@@ -164,10 +162,18 @@ async function main() {
       reserveG: formInputs.reserveG,
       walkMaxMs: formInputs.walkMaxMs,
       altitudeAdjustment: formInputs.altitudeAdjustment,
-    });
+    };
+    const analysis = analyzeRun(course.segments, analysisInputs);
     races.push(buildEffortTrendPoints(course.segments, analysis.segments, formInputs.altitudeAdjustment));
     raceDates.push(run.date ? new Date(run.date) : null);
     console.log(`  fetched: ${run.name} (${(course.totalDistance3D / 1000).toFixed(1)}km)`);
+
+    // Self-consistent per race: avgIntensity is judged against THIS race's
+    // own best-fit tau, not the one global default -- see
+    // raceDiagnosticPoint.ts for why that matters (a long race read against
+    // a too-short default tau reads as far more intense than it really was).
+    const point = buildRaceDiagnosticPoint(run.name, course, analysisInputs);
+    if (point) diagnosticPoints.push(point);
   }
 
   console.log(`\n${races.length} races with usable timestamps -- fitting...\n`);
@@ -199,6 +205,20 @@ async function main() {
         `${r.unresponsive ? " (unresponsive)" : ""}`,
     ),
   );
+
+  console.log(`\nTau-vs-intensity/descent diagnostic (${diagnosticPoints.length} races with a reliable solo tau fit, self-consistent avg effort):`);
+  diagnosticPoints.forEach((p) =>
+    console.log(
+      `  ${p.label}: tau ${p.tauMin}min, ${(p.avgIntensity * 100).toFixed(0)}% avg effort, ` +
+        `${p.descentPerKm.toFixed(0)} m/km descent`,
+    ),
+  );
+  const diagnostic = computeTauDiagnostic(diagnosticPoints);
+  console.log("\nCorrelations (tau vs. ...):");
+  console.log(`  intensity:            ${diagnostic.intensityCorrelation?.toFixed(2) ?? "n/a"}`);
+  console.log(`  descent:              ${diagnostic.descentCorrelation?.toFixed(2) ?? "n/a"}`);
+  console.log(`  descent impact:       ${diagnostic.descentImpactCorrelation?.toFixed(2) ?? "n/a"}`);
+  console.log(`  descent impact²:      ${diagnostic.descentImpactSquaredCorrelation?.toFixed(2) ?? "n/a"}`);
 }
 
 main().catch((err) => {

@@ -6,7 +6,6 @@ import {
   buildEffortTrendPoints,
   fitFInfAndTauAcrossRaces,
   fitTauAcrossRaces,
-  fitTauMinutes,
   type EffortTrendPoint,
   type FInfTauFitResult,
   type MultiRaceTauFitResult,
@@ -15,7 +14,7 @@ import { suggestRunsForFit } from "../model/suggestRuns";
 import { dedupeStoredRuns } from "../model/dedupeRuns";
 import { filterRunsSinceDate, shouldFetchNextBackfillPage, toStoredRunSummaryInput, type BackfillPage } from "../model/stravaBackfill";
 import { computeTauDiagnostic, type RaceDiagnosticPoint } from "../model/tauDiagnostic";
-import { descentImpact, descentImpactSquared } from "../model/descentImpact";
+import { buildRaceDiagnosticPoint } from "../model/raceDiagnosticPoint";
 import { estimateVo2MaxFromRun } from "../model/vo2MaxEstimate";
 import {
   addStoredRun,
@@ -274,8 +273,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
     for (const run of dedupedRuns) {
       if (run.points === null) continue;
       const course = runPipeline(run.points);
-      if (!course.hasTimestamps) continue;
-      const analysis = analyzeRun(course.segments, {
+      const point = buildRaceDiagnosticPoint(run.name, course, {
         bodyMassKg: formInputs.bodyMassKg,
         ceilingParams: diagnosticCeilingParams,
         fueling: { intakeGPerH: formInputs.intakeGPerH, gutMaxGPerH: formInputs.gutMaxGPerH },
@@ -284,19 +282,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
         walkMaxMs: formInputs.walkMaxMs,
         altitudeAdjustment: formInputs.altitudeAdjustment,
       });
-      const effortTrendPoints = buildEffortTrendPoints(course.segments, analysis.segments, formInputs.altitudeAdjustment);
-      const tauFit = fitTauMinutes(effortTrendPoints, diagnosticCeilingParams);
-      if (!tauFit || tauFit.hitSearchBoundary) continue;
-      const distanceKm = course.totalDistance3D / 1000;
-      if (distanceKm <= 0) continue;
-      points.push({
-        label: run.name,
-        tauMin: tauFit.tauMin,
-        avgIntensity: analysis.avgEffortFraction,
-        descentPerKm: course.totalElevationLoss / distanceKm,
-        descentImpactPerKm: descentImpact(course.segments) / distanceKm,
-        descentImpactSquaredPerKm: descentImpactSquared(course.segments) / distanceKm,
-      });
+      if (point) points.push(point);
     }
     return computeTauDiagnostic(points);
   }, [dedupedRuns, formInputs]);
@@ -789,6 +775,10 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
           that harder, more descent-loaded, or faster-descended runs fade <em>faster</em> -- a{" "}
           <strong>negative</strong> correlation (higher intensity/descent/impact going with a <em>smaller</em>{" "}
           tau), not just any relationship. Runs whose own fit hit a search-range boundary are excluded as unreliable.
+          Average effort is computed against each run's <em>own</em> best-fit tau, not one shared default -- using one
+          global tau for every run inflates the reading for anything much longer than that tau's own timescale (a
+          ~30h race can otherwise misread as ~100% effort simply because the ceiling has already decayed to near-fInf
+          long before the race is done), which would make short and long runs incomparable on this axis.
         </p>
         {tauDiagnostic.points.length < 3 ? (
           <p className="placeholder">
