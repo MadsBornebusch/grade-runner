@@ -31,6 +31,11 @@ import {
 } from "../src/model/stravaBackfill.ts";
 import { suggestRunsForFit } from "../src/model/suggestRuns.ts";
 import { computeTauDiagnostic, type RaceDiagnosticPoint } from "../src/model/tauDiagnostic.ts";
+import {
+  buildWithinRaceDiagnosticPoint,
+  computeWithinRaceDescentDiagnostic,
+  type WithinRaceDiagnosticPoint,
+} from "../src/model/withinRaceDescentDiagnostic.ts";
 import type { StoredRun } from "../src/storage/runLibrary.ts";
 import { DEFAULT_FORM_INPUTS, resolveVo2Max } from "../src/ui/formInputs.ts";
 
@@ -146,6 +151,7 @@ async function main() {
   const races: EffortTrendPoint[][] = [];
   const raceDates: (Date | null)[] = [];
   const diagnosticPoints: RaceDiagnosticPoint[] = [];
+  const withinRacePoints: WithinRaceDiagnosticPoint[] = [];
   for (const run of candidates) {
     if (run.stravaId === undefined) continue;
     const { points } = await fetchActivityPoints(cookie, run.stravaId);
@@ -174,6 +180,9 @@ async function main() {
     // a too-short default tau reads as far more intense than it really was).
     const point = buildRaceDiagnosticPoint(run.name, course, analysisInputs);
     if (point) diagnosticPoints.push(point);
+
+    const withinRacePoint = buildWithinRaceDiagnosticPoint(run.name, course, analysisInputs);
+    if (withinRacePoint) withinRacePoints.push(withinRacePoint);
   }
 
   console.log(`\n${races.length} races with usable timestamps -- fitting...\n`);
@@ -219,6 +228,21 @@ async function main() {
   console.log(`  descent:              ${diagnostic.descentCorrelation?.toFixed(2) ?? "n/a"}`);
   console.log(`  descent impact:       ${diagnostic.descentImpactCorrelation?.toFixed(2) ?? "n/a"}`);
   console.log(`  descent impact²:      ${diagnostic.descentImpactSquaredCorrelation?.toFixed(2) ?? "n/a"}`);
+
+  console.log(
+    `\nWithin-race early-descent-vs-late-fade diagnostic (${withinRacePoints.length} races with a reliable whole-race tau fit and a long-enough late window):`,
+  );
+  withinRacePoints.forEach((p) =>
+    console.log(
+      `  ${p.label}: late residual ${p.lateResidualTrendPctPerHour >= 0 ? "+" : ""}${p.lateResidualTrendPctPerHour.toFixed(1)}%/h, ` +
+        `${p.earlyDescentPerKm.toFixed(0)} m/km early descent`,
+    ),
+  );
+  const withinRaceDiagnostic = computeWithinRaceDescentDiagnostic(withinRacePoints);
+  console.log("\nCorrelations (late residual vs. ...):");
+  console.log(`  early descent:        ${withinRaceDiagnostic.lateResidualVsEarlyDescentCorrelation?.toFixed(2) ?? "n/a"}`);
+  console.log(`  early descent impact: ${withinRaceDiagnostic.lateResidualVsEarlyDescentImpactCorrelation?.toFixed(2) ?? "n/a"}`);
+  console.log(`  early descent impact²: ${withinRaceDiagnostic.lateResidualVsEarlyDescentImpactSquaredCorrelation?.toFixed(2) ?? "n/a"}`);
 }
 
 main().catch((err) => {

@@ -40,9 +40,10 @@ export interface TauDiagnosticResult {
   descentImpactSquaredCorrelation: number | null;
 }
 
-const MIN_POINTS_FOR_CORRELATION = 3;
+/** Exported for reuse by withinRaceDescentDiagnostic.ts's own correlations. */
+export const MIN_POINTS_FOR_CORRELATION = 3;
 
-function pearsonCorrelation(xs: number[], ys: number[]): number | null {
+export function pearsonCorrelation(xs: number[], ys: number[]): number | null {
   const n = xs.length;
   if (n < MIN_POINTS_FOR_CORRELATION) return null;
   const meanX = xs.reduce((a, b) => a + b, 0) / n;

@@ -58,6 +58,16 @@ export function descentImpact(segments: CourseSegment[]): number {
 }
 
 /**
+ * Plain descent meters, no speed weighting -- shares the same elevation-
+ * delta/pause-exclusion logic as the weighted variants (rather than
+ * reimplementing it) for callers that need raw descent over an arbitrary
+ * segment range, e.g. withinRaceDescentDiagnostic.ts's early-window sum.
+ */
+export function descentMeters(segments: CourseSegment[]): number {
+  return sumDescentWeightedBySpeed(segments, () => 1);
+}
+
+/**
  * Speed-squared variant: sum of (descent meters x speed^2), proportional to
  * the kinetic energy being carried into each footstrike rather than speed
  * itself. Impact/eccentric-loading forces are often modeled as scaling with

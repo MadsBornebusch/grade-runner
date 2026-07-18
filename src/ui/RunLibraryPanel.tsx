@@ -15,6 +15,11 @@ import { dedupeStoredRuns } from "../model/dedupeRuns";
 import { filterRunsSinceDate, shouldFetchNextBackfillPage, toStoredRunSummaryInput, type BackfillPage } from "../model/stravaBackfill";
 import { computeTauDiagnostic, type RaceDiagnosticPoint } from "../model/tauDiagnostic";
 import { buildRaceDiagnosticPoint } from "../model/raceDiagnosticPoint";
+import {
+  buildWithinRaceDiagnosticPoint,
+  computeWithinRaceDescentDiagnostic,
+  type WithinRaceDiagnosticPoint,
+} from "../model/withinRaceDescentDiagnostic";
 import { estimateVo2MaxFromRun } from "../model/vo2MaxEstimate";
 import {
   addStoredRun,
@@ -285,6 +290,39 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
       if (point) points.push(point);
     }
     return computeTauDiagnostic(points);
+  }, [dedupedRuns, formInputs]);
+
+  // Within-race redesign of the descent diagnostic above: eccentric-loading
+  // damage from a fast downhill should show up as degraded fade in whatever
+  // comes *after* it, not smeared into a whole-race average -- few real
+  // races have the ideal shape to test that via a whole-race comparison, so
+  // this compares each race's own late-window behavior to its own early-
+  // window descent instead. See withinRaceDescentDiagnostic.ts.
+  const withinRaceDiagnostic = useMemo(() => {
+    const diagnosticCeilingParams = {
+      vo2MaxMlPerKgPerMin: resolveVo2Max(formInputs.vo2MaxHistory),
+      lt2Fraction: formInputs.lt2Fraction,
+      f0: formInputs.f0,
+      fInf: formInputs.fInf,
+      tauMin: formInputs.tauMin,
+      durabilityDriftPerHour: formInputs.durabilityDriftPerHour,
+    };
+    const points: WithinRaceDiagnosticPoint[] = [];
+    for (const run of dedupedRuns) {
+      if (run.points === null) continue;
+      const course = runPipeline(run.points);
+      const point = buildWithinRaceDiagnosticPoint(run.name, course, {
+        bodyMassKg: formInputs.bodyMassKg,
+        ceilingParams: diagnosticCeilingParams,
+        fueling: { intakeGPerH: formInputs.intakeGPerH, gutMaxGPerH: formInputs.gutMaxGPerH },
+        glycogenStoreG: formInputs.glycogenStoreG,
+        reserveG: formInputs.reserveG,
+        walkMaxMs: formInputs.walkMaxMs,
+        altitudeAdjustment: formInputs.altitudeAdjustment,
+      });
+      if (point) points.push(point);
+    }
+    return computeWithinRaceDescentDiagnostic(points);
   }, [dedupedRuns, formInputs]);
 
   // PLAN.md §12: candidate VO2max estimates from already-fetched runs whose
@@ -827,6 +865,62 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
               version tracks tau meaningfully better than the linear one, that favors a kinetic-energy-style
               relationship over a linear one -- if they're about equally (un)correlated, the exponent isn't
               distinguishing anything with this library yet.
+            </p>
+          </>
+        )}
+      </div>
+
+      <div className="run-library__diagnostic">
+        <p className="field-group-note">Experimental: does early descent predict a worse-than-expected late fade?</p>
+        <p className="field-group-help">
+          A redesign of the diagnostic above: eccentric-loading damage from a fast downhill should show up as
+          degraded fade in whatever comes <em>after</em> it, not smeared into a whole-race average -- few real
+          races have the ideal shape (fast descent concentrated early, substantial distance remaining after) to
+          test that via a whole-race comparison. This instead splits each race at its midpoint, sums descent in the
+          first half, and computes the second half's own residual trend at the race's already-fitted tau -- near
+          zero if a single clean fade shape explains the whole race, negative if the back half faded faster than
+          that shape predicts. The hypothesis predicts a <strong>negative</strong> correlation (more early descent
+          going with a worse-than-expected late residual). Works with any race that has some early descent -- it
+          doesn't need a specially-shaped race, since the comparison is within each race, not between them.
+        </p>
+        {withinRaceDiagnostic.points.length < 3 ? (
+          <p className="placeholder">
+            Need at least 3 runs with full data already fetched, a reliable whole-race tau fit, and enough points in
+            the late half specifically -- currently {withinRaceDiagnostic.points.length}.
+          </p>
+        ) : (
+          <>
+            <div className="fatox-rows">
+              {withinRaceDiagnostic.points.map((p, i) => (
+                <div key={i} className="run-library-row">
+                  <span className="run-library-row__label">
+                    {p.label} &middot; late residual {p.lateResidualTrendPctPerHour >= 0 ? "+" : ""}
+                    {p.lateResidualTrendPctPerHour.toFixed(1)}%/h &middot; {p.earlyDescentPerKm.toFixed(0)} m/km early
+                    descent &middot; {p.earlyDescentImpactPerKm.toFixed(0)} early impact/km &middot;{" "}
+                    {p.earlyDescentImpactSquaredPerKm.toFixed(0)} early impact&sup2;/km
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="field-group-note">
+              Correlation (late residual vs. early descent):{" "}
+              {withinRaceDiagnostic.lateResidualVsEarlyDescentCorrelation !== null
+                ? withinRaceDiagnostic.lateResidualVsEarlyDescentCorrelation.toFixed(2)
+                : "n/a"}
+              {" · "}
+              vs. early descent impact:{" "}
+              {withinRaceDiagnostic.lateResidualVsEarlyDescentImpactCorrelation !== null
+                ? withinRaceDiagnostic.lateResidualVsEarlyDescentImpactCorrelation.toFixed(2)
+                : "n/a"}
+              {" · "}
+              vs. early descent impact&sup2;:{" "}
+              {withinRaceDiagnostic.lateResidualVsEarlyDescentImpactSquaredCorrelation !== null
+                ? withinRaceDiagnostic.lateResidualVsEarlyDescentImpactSquaredCorrelation.toFixed(2)
+                : "n/a"}
+            </p>
+            <p className="field-group-help">
+              Newer and less battle-tested than the whole-race diagnostic above -- treat any result here as a
+              first read, not a settled one. The 50/50 early/late split is a fixed default, not tuned yet.
             </p>
           </>
         )}

@@ -48,13 +48,15 @@ export function buildEffortTrendPoints(
     }));
 }
 
-interface TrendFit {
+export interface TrendFit {
   /** Effort-fraction change per hour (e.g. 0.05 = effort rising ~5 percentage points/hour). */
   slopePerHour: number;
 }
 
-/** Weighted least-squares slope of effort (grossPower/ceiling) vs. elapsed hours. */
-function effortTrend(points: EffortTrendPoint[], ceilingParams: CeilingParams): TrendFit | null {
+/** Weighted least-squares slope of effort (grossPower/ceiling) vs. elapsed hours.
+ * Exported for reuse by withinRaceDescentDiagnostic.ts, which needs the same
+ * slope computation restricted to a sub-window of a race's points. */
+export function computeEffortTrend(points: EffortTrendPoint[], ceilingParams: CeilingParams): TrendFit | null {
   const xs: number[] = [];
   const ys: number[] = [];
   const ws: number[] = [];
@@ -98,7 +100,9 @@ export function trimForPacingFit(points: EffortTrendPoint[]): EffortTrendPoint[]
   return points.filter((p) => p.tHours >= trimHours && p.tHours <= totalHours - trimHours);
 }
 
-const MIN_FIT_POINTS = 10;
+/** Exported for reuse by withinRaceDescentDiagnostic.ts's own late-window
+ * point-count gate -- same numerical floor, not a new magic number. */
+export const MIN_FIT_POINTS = 10;
 
 export interface TauFitResult {
   tauMin: number;
@@ -142,7 +146,7 @@ export function fitTauMinutes(
   const trimmed = trimForPacingFit(points);
   if (trimmed.length < MIN_FIT_POINTS) return null;
 
-  const currentTrend = effortTrend(trimmed, ceilingParams);
+  const currentTrend = computeEffortTrend(trimmed, ceilingParams);
   if (!currentTrend) return null;
 
   const totalMin = trimmed[trimmed.length - 1].tHours * 60;
@@ -155,7 +159,7 @@ export function fitTauMinutes(
     let bestTau = lo;
     let bestAbsSlope = Infinity;
     for (let tau = lo; tau <= hi; tau += step) {
-      const trend = effortTrend(trimmed, { ...ceilingParams, tauMin: tau });
+      const trend = computeEffortTrend(trimmed, { ...ceilingParams, tauMin: tau });
       if (trend && Math.abs(trend.slopePerHour) < bestAbsSlope) {
         bestAbsSlope = Math.abs(trend.slopePerHour);
         bestTau = tau;
@@ -169,7 +173,7 @@ export function fitTauMinutes(
   const coarse = search(lo, hi, coarseStep);
   const fine = search(Math.max(lo, coarse - coarseStep), Math.min(hi, coarse + coarseStep), Math.max(1, coarseStep / 10));
 
-  const fittedTrend = effortTrend(trimmed, { ...ceilingParams, tauMin: fine });
+  const fittedTrend = computeEffortTrend(trimmed, { ...ceilingParams, tauMin: fine });
   if (!fittedTrend) return null;
 
   const tauMin = Math.round(fine);
@@ -273,7 +277,7 @@ export function fitTauAcrossRaces(
   const trimmed = trimmedWithWeight.map((r) => r.points);
   const recencyWeights = trimmedWithWeight.map((r) => r.recencyWeight);
 
-  const currentTrends = trimmed.map((r) => effortTrend(r, ceilingParams));
+  const currentTrends = trimmed.map((r) => computeEffortTrend(r, ceilingParams));
   if (currentTrends.some((t) => !t)) return null;
 
   const totalMinPerRace = trimmed.map((r) => r[r.length - 1].tHours * 60);
@@ -283,7 +287,7 @@ export function fitTauAcrossRaces(
   const pooledSquaredSlope = (tau: number) => {
     let sum = 0;
     for (let i = 0; i < trimmed.length; i++) {
-      const trend = effortTrend(trimmed[i], { ...ceilingParams, tauMin: tau });
+      const trend = computeEffortTrend(trimmed[i], { ...ceilingParams, tauMin: tau });
       if (!trend) return Infinity;
       sum += recencyWeights[i] * trend.slopePerHour ** 2;
     }
@@ -308,7 +312,7 @@ export function fitTauAcrossRaces(
   const fine = search(Math.max(lo, coarse - coarseStep), Math.min(hi, coarse + coarseStep), Math.max(1, coarseStep / 10));
 
   const tauMin = Math.round(fine);
-  const fittedTrends = trimmed.map((r) => effortTrend(r, { ...ceilingParams, tauMin }));
+  const fittedTrends = trimmed.map((r) => computeEffortTrend(r, { ...ceilingParams, tauMin }));
   if (fittedTrends.some((t) => !t)) return null;
 
   const hitSearchBoundary = tauMin <= lo + 1 ? "lower" : tauMin >= hi - 1 ? "upper" : null;
@@ -411,7 +415,7 @@ export function fitFInfAndTauAcrossRaces(
   const trimmed = trimmedWithWeight.map((r) => r.points);
   const recencyWeights = trimmedWithWeight.map((r) => r.recencyWeight);
 
-  const currentTrends = trimmed.map((r) => effortTrend(r, ceilingParams));
+  const currentTrends = trimmed.map((r) => computeEffortTrend(r, ceilingParams));
   if (currentTrends.some((t) => !t)) return null;
 
   const totalMinPerRace = trimmed.map((r) => r[r.length - 1].tHours * 60);
@@ -425,7 +429,7 @@ export function fitFInfAndTauAcrossRaces(
   const pooledSquaredSlope = (fInf: number, tau: number) => {
     let sum = 0;
     for (let i = 0; i < trimmed.length; i++) {
-      const trend = effortTrend(trimmed[i], { ...ceilingParams, fInf, tauMin: tau });
+      const trend = computeEffortTrend(trimmed[i], { ...ceilingParams, fInf, tauMin: tau });
       if (!trend) return Infinity;
       sum += recencyWeights[i] * trend.slopePerHour ** 2;
     }
@@ -459,7 +463,7 @@ export function fitFInfAndTauAcrossRaces(
   const fInf = Math.round(fine.fInf * 1000) / 1000;
   const tauMin = Math.round(fine.tau);
 
-  const fittedTrends = trimmed.map((r) => effortTrend(r, { ...ceilingParams, fInf, tauMin }));
+  const fittedTrends = trimmed.map((r) => computeEffortTrend(r, { ...ceilingParams, fInf, tauMin }));
   if (fittedTrends.some((t) => !t)) return null;
 
   // Same saturation-at-the-fitted-params measurement fitTauAcrossRaces uses
@@ -513,7 +517,7 @@ export function fitDurabilityDriftPerHour(
     let best = lo;
     let bestAbsSlope = Infinity;
     for (let drift = lo; drift <= hi; drift += step) {
-      const trend = effortTrend(trimmed, { ...ceilingParams, durabilityDriftPerHour: drift });
+      const trend = computeEffortTrend(trimmed, { ...ceilingParams, durabilityDriftPerHour: drift });
       if (trend && Math.abs(trend.slopePerHour) < bestAbsSlope) {
         bestAbsSlope = Math.abs(trend.slopePerHour);
         best = drift;
@@ -525,7 +529,7 @@ export function fitDurabilityDriftPerHour(
   const coarse = search(range[0], range[1], 0.002);
   const fine = search(Math.max(range[0], coarse - 0.0018), Math.min(range[1], coarse + 0.0018), 0.0002);
 
-  const fittedTrend = effortTrend(trimmed, { ...ceilingParams, durabilityDriftPerHour: fine });
+  const fittedTrend = computeEffortTrend(trimmed, { ...ceilingParams, durabilityDriftPerHour: fine });
   if (!fittedTrend) return null;
 
   return {

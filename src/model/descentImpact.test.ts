@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CourseSegment } from "../gpx/pipeline";
-import { descentImpact, descentImpactSquared } from "./descentImpact";
+import { descentImpact, descentImpactSquared, descentMeters } from "./descentImpact";
 
 function segment(overrides: Partial<CourseSegment> = {}): CourseSegment {
   return {
@@ -119,5 +119,24 @@ describe("descentImpactSquared", () => {
 
     expect(descentImpact(doubleSpeed) / descentImpact(baseline)).toBeCloseTo(2, 6);
     expect(descentImpactSquared(doubleSpeed) / descentImpactSquared(baseline)).toBeCloseTo(4, 6);
+  });
+});
+
+describe("descentMeters", () => {
+  it("is zero on a flat course or a pure climb", () => {
+    expect(descentMeters([segment({ elevation: 0 }), segment({ elevation: 0 })])).toBe(0);
+    expect(descentMeters([segment({ elevation: 10 }), segment({ elevation: 25 })])).toBe(0);
+  });
+
+  it("sums raw descent meters regardless of speed, unlike the impact variants", () => {
+    const slow = [segment({ elevation: 100 }), segment({ elevation: 90, distance3D: 50, dtS: 100 })]; // 0.5 m/s
+    const fast = [segment({ elevation: 100 }), segment({ elevation: 90, distance3D: 50, dtS: 12.5 })]; // 4 m/s
+    expect(descentMeters(slow)).toBeCloseTo(10, 6);
+    expect(descentMeters(fast)).toBeCloseTo(10, 6);
+  });
+
+  it("excludes paused segments", () => {
+    const segments = [segment({ elevation: 100 }), segment({ elevation: 50, distance3D: 50, dtS: 5, paused: true })];
+    expect(descentMeters(segments)).toBe(0);
   });
 });
