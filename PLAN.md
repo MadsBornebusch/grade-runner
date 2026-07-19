@@ -873,12 +873,30 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    represent continuous-effort ultra pacing well), independent of whether
    descent-based durability is the right fix for it.
 
+   **Follow-up: re-ran Soria Moria excluding the backyard ultra**
+   (`--exclude="Backyard"`, added to `backtestFinishTime.ts` specifically
+   for this) to test that theory directly. Result: fInf dropped from an
+   implausibly-high 0.623 to 0.339, and tauMin from 34.6h to 19.7h (still
+   longer than sensible, but no longer longer than the race itself) —
+   confirming the backyard ultra's looped/forced pacing was distorting the
+   fit as suspected. But the underprediction barely moved: -24.7%
+   (18h29m07s vs. the actual 24h33m16s), down only slightly from -26.8%,
+   and all three descent-drift rates *still* fit to exactly 0. So the
+   backyard ultra wasn't the whole story — even a cleaner 27-race training
+   set (including a real 80km race) contains nothing long/technical enough
+   to exhibit whatever actually costs this athlete ~6 hours on a 171km,
+   ~24.5h effort. That's a real model gap, not (yet) evidence for or
+   against descent-based durability specifically — the descent term simply
+   has no training signal to learn from at this distance scale until a
+   comparably long, continuously-paced race is available to train on.
+
    Net: one real, supportive out-of-sample result for the descent term
-   (Ecotrail 80, `descentMeters` basis), and one case where the surrounding
-   fInf/tau fit itself looks unreliable enough that the descent term never
-   got a fair test. Not enough to declare any basis "the" answer yet —
-   more held-out cases, and a closer look at why Soria Moria's tau/fInf fit
-   landed where it did, are the natural next steps.
+   (Ecotrail 80, `descentMeters` basis), and one race (Soria Moria) the
+   model underpredicts substantially regardless of which candidate is
+   used — a gap the descent term hasn't been shown to explain, only shown
+   to be untestable against with the training data available so far. Not
+   enough to declare any basis "the" answer yet — more held-out cases, and
+   especially more *long* training races, are the natural next steps.
 
    **Second interpretive caveat, specific to the two speed-weighted
    bases:** `descentImpact`/`descentImpactSquared` are fit (in
