@@ -35,6 +35,7 @@ import {
   fitDurabilityDriftPerDescentUnitAcrossRaces,
   fitFInfAndTauAcrossRaces,
   fitTauAcrossRaces,
+  MIN_INFORMATIVE_RACES,
   type DescentExposureBasis,
   type EffortTrendPoint,
 } from "../src/model/pacingFit.ts";
@@ -183,29 +184,44 @@ async function main() {
   }
   console.log(`\n${races.length} training races with usable timestamps -- fitting...\n`);
 
+  // Three-tier fallback: joint fInf/tau fit -> tau-only fit -> hold the
+  // current defaults untouched. Each tier requires at least
+  // MIN_INFORMATIVE_RACES races that actually constrain the parameter(s)
+  // being fit (see pacingFit.ts's own doc on informativeRaceCount) -- a fit
+  // "pooled across N races" where only one of them is actually informative
+  // is really just that one race's idiosyncratic pacing, not a genuine
+  // consensus, and shouldn't be trusted just because it ran without error.
   const fInfFit = fitFInfAndTauAcrossRaces(races, ceilingParams, { raceDates });
+  const tauFit = fitTauAcrossRaces(races, ceilingParams, { raceDates });
   let fittedCeilingParams: CeilingParams = ceilingParams;
   if (
     fInfFit &&
     fInfFit.durationDiversityRatio >= MIN_DURATION_DIVERSITY_RATIO &&
+    fInfFit.informativeRaceCount >= MIN_INFORMATIVE_RACES &&
     !fInfFit.hitSearchBoundary.fInf &&
     !fInfFit.hitSearchBoundary.tau
   ) {
     fittedCeilingParams = { ...ceilingParams, fInf: fInfFit.fInf, tauMin: fInfFit.tauMin };
     console.log(
       `Using jointly-fit fInf=${fInfFit.fInf}, tauMin=${fInfFit.tauMin}min ` +
-        `(durationDiversityRatio=${fInfFit.durationDiversityRatio.toFixed(1)}).`,
+        `(durationDiversityRatio=${fInfFit.durationDiversityRatio.toFixed(1)}, ` +
+        `informativeRaceCount=${fInfFit.informativeRaceCount}/${fInfFit.perRace.length}).`,
     );
-  } else {
-    const tauFit = fitTauAcrossRaces(races, ceilingParams, { raceDates });
-    if (!tauFit) {
-      throw new Error("Neither fitFInfAndTauAcrossRaces nor fitTauAcrossRaces produced a usable fit on the training set.");
-    }
+  } else if (tauFit && tauFit.informativeRaceCount >= MIN_INFORMATIVE_RACES && !tauFit.hitSearchBoundary) {
     fittedCeilingParams = { ...ceilingParams, tauMin: tauFit.tauMin };
     console.log(
       `fInf/tau joint fit unreliable (durationDiversityRatio=${fInfFit?.durationDiversityRatio.toFixed(1) ?? "n/a"}, ` +
+        `informativeRaceCount=${fInfFit?.informativeRaceCount ?? 0}/${fInfFit?.perRace.length ?? 0}, ` +
         `hitSearchBoundary=${JSON.stringify(fInfFit?.hitSearchBoundary ?? null)}) -- falling back to a tau-only fit: ` +
-        `tauMin=${tauFit.tauMin}min, fInf held at the default ${ceilingParams.fInf}.`,
+        `tauMin=${tauFit.tauMin}min (informativeRaceCount=${tauFit.informativeRaceCount}/${tauFit.perRace.length}), ` +
+        `fInf held at the default ${ceilingParams.fInf}.`,
+    );
+  } else {
+    console.log(
+      `  WARNING: neither the joint fInf/tau fit nor the tau-only fit had at least ${MIN_INFORMATIVE_RACES} ` +
+        `informative races (tau-only informativeRaceCount=${tauFit?.informativeRaceCount ?? 0}/${tauFit?.perRace.length ?? 0}) -- ` +
+        `holding tau=${ceilingParams.tauMin}min/fInf=${ceilingParams.fInf} at their current defaults rather than trusting ` +
+        `a fit that a single race could have driven on its own.`,
     );
   }
 
@@ -217,9 +233,17 @@ async function main() {
       console.log(`  ${basis}: no usable fit on the training set (no descent exposure recorded, or too few points) -- skipped.`);
       continue;
     }
+    if (driftFit.informativeRaceCount < MIN_INFORMATIVE_RACES) {
+      console.log(
+        `  ${basis}: skipped -- only ${driftFit.informativeRaceCount}/${driftFit.perRace.length} training races actually ` +
+          `constrained this rate (need >= ${MIN_INFORMATIVE_RACES}); trusting it would mean trusting essentially one race's ` +
+          `descent pattern, not a genuine cross-race fit.`,
+      );
+      continue;
+    }
     console.log(
       `  ${basis}: durabilityDriftPerDescentUnit=${driftFit.durabilityDriftPerDescentUnit.toExponential(3)} ` +
-        `(${driftFit.perRace.filter((r) => r.unresponsive).length}/${driftFit.perRace.length} training races unresponsive)`,
+        `(informativeRaceCount=${driftFit.informativeRaceCount}/${driftFit.perRace.length})`,
     );
     candidates.push({
       name: basis,

@@ -260,6 +260,28 @@ export function fitTauMinutes(
  * near the cutoff) -- see pacingFit.test.ts. */
 const MIN_CEILING_DROP_FRACTION = 0.03;
 
+/**
+ * General guard against a pooled multi-race fit secretly being driven by
+ * one race in disguise: an "unresponsive" race (see MultiRaceTauFitResult's
+ * own doc) contributes an approximately-constant, near-zero term to the
+ * pooled objective regardless of the candidate parameter, so it doesn't
+ * meaningfully constrain where the fit lands -- only the non-unresponsive
+ * ("informative") races actually do. If only one race is informative,
+ * "pooled across N races" is misleading: the result is really just that
+ * one race's own idiosyncratic pacing (which can be very unrepresentative
+ * -- e.g. a looped/forced-pace format like a backyard ultra doesn't decay
+ * the way a continuous-effort race does), dressed up as a multi-race
+ * consensus. `informativeRaceCount` on each pooled result surfaces this so
+ * callers can require at least this many informative races before trusting
+ * the fit, exactly the way `durationDiversityRatio` already gates trust in
+ * the joint fInf/tau fit -- not by special-casing any particular race, but
+ * by generalizing "does this fit actually reflect more than one race?"
+ * into a checkable number. See `scripts/backtestFinishTime.ts` for a
+ * concrete three-tier fallback built on this (joint fit -> tau-only fit ->
+ * hold current defaults), and `RunLibraryPanel.tsx` for the UI warning.
+ */
+export const MIN_INFORMATIVE_RACES = 2;
+
 export interface MultiRaceTauFitResult {
   tauMin: number;
   perRace: {
@@ -278,6 +300,10 @@ export interface MultiRaceTauFitResult {
      */
     unresponsive: boolean;
   }[];
+  /** Count of perRace entries with unresponsive === false -- see
+   * MIN_INFORMATIVE_RACES above for why this matters beyond just perRace
+   * detail. */
+  informativeRaceCount: number;
   hitSearchBoundary: "lower" | "upper" | null;
 }
 
@@ -395,13 +421,16 @@ export function fitTauAcrossRaces(
     return ceilStart > 0 ? (ceilStart - ceilEnd) / ceilStart : 0;
   };
 
+  const perRace = currentTrends.map((current, i) => ({
+    trendAtCurrentPctPerHour: current!.slopePerHour * 100,
+    trendAtFitPctPerHour: fittedTrends[i]!.slopePerHour * 100,
+    unresponsive: ceilingDropFraction(trimmed[i]) < MIN_CEILING_DROP_FRACTION,
+  }));
+
   return {
     tauMin,
-    perRace: currentTrends.map((current, i) => ({
-      trendAtCurrentPctPerHour: current!.slopePerHour * 100,
-      trendAtFitPctPerHour: fittedTrends[i]!.slopePerHour * 100,
-      unresponsive: ceilingDropFraction(trimmed[i]) < MIN_CEILING_DROP_FRACTION,
-    })),
+    perRace,
+    informativeRaceCount: perRace.filter((r) => !r.unresponsive).length,
     hitSearchBoundary,
   };
 }
@@ -434,6 +463,9 @@ export interface FInfTauFitResult {
     trendAtFitPctPerHour: number;
     unresponsive: boolean;
   }[];
+  /** See MIN_INFORMATIVE_RACES's doc above -- count of perRace entries with
+   * unresponsive === false. */
+  informativeRaceCount: number;
   hitSearchBoundary: { fInf: "lower" | "upper" | null; tau: "lower" | "upper" | null };
 }
 
@@ -543,15 +575,18 @@ export function fitFInfAndTauAcrossRaces(
     return ceilStart > 0 ? (ceilStart - ceilEnd) / ceilStart : 0;
   };
 
+  const perRace = currentTrends.map((current, i) => ({
+    trendAtCurrentPctPerHour: current!.slopePerHour * 100,
+    trendAtFitPctPerHour: fittedTrends[i]!.slopePerHour * 100,
+    unresponsive: ceilingDropFraction(trimmed[i]) < MIN_CEILING_DROP_FRACTION,
+  }));
+
   return {
     fInf,
     tauMin,
     durationDiversityRatio: Math.max(...totalMinPerRace) / Math.min(...totalMinPerRace),
-    perRace: currentTrends.map((current, i) => ({
-      trendAtCurrentPctPerHour: current!.slopePerHour * 100,
-      trendAtFitPctPerHour: fittedTrends[i]!.slopePerHour * 100,
-      unresponsive: ceilingDropFraction(trimmed[i]) < MIN_CEILING_DROP_FRACTION,
-    })),
+    perRace,
+    informativeRaceCount: perRace.filter((r) => !r.unresponsive).length,
     hitSearchBoundary: {
       fInf: fInf <= fInfLo + 0.005 ? "lower" : fInf >= fInfHi - 0.005 ? "upper" : null,
       tau: tauMin <= tauLo + 1 ? "lower" : tauMin >= tauHi - 1 ? "upper" : null,
@@ -704,6 +739,9 @@ export interface MultiRaceDescentDriftFitResult {
      * saturation. */
     unresponsive: boolean;
   }[];
+  /** See MIN_INFORMATIVE_RACES's doc above -- count of perRace entries with
+   * unresponsive === false. */
+  informativeRaceCount: number;
   hitSearchBoundary: "lower" | "upper" | null;
 }
 
@@ -806,13 +844,16 @@ export function fitDurabilityDriftPerDescentUnitAcrossRaces(
         ? "upper"
         : null;
 
+  const perRace = currentTrends.map((current, i) => ({
+    trendAtCurrentPctPerHour: current!.slopePerHour * 100,
+    trendAtFitPctPerHour: fittedTrends[i]!.slopePerHour * 100,
+    unresponsive: durabilityDriftPerDescentUnit * maxExposurePerRace[i] < MIN_CEILING_DROP_FRACTION,
+  }));
+
   return {
     durabilityDriftPerDescentUnit,
-    perRace: currentTrends.map((current, i) => ({
-      trendAtCurrentPctPerHour: current!.slopePerHour * 100,
-      trendAtFitPctPerHour: fittedTrends[i]!.slopePerHour * 100,
-      unresponsive: durabilityDriftPerDescentUnit * maxExposurePerRace[i] < MIN_CEILING_DROP_FRACTION,
-    })),
+    perRace,
+    informativeRaceCount: perRace.filter((r) => !r.unresponsive).length,
     hitSearchBoundary,
   };
 }

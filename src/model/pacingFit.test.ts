@@ -212,6 +212,7 @@ describe("fitTauAcrossRaces", () => {
       expect(result!.perRace[1].unresponsive).toBe(true);
       expect(result!.perRace[2].unresponsive).toBe(false);
       expect(result!.perRace[3].unresponsive).toBe(false);
+      expect(result!.informativeRaceCount).toBe(2);
     });
 
     it("does not flag a clean two-race case where both races genuinely inform the fit", () => {
@@ -221,6 +222,25 @@ describe("fitTauAcrossRaces", () => {
       expect(result).not.toBeNull();
       expect(result!.perRace[0].unresponsive).toBe(false);
       expect(result!.perRace[1].unresponsive).toBe(false);
+      expect(result!.informativeRaceCount).toBe(2);
+    });
+
+    it("informativeRaceCount drops to 1 when only one long race actually constrains a pool of otherwise-short ones -- the general single-race-blowup guard", () => {
+      // Same shape as the real bug report this guard was built for: short,
+      // structurally-unresponsive races pooled alongside one long one that
+      // alone determines where the fit lands. MIN_INFORMATIVE_RACES callers
+      // (backtestFinishTime.ts, RunLibraryPanel.tsx) use this count to
+      // decide whether "pooled across N races" is actually true. Reuses the
+      // same three races as the test above, just drops one of its two
+      // independently-responsive long races (race660) to isolate the case
+      // where exactly one race is left carrying the whole fit.
+      const race50 = makeRealisticRace(50, 0.8, -0.1, 2);
+      const race270 = makeRealisticRace(270, 0.75, -0.02);
+      const race960 = makeRealisticRace(960, 0.65, 0.008);
+
+      const result = fitTauAcrossRaces([race50, race270, race960], { ...baseParams, tauMin: 250 });
+      expect(result).not.toBeNull();
+      expect(result!.informativeRaceCount).toBe(1);
     });
   });
 });
@@ -277,6 +297,8 @@ describe("fitFInfAndTauAcrossRaces", () => {
     expect(result).not.toBeNull();
     expect(result!.perRace).toHaveLength(5);
     expect(result!.perRace[0].unresponsive).toBe(true); // the 1h race can't leave the cap at tau~300
+    expect(result!.informativeRaceCount).toBe(result!.perRace.filter((r) => !r.unresponsive).length);
+    expect(result!.informativeRaceCount).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -404,6 +426,7 @@ describe("fitDurabilityDriftPerDescentUnitAcrossRaces", () => {
     expect(result).not.toBeNull();
     expect(result!.perRace[0].unresponsive).toBe(false);
     expect(result!.perRace[1].unresponsive).toBe(true);
+    expect(result!.informativeRaceCount).toBe(1);
   });
 
   it("ignores a race with too few points and still fits from the rest", () => {
