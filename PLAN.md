@@ -826,7 +826,7 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    that the effect shows up as a graduated pace change, not a discrete
    run/walk mode flip that's identical regardless of the rate's magnitude.
 
-   **Out-of-sample backtest tooling — built, not yet run.**
+   **Out-of-sample backtest tooling — built and run.**
    `scripts/backtestFinishTime.ts` fits (fInf, tau) and a per-basis descent
    drift rate on a training window of past races, excluding one named
    target race, then predicts that race's finish time via the real solver
@@ -842,11 +842,43 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    the training races) is close to guaranteed by construction and easily
    confounded with tau/time-drift already explaining the same trend — it
    is NOT evidence the term matters. Only the backtest script's held-out
-   comparison is. The script has not been run against real data yet (needs
-   a live `vercel dev` session plus a fresh Strava cookie); running it for
-   the two named cases (Soria Moria against ~2025-2026 training data,
-   Ecotrail 80 against ~2024-2025 data) is the natural next step, not a
-   "done" claim to make without having seen the numbers.
+   comparison is.
+
+   **Real results, both named cases (2026-07-19 run):**
+
+   *Ecotrail 80* (target: 2025-05-24, 80km; trained on 25 races from
+   2024-01-01 to 2025-05-24, jointly-fit fInf=0.529/tauMin=169min): baseline
+   underpredicted the actual 8h24m50s finish by -5.0% (7h59m37s). All three
+   descent bases improved on it — `descentMeters` nearly exactly
+   (8h23m58s, -0.2% error), `descentImpact` -2.1%, `descentImpactSquared`
+   -3.5%. This is the first real out-of-sample evidence in this project
+   that the descent term helps, with the "clean" (non-speed-weighted)
+   basis winning — consistent with the speed-basis-mismatch caveat below
+   predicting the speed-weighted forms would underperform it.
+
+   *Soria Moria til Verdens Ende* (target: 2026-05-30, 171km/~24.5h;
+   trained on 27 races from 2025-01-01 to 2026-05-30, jointly-fit
+   fInf=0.623/tauMin=2075min ≈ 34.6h): all three descent-drift rates fit to
+   exactly **0** (27/27 training races flagged unresponsive) — the training
+   set (mostly 8-30km runs, one 106.9km backyard ultra) gave the fit no
+   residual downward trend to explain once tau/fInf had already been fit,
+   so the descent term genuinely couldn't be tested here; all 4 candidates
+   predicted identically. More strikingly, baseline underpredicted the
+   actual 24h33m16s finish by **-26.8%** (17h58m23s) — a 6.5-hour miss. A
+   fitted tauMin longer than the race itself (34.6h fit vs. a 24.5h race)
+   means the model treats this whole race as still inside the early,
+   barely-decayed plateau — worth investigating on its own (possibly an
+   artifact of pooling very short training runs with one long, irregular
+   backyard-ultra effort whose looped/forced-pace dynamics may not
+   represent continuous-effort ultra pacing well), independent of whether
+   descent-based durability is the right fix for it.
+
+   Net: one real, supportive out-of-sample result for the descent term
+   (Ecotrail 80, `descentMeters` basis), and one case where the surrounding
+   fInf/tau fit itself looks unreliable enough that the descent term never
+   got a fair test. Not enough to declare any basis "the" answer yet —
+   more held-out cases, and a closer look at why Soria Moria's tau/fInf fit
+   landed where it did, are the natural next steps.
 
    **Second interpretive caveat, specific to the two speed-weighted
    bases:** `descentImpact`/`descentImpactSquared` are fit (in
@@ -867,13 +899,15 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
 Stages 1-5 are now built. Stages 1-4 (plus the avgIntensity/within-race
 fixes folded into stage 4 above) are well-supported by existing literature
 and directly extend code that already existed; stage 5 is explicitly
-exploratory — its mechanism, fitting, and prediction wiring are built and
-unit-tested, but its real-world validation (the out-of-sample backtest
-above) is still pending an actual run against real data. Flag any of its
-results as exploratory in the UI, the same way the single-race tau fit
-already flags negative-split ambiguity, until the backtest has actually
-been run and shown the descent term earns its place. Stage 5's target was
-sharpened by an independent design review — see §13.
+exploratory — its mechanism, fitting, and prediction wiring are built,
+unit-tested, and now backtested against two real held-out races (see
+above), with one supportive result (Ecotrail 80, `descentMeters`) and one
+inconclusive one (Soria Moria, where the surrounding fInf/tau fit itself
+looks unreliable). That's early evidence, not a settled result — flag any
+of its predictions as exploratory in the UI, the same way the single-race
+tau fit already flags negative-split ambiguity, until more held-out cases
+back it up. Stage 5's target was sharpened by an independent design
+review — see §13.
 
 ## 13. Second-opinion design review — comparison against a mechanistic 5-layer model
 
