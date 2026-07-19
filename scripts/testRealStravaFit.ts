@@ -72,7 +72,13 @@ async function main() {
   const withinRacePoints: WithinRaceDiagnosticPoint[] = [];
   for (const run of candidates) {
     if (run.stravaId === undefined) continue;
-    const { points } = await fetchActivityPoints(BASE_URL, cookie, run.stravaId);
+    let points;
+    try {
+      ({ points } = await fetchActivityPoints(BASE_URL, cookie, run.stravaId));
+    } catch (err) {
+      console.log(`  skipped (fetch failed: ${err instanceof Error ? err.message : err}): ${run.name}`);
+      continue;
+    }
     const course = runPipeline(points);
     if (!course.hasTimestamps) {
       console.log(`  skipped (no timestamps): ${run.name}`);
