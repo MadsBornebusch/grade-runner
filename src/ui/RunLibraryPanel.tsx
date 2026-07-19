@@ -6,6 +6,7 @@ import {
   buildEffortTrendPoints,
   fitFInfAndTauAcrossRaces,
   fitTauAcrossRaces,
+  MIN_INFORMATIVE_RACES,
   type EffortTrendPoint,
   type FInfTauFitResult,
   type MultiRaceTauFitResult,
@@ -692,6 +693,14 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
           <p className="field-group-note">
             Best-fit tau across {fitResult.perRace.length} run{fitResult.perRace.length === 1 ? "" : "s"}: {fitResult.tauMin} min.
           </p>
+          {fitResult.informativeRaceCount < MIN_INFORMATIVE_RACES && (
+            <p className="warning">
+              Only {fitResult.informativeRaceCount} of {fitResult.perRace.length} selected runs actually constrained
+              this fit (see the unresponsive ones marked below) -- with fewer than {MIN_INFORMATIVE_RACES}, this isn't
+              really a pooled result, it's effectively one run's own pacing labeled as a fit across many. Treat this
+              tau with real caution, or select more runs of a genuinely different duration before applying it.
+            </p>
+          )}
           <ul className="run-library__fit-notes">
             {fitResult.perRace.map((race, i) => (
               <li key={i} className={race.unresponsive ? "warning" : "field-group-note"}>
@@ -738,6 +747,14 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
             Best fit: fInf {fInfFitResult.fInf.toFixed(2)}, tau {fInfFitResult.tauMin} min, across{" "}
             {fInfFitResult.perRace.length} run{fInfFitResult.perRace.length === 1 ? "" : "s"}.
           </p>
+          {fInfFitResult.informativeRaceCount < MIN_INFORMATIVE_RACES && (
+            <p className="warning">
+              Only {fInfFitResult.informativeRaceCount} of {fInfFitResult.perRace.length} selected runs actually
+              constrained this fit -- with fewer than {MIN_INFORMATIVE_RACES}, "fInf {fInfFitResult.fInf.toFixed(2)},
+              tau {fInfFitResult.tauMin}min" is really just one run's own pacing, not a genuine multi-race result.
+              Select more runs of a different duration before applying either value.
+            </p>
+          )}
           <ul className="run-library__fit-notes">
             {fInfFitResult.perRace.map((race, i) => (
               <li key={i} className={race.unresponsive ? "warning" : "field-group-note"}>
