@@ -746,25 +746,118 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    (running-total-so-far) form rather than a single race-level summary —
    the same way `durabilityDriftPerHour` would need to key off cumulative
    descent-impact-so-far, not a whole-race total, at each point in a race.
-5. **Descent/eccentric-load-dependent durability term** (only if stage 4
-   shows a real signal). Not yet built. Sharpened by an independent design
-   review (§13): key durability to cumulative descent/eccentric work
-   instead of `durabilityDriftPerHour`'s current linear-in-elapsed-time
-   form, which is collinear with tau's own exponential decay — not a vaguer
-   "intensity-dependent" redesign. Still research territory, no established
-   formula to copy; start narrow (e.g. a term that shrinks the ceiling as a
-   function of cumulative descent, alongside — not replacing — the existing
-   time-based fade) rather than a full central/peripheral two-component
-   model in one step.
 
-Stages 1-4 are done and well-supported by existing literature, directly
-extending code that already existed. Stage 4's result (run it in the app —
-needs at least 3 already-fetched runs) is what decides whether stage 5,
-which is explicitly exploratory, is worth building at all — flag any result
-from it as such in the UI, the same way the single-race tau fit already
-flags negative-split ambiguity. Stage 5's target has since been sharpened by
-an independent design review —
-see §13.
+   **Confound found and fixed in `avgIntensity` itself.**
+   `avgEffortFraction` is actual power ÷ the model's own duration-decaying
+   predicted ceiling, computed against whatever `tauMin` the caller
+   assumed — using one global default tau for races of very different
+   lengths systematically inflated the reading for anything much longer
+   than that tau's own timescale (a ~30h race read as 94% effort against a
+   250min default tau, since the assumed curve had already decayed to
+   near-fInf long before the race was done). Fixed by
+   `raceDiagnosticPoint.ts`'s `buildRaceDiagnosticPoint`: fit each race's
+   own tau first (already reported by the diagnostic), then recompute
+   `avgEffortFraction` against THAT tau, not the global default. Verified
+   on real data: Soria Moria 94%→55%, Ecotrail 80 101%→78%; the
+   tau-vs-intensity correlation across all races went from an unstable,
+   confounded reading to a consistent -0.60 at n=12.
+
+   **Within-race redesign, not just a whole-race diagnostic — built.** The
+   whole-race diagnostic above averages descent-load and fade over an
+   entire race, which can't distinguish "this race was generally hard"
+   from "a fast descent specifically degraded output afterward" — the
+   actual physiological claim under test. `withinRaceDescentDiagnostic.ts`
+   splits each race in half by elapsed time, computes early-window descent
+   metrics (normalized per km) and the late window's own residual fade
+   trend relative to the race's already-fitted whole-race tau (not a
+   second independent fit). Validated with synthetic known-injected-effect
+   and null-control tests (catching and fixing 3 real bugs in the
+   synthetic course builder along the way: distance3D/horizontal
+   derivation order, a bogus altitude-adjustment penalty from synthetic
+   elevation, and an overly-strict null-control assertion) before trusting
+   it on real data. Real data initially showed an unstable, wrong-signed
+   correlation (+0.32 to +0.37) driven by two ~20-minute "races" whose late
+   windows were too short to carry any real fatigue signal but dominated
+   the small sample — fixed per the athlete's own hypothesis ("I doubt we
+   will see any muscular fade in runs below 1 hour") by adding a
+   `minLateWindowHours` floor (default 1h) alongside the existing
+   point-count floor. Re-run: n dropped from 12 to 7, correlations flipped
+   to the hypothesized direction (raw descent -0.58, descent impact -0.39,
+   descent impact² -0.23) — the "real signal" gate stage 5 below was
+   waiting on.
+5. **Descent/eccentric-load-dependent durability term — built**, once the
+   within-race diagnostic above cleared its own "real signal" gate (n=7,
+   all three descent-exposure forms negatively correlated with late-race
+   fade in the hypothesized direction). Added as a second, independent
+   multiplicative drift term in `ceiling.ts`
+   (`durabilityDriftPerDescentUnit` / `CeilingInput.descentExposure`),
+   composing with — not replacing — the existing time-based
+   `durabilityDriftPerHour`. All three descent-exposure forms from stage 4
+   (raw descent, descent×speed, descent×speed²) are kept as live
+   candidates rather than picking one; `ceiling.ts` itself is agnostic
+   about which metric `descentExposure` represents — that choice belongs
+   to the caller.
+
+   `descentImpact.ts`'s per-segment core was extracted into
+   `descentStepForSegment` so the whole-array summaries, `pacingFit.ts`'s
+   incremental per-point tracking, and `solver.ts`'s incremental
+   prediction-time tracking share one elevation-delta/pause-exclusion
+   implementation instead of three. `pacingFit.ts` gained cumulative
+   descent fields on `EffortTrendPoint`, a single-race fit
+   (`fitDurabilityDriftPerDescentUnit`), and a pooled multi-race fit
+   (`fitDurabilityDriftPerDescentUnitAcrossRaces`, mirroring
+   `fitTauAcrossRaces`'s per-race-squared-slope pooling — needed once a fit
+   has to span a training set of races, not just recover a rate from one).
+   `solver.ts`'s `SolverInputs` gained `descentExposureBasis`, tracked via
+   the segment's own *simulated* speed during forward simulation,
+   deliberately NOT via `descentStepForSegment`'s recorded-pace speed — a
+   planning-mode course typically has no timestamps at all, and even a
+   previously-recorded GPX's pace isn't what the solver is predicting.
+
+   Every new fitting mechanism was verified with a synthetic
+   known-injected-rate recovery test before being trusted, same discipline
+   as stages 1-4. One real trap surfaced during that verification:
+   `solver.test.ts`'s first synthetic descent course reused a fixture that
+   pinned `elevation` at 0 regardless of gradient (fine for the grade-cost
+   tests it was built for), which made the descent term's own test
+   exercise ~1% of the intended exposure and pass for the wrong reason —
+   fixed by building a course whose elevation genuinely accumulates, and by
+   choosing an effort level with enough headroom above the walk-speed cap
+   that the effect shows up as a graduated pace change, not a discrete
+   run/walk mode flip that's identical regardless of the rate's magnitude.
+
+   **Out-of-sample backtest tooling — built, not yet run.**
+   `scripts/backtestFinishTime.ts` fits (fInf, tau) and a per-basis descent
+   drift rate on a training window of past races, excluding one named
+   target race, then predicts that race's finish time via the real solver
+   (`findSustainableTheta`) and compares it to what actually happened —
+   reporting all 4 candidates (baseline + 3 descent bases) against the
+   actual recorded moving time. This is the first genuinely predictive
+   check in this project (everything above validates retrospective fit,
+   not prediction of a held-out race) and is meant to be the actual
+   arbiter of whether any descent form earns a permanent place in the
+   model. **Important interpretive caveat:** within one race, cumulative
+   descent exposure is close to monotonic in elapsed time, so a good
+   in-sample fit (`fitDurabilityDriftPerDescentUnitAcrossRaces` flattening
+   the training races) is close to guaranteed by construction and easily
+   confounded with tau/time-drift already explaining the same trend — it
+   is NOT evidence the term matters. Only the backtest script's held-out
+   comparison is. The script has not been run against real data yet (needs
+   a live `vercel dev` session plus a fresh Strava cookie); running it for
+   the two named cases (Soria Moria against ~2025-2026 training data,
+   Ecotrail 80 against ~2024-2025 data) is the natural next step, not a
+   "done" claim to make without having seen the numbers.
+
+Stages 1-5 are now built. Stages 1-4 (plus the avgIntensity/within-race
+fixes folded into stage 4 above) are well-supported by existing literature
+and directly extend code that already existed; stage 5 is explicitly
+exploratory — its mechanism, fitting, and prediction wiring are built and
+unit-tested, but its real-world validation (the out-of-sample backtest
+above) is still pending an actual run against real data. Flag any of its
+results as exploratory in the UI, the same way the single-race tau fit
+already flags negative-split ambiguity, until the backtest has actually
+been run and shown the descent term earns its place. Stage 5's target was
+sharpened by an independent design review — see §13.
 
 ## 13. Second-opinion design review — comparison against a mechanistic 5-layer model
 
