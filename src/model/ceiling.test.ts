@@ -59,4 +59,37 @@ describe("ceilingPower", () => {
     const b = ceilingPower({ tMin: 0, elapsedHours: 0 }, { durabilityDriftPerHour: 0.02 });
     expect(a).toBeCloseTo(b, 10);
   });
+
+  describe("descent-based durability drift (PLAN.md §12/§13 stage 5)", () => {
+    it("reduces the ceiling over cumulative descent exposure when enabled", () => {
+      const noDrift = ceilingPower({ tMin: 300, descentExposure: 500 });
+      const withDrift = ceilingPower({ tMin: 300, descentExposure: 500 }, { durabilityDriftPerDescentUnit: 0.0005 });
+      expect(withDrift).toBeLessThan(noDrift);
+    });
+
+    it("is off by default, and has no effect even when descentExposure is provided", () => {
+      const a = ceilingPower({ tMin: 300, descentExposure: 1000 });
+      const b = ceilingPower({ tMin: 300, descentExposure: 1000 }, {});
+      expect(a).toBeCloseTo(b, 10);
+    });
+
+    it("has no effect when descentExposure is omitted, even if the rate is configured", () => {
+      // A caller that never tracked descent exposure shouldn't be silently
+      // penalized just because a rate happens to be configured -- the term
+      // needs an explicit exposure value to apply at all.
+      const a = ceilingPower({ tMin: 300 });
+      const b = ceilingPower({ tMin: 300 }, { durabilityDriftPerDescentUnit: 0.0005 });
+      expect(a).toBeCloseTo(b, 10);
+    });
+
+    it("doesn't affect the elapsed-time-based drift term, and both compose when both are set", () => {
+      const timeOnly = ceilingPower({ tMin: 300, elapsedHours: 5 }, { durabilityDriftPerHour: 0.01 });
+      const both = ceilingPower(
+        { tMin: 300, elapsedHours: 5, descentExposure: 500 },
+        { durabilityDriftPerHour: 0.01, durabilityDriftPerDescentUnit: 0.0005 },
+      );
+      // Both terms active should reduce the ceiling further than either alone.
+      expect(both).toBeLessThan(timeOnly);
+    });
+  });
 });

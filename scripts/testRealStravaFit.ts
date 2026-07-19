@@ -16,19 +16,11 @@
 // Usage:
 //   npx tsx scripts/testRealStravaFit.ts [--base=http://localhost:3000] [--since=2024-01-01]
 
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { GpxPoint } from "../src/gpx/pipeline.ts";
 import { runPipeline } from "../src/gpx/pipeline.ts";
 import { analyzeRun } from "../src/model/analysis.ts";
 import { buildEffortTrendPoints, fitFInfAndTauAcrossRaces, fitTauAcrossRaces, type EffortTrendPoint } from "../src/model/pacingFit.ts";
 import { buildRaceDiagnosticPoint } from "../src/model/raceDiagnosticPoint.ts";
-import {
-  filterRunsSinceDate,
-  shouldFetchNextBackfillPage,
-  toStoredRunSummaryInput,
-  type BackfillPage,
-} from "../src/model/stravaBackfill.ts";
 import { suggestRunsForFit } from "../src/model/suggestRuns.ts";
 import { computeTauDiagnostic, type RaceDiagnosticPoint } from "../src/model/tauDiagnostic.ts";
 import {
@@ -36,90 +28,16 @@ import {
   computeWithinRaceDescentDiagnostic,
   type WithinRaceDiagnosticPoint,
 } from "../src/model/withinRaceDescentDiagnostic.ts";
-import type { StoredRun } from "../src/storage/runLibrary.ts";
 import { DEFAULT_FORM_INPUTS, resolveVo2Max } from "../src/ui/formInputs.ts";
-
-function arg(name: string, fallback: string): string {
-  const prefix = `--${name}=`;
-  return process.argv.find((a) => a.startsWith(prefix))?.slice(prefix.length) ?? fallback;
-}
+import { arg, backfill, fetchActivityPoints, loadCookie } from "./stravaScriptHelpers.ts";
 
 const BASE_URL = arg("base", "http://localhost:3000");
 const SINCE_DATE = new Date(arg("since", "2024-01-01"));
 const SESSION_FILE = fileURLToPath(new URL("../.strava-session.local", import.meta.url));
-const MAX_BACKFILL_PAGES = 20;
-const BACKFILL_PER_PAGE = 100;
 const SUGGESTION_COUNT = 10;
 
-function loadCookie(): string {
-  try {
-    return readFileSync(SESSION_FILE, "utf8").trim();
-  } catch {
-    throw new Error(
-      `Missing ${SESSION_FILE}. Log in via the browser at ${BASE_URL}, copy the gr_session cookie value from ` +
-        `DevTools (Application > Cookies), and save just that value (no "gr_session=" prefix) into that file.`,
-    );
-  }
-}
-
-async function fetchJson(path: string, cookie: string): Promise<unknown> {
-  const res = await fetch(`${BASE_URL}${path}`, { headers: { Cookie: `gr_session=${cookie}` } });
-  const body = await res.json();
-  if (!res.ok) throw new Error(`${path} -> ${res.status}: ${body.error ?? JSON.stringify(body)}`);
-  return body;
-}
-
-/** Mirrors stravaClient.ts's fetchStravaActivity -- `time` comes back as an
- * ISO string over JSON, parsed back to a Date here. */
-interface WireGpxPoint {
-  lat: number;
-  lon: number;
-  ele: number | null;
-  time: string | null;
-  hr: number | null;
-  power: number | null;
-}
-
-async function fetchActivityPoints(cookie: string, stravaId: number): Promise<{ name: string; points: GpxPoint[] }> {
-  const body = (await fetchJson(`/api/strava/activity?id=${stravaId}`, cookie)) as { name: string; points: WireGpxPoint[] };
-  const points: GpxPoint[] = body.points.map((p) => ({ ...p, time: p.time ? new Date(p.time) : null }));
-  return { name: body.name, points };
-}
-
-/** Mirrors RunLibraryPanel.tsx's runBackfill loop, minus the IndexedDB
- * write -- runs are kept in memory only, for this one-off report. */
-async function backfill(cookie: string, sinceDate: Date): Promise<StoredRun[]> {
-  const runs: StoredRun[] = [];
-  let page = 1;
-  for (;;) {
-    const body = (await fetchJson(
-      `/api/strava/activities?page=${page}&per_page=${BACKFILL_PER_PAGE}`,
-      cookie,
-    )) as BackfillPage;
-    for (const r of filterRunsSinceDate(body.runs, sinceDate)) {
-      const input = toStoredRunSummaryInput(r);
-      runs.push({
-        id: `strava:${input.stravaId}`,
-        name: input.name,
-        addedAt: Date.now(),
-        points: null,
-        stravaId: input.stravaId,
-        date: input.date,
-        distanceKm: input.distanceKm,
-        durationS: input.durationS,
-        elevationGainM: input.elevationGainM,
-        avgHeartRate: input.avgHeartRate,
-        avgWatts: input.avgWatts,
-      });
-    }
-    if (!shouldFetchNextBackfillPage(body, page, sinceDate, MAX_BACKFILL_PAGES)) break;
-    page++;
-  }
-  return runs;
-}
-
 async function main() {
-  const cookie = loadCookie();
+  const cookie = loadCookie(SESSION_FILE, BASE_URL);
   const formInputs = DEFAULT_FORM_INPUTS;
   // Same shape RunLibraryPanel.tsx builds -- default athlete params, not any
   // saved profile (this script has no access to localStorage).
@@ -133,7 +51,7 @@ async function main() {
   };
 
   console.log(`Backfilling run summaries since ${SINCE_DATE.toISOString().slice(0, 10)} from ${BASE_URL}...`);
-  const runs = await backfill(cookie, SINCE_DATE);
+  const runs = await backfill(BASE_URL, cookie, SINCE_DATE);
   console.log(`Found ${runs.length} runs.\n`);
 
   const suggestions = suggestRunsForFit(runs, SUGGESTION_COUNT);
@@ -154,7 +72,7 @@ async function main() {
   const withinRacePoints: WithinRaceDiagnosticPoint[] = [];
   for (const run of candidates) {
     if (run.stravaId === undefined) continue;
-    const { points } = await fetchActivityPoints(cookie, run.stravaId);
+    const { points } = await fetchActivityPoints(BASE_URL, cookie, run.stravaId);
     const course = runPipeline(points);
     if (!course.hasTimestamps) {
       console.log(`  skipped (no timestamps): ${run.name}`);

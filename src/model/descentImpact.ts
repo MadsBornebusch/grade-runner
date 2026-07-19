@@ -19,10 +19,22 @@
 
 import type { CourseSegment } from "../gpx/pipeline";
 
+export interface DescentStep {
+  /** 0 if this segment doesn't count as descent (paused, no timing, or
+   * climbing/flat). */
+  descentM: number;
+  /** null under the same conditions descentM is 0 for a non-descending
+   * reason -- distinguishes "counts, but happens to be 0 descent" from
+   * "doesn't count at all" for callers that need to know which. */
+  speedMs: number | null;
+}
+
 /**
- * Sums `descentMeters * speedWeight(speedMs)` across all non-paused,
- * descending segments. Shared by the linear and speed^2 variants below so a
- * fix to the elevation-delta/pause-exclusion logic can't drift between them.
+ * Per-segment core shared by the whole-array sums below *and* by callers
+ * that need to track a running cumulative total alongside their own other
+ * per-segment state (pacingFit.ts's buildEffortTrendPoints, solver.ts's
+ * simulate) -- rather than recomputing this same elevation-delta/pause
+ * logic in three places that could drift apart.
  *
  * Elevation delta is derived from consecutive segments' own smoothed
  * `elevation` (matching how the pipeline's own totalElevationGain/Loss are
@@ -30,19 +42,34 @@ import type { CourseSegment } from "../gpx/pipeline";
  * segment, which has no prior segment to diff against and falls back to
  * `gradient x distanceHorizontal`. That approximation touches at most one
  * out of typically hundreds/thousands of segments, a negligible edge effect.
+ *
+ * Callers must pass the *previous* segment's own `elevation` (null for the
+ * first segment) and update their own running value to `seg.elevation`
+ * after each call, unconditionally -- regardless of whether this step
+ * "counted".
+ */
+export function descentStepForSegment(seg: CourseSegment, previousElevation: number | null): DescentStep {
+  const eleDelta =
+    previousElevation !== null ? seg.elevation - previousElevation : seg.gradient * seg.distanceHorizontal;
+
+  if (seg.paused || seg.dtS === null || seg.dtS <= 0 || eleDelta >= 0) {
+    return { descentM: 0, speedMs: null };
+  }
+  return { descentM: -eleDelta, speedMs: seg.distance3D / seg.dtS };
+}
+
+/**
+ * Sums `descentMeters * speedWeight(speedMs)` across all non-paused,
+ * descending segments. Shared by the linear and speed^2 variants below so a
+ * fix to the elevation-delta/pause-exclusion logic can't drift between them.
  */
 function sumDescentWeightedBySpeed(segments: CourseSegment[], speedWeight: (speedMs: number) => number): number {
   let impact = 0;
   let previousElevation: number | null = null;
   for (const seg of segments) {
-    const eleDelta =
-      previousElevation !== null ? seg.elevation - previousElevation : seg.gradient * seg.distanceHorizontal;
+    const { descentM, speedMs } = descentStepForSegment(seg, previousElevation);
     previousElevation = seg.elevation;
-
-    if (seg.paused || seg.dtS === null || seg.dtS <= 0 || eleDelta >= 0) continue;
-    const descentM = -eleDelta;
-    const speedMs = seg.distance3D / seg.dtS;
-    impact += descentM * speedWeight(speedMs);
+    if (speedMs !== null) impact += descentM * speedWeight(speedMs);
   }
   return impact;
 }

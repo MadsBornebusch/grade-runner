@@ -186,3 +186,142 @@ describe("findSustainableTheta", () => {
     expect(simulate(0.3, impossible).bonkIndex).toBe(0);
   });
 });
+
+describe("descent-based durability drift (PLAN.md §12/§13 stage 5)", () => {
+  /**
+   * A steep descent for the first half, flat for the second -- so a
+   * descent-driven drift term should suppress the ceiling specifically in
+   * the second half, slowing it down relative to an otherwise-identical
+   * pure-flat course.
+   *
+   * Elevation actually accumulates here (unlike makeSegments, which always
+   * pins elevation at 0 regardless of gradient -- fine for the grade-cost
+   * tests above, but this describe block's whole point is exercising
+   * solver.ts's own eleDelta tracking, which reads consecutive segments'
+   * `elevation`, not `gradient`). altitudeAdjustment is turned off below so
+   * the resulting large negative elevation doesn't also perturb the ceiling
+   * via the (here, irrelevant) Cerretelli altitude correction -- same
+   * reasoning withinRaceDescentDiagnostic.test.ts's synthetic course uses.
+   */
+  /** Theta chosen so the flat course's baseline run speed sits comfortably
+   * above walkMaxMs (~2.96 m/s vs. a 2.0 m/s cap) -- otherwise ANY
+   * configured drift rate immediately tips the run/walk choice over to the
+   * walk-speed cap, which is then completely insensitive to the rate's
+   * actual magnitude and makes every basis/rate combination converge on the
+   * exact same (mode-capped, not power-limited) finish time -- a real trap
+   * this test tripped into during development. */
+  const DESCENT_TEST_THETA = 0.8;
+
+  function frontLoadedDescentSegments(descentSteps: number, flatSteps: number): CourseSegment[] {
+    const segLenM = 50;
+    const descentGradient = -0.15;
+    const segments: CourseSegment[] = [];
+    let cumulativeDistance3D = 0;
+    let elevation = 0;
+    for (let i = 0; i < descentSteps; i++) {
+      cumulativeDistance3D += segLenM;
+      elevation += descentGradient * segLenM;
+      segments.push({
+        index: i,
+        cumulativeDistance3D,
+        distanceHorizontal: segLenM,
+        distance3D: segLenM,
+        elevation,
+        gradient: descentGradient,
+        time: null,
+        dtS: null,
+        paused: false,
+        heartRateBpm: null,
+        powerWatts: null,
+      });
+    }
+    for (let i = 0; i < flatSteps; i++) {
+      cumulativeDistance3D += segLenM;
+      segments.push({
+        index: descentSteps + i,
+        cumulativeDistance3D,
+        distanceHorizontal: segLenM,
+        distance3D: segLenM,
+        elevation, // stays at the bottom of the descent for the flat tail
+        gradient: 0,
+        time: null,
+        dtS: null,
+        paused: false,
+        heartRateBpm: null,
+        powerWatts: null,
+      });
+    }
+    return segments;
+  }
+
+  // 2.5km descent (@ -15% -> 375m) then a 15km flat tail -- long enough
+  // after the descent for a moderate drift rate to show up as a genuinely
+  // graduated pace change, not just an earlier flip into the walk cap.
+  const TEST_COURSE = () => frontLoadedDescentSegments(50, 300);
+
+  it("finishes slower than an otherwise-identical flat course when a descent-drift rate is configured", () => {
+    const flat = baseInputs({ segments: makeSegments(350, 50, 0), altitudeAdjustment: false });
+    const descentThenFlat = baseInputs({ segments: TEST_COURSE(), altitudeAdjustment: false });
+
+    const withoutDrift = simulate(DESCENT_TEST_THETA, {
+      ...descentThenFlat,
+      ceilingParams: { durabilityDriftPerDescentUnit: 0.0001 },
+      // No basis configured -- exposure never populated, so the rate above must be inert.
+    });
+    const withDrift = simulate(DESCENT_TEST_THETA, {
+      ...descentThenFlat,
+      ceilingParams: { durabilityDriftPerDescentUnit: 0.0001 },
+      descentExposureBasis: "descentMeters",
+    });
+
+    // Must still complete the course -- a rate strong enough to fully
+    // saturate the ceiling (driftFactor clamped to 0) would stall the
+    // simulation instead of genuinely slowing it, which wouldn't test what
+    // this is meant to test.
+    expect(withDrift.feasible).toBe(true);
+    expect(withDrift.finishTimeS).toBeGreaterThan(withoutDrift.finishTimeS);
+    // A real, graduated effect, not a rounding-level nudge.
+    expect(withDrift.finishTimeS / withoutDrift.finishTimeS).toBeGreaterThan(1.02);
+
+    // Sanity: the flat course (no descent at all) is unaffected by the same
+    // configured rate, confirming the slowdown above is genuinely coming
+    // from the descent, not just from the rate being set.
+    const flatWithDrift = simulate(DESCENT_TEST_THETA, {
+      ...flat,
+      ceilingParams: { durabilityDriftPerDescentUnit: 0.0001 },
+      descentExposureBasis: "descentMeters",
+    });
+    const flatWithoutDrift = simulate(DESCENT_TEST_THETA, flat);
+    expect(flatWithDrift.finishTimeS).toBeCloseTo(flatWithoutDrift.finishTimeS, 6);
+  });
+
+  it("is byte-for-byte unchanged when descentExposureBasis is omitted, even with a rate configured", () => {
+    const inputs = baseInputs({ segments: TEST_COURSE(), altitudeAdjustment: false });
+    const withRateNoBasis = simulate(DESCENT_TEST_THETA, {
+      ...inputs,
+      ceilingParams: { durabilityDriftPerDescentUnit: 0.0001 },
+    });
+    const plain = simulate(DESCENT_TEST_THETA, inputs);
+    expect(withRateNoBasis).toEqual(plain);
+  });
+
+  it("descentImpact and descentImpactSquared bases also produce a graduated slowdown, without stalling", () => {
+    const inputs = baseInputs({ segments: TEST_COURSE(), altitudeAdjustment: false });
+    const baseline = simulate(DESCENT_TEST_THETA, inputs);
+    // Each basis's units span orders of magnitude apart (see
+    // DescentExposureBasis's doc comment in pacingFit.ts), so each needs its
+    // own rate to land in a comparable "meaningfully slower, still feasible,
+    // still power-limited (not walk-cap-limited)" zone -- not a shared
+    // constant.
+    const ratesByBasis = { descentImpact: 0.00003, descentImpactSquared: 0.000006 } as const;
+    for (const basis of ["descentImpact", "descentImpactSquared"] as const) {
+      const result = simulate(DESCENT_TEST_THETA, {
+        ...inputs,
+        ceilingParams: { durabilityDriftPerDescentUnit: ratesByBasis[basis] },
+        descentExposureBasis: basis,
+      });
+      expect(result.feasible).toBe(true);
+      expect(result.finishTimeS / baseline.finishTimeS).toBeGreaterThan(1.01);
+    }
+  });
+});

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CourseSegment } from "../gpx/pipeline";
-import { descentImpact, descentImpactSquared, descentMeters } from "./descentImpact";
+import { descentImpact, descentImpactSquared, descentMeters, descentStepForSegment } from "./descentImpact";
 
 function segment(overrides: Partial<CourseSegment> = {}): CourseSegment {
   return {
@@ -138,5 +138,33 @@ describe("descentMeters", () => {
   it("excludes paused segments", () => {
     const segments = [segment({ elevation: 100 }), segment({ elevation: 50, distance3D: 50, dtS: 5, paused: true })];
     expect(descentMeters(segments)).toBe(0);
+  });
+});
+
+describe("descentStepForSegment", () => {
+  it("returns the descent and speed for a descending segment", () => {
+    const seg = segment({ elevation: 90, distance3D: 50, dtS: 25 }); // 10m drop from 100, 2 m/s
+    expect(descentStepForSegment(seg, 100)).toEqual({ descentM: 10, speedMs: 2 });
+  });
+
+  it("returns zero descent and null speed for a climbing segment", () => {
+    const seg = segment({ elevation: 120, distance3D: 50, dtS: 25 });
+    expect(descentStepForSegment(seg, 100)).toEqual({ descentM: 0, speedMs: null });
+  });
+
+  it("returns null speed for a paused or untimed segment even if it descended", () => {
+    expect(descentStepForSegment(segment({ elevation: 50, paused: true }), 100)).toEqual({
+      descentM: 0,
+      speedMs: null,
+    });
+    expect(descentStepForSegment(segment({ elevation: 50, dtS: null }), 100)).toEqual({
+      descentM: 0,
+      speedMs: null,
+    });
+  });
+
+  it("falls back to gradient x distanceHorizontal when there's no previous elevation", () => {
+    const seg = segment({ elevation: -10, gradient: -0.2, distanceHorizontal: 50, distance3D: 50, dtS: 25 });
+    expect(descentStepForSegment(seg, null)).toEqual({ descentM: 10, speedMs: 2 });
   });
 });

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { analyzeRun } from "./analysis";
 import { ceilingPower, type CeilingParams } from "./ceiling";
+import { descentImpact, descentImpactSquared, descentMeters } from "./descentImpact";
+import type { CourseSegment } from "../gpx/pipeline";
 import {
+  buildEffortTrendPoints,
+  type EffortTrendPoint,
+  fitDurabilityDriftPerDescentUnit,
+  fitDurabilityDriftPerDescentUnitAcrossRaces,
   fitDurabilityDriftPerHour,
   fitFInfAndTauAcrossRaces,
   fitTauAcrossRaces,
@@ -303,5 +310,199 @@ describe("fitDurabilityDriftPerHour", () => {
     const result = fitDurabilityDriftPerHour(points, { ...baseParams, tauMin: 120 });
     expect(result).not.toBeNull();
     expect(result!.durabilityDriftPerHour).toBeCloseTo(0, 2);
+  });
+});
+
+describe("fitDurabilityDriftPerDescentUnit (PLAN.md §12/§13 stage 5)", () => {
+  const baseParams: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, f0: 0.94, fInf: 0.38, tauMin: 250 };
+
+  it("recovers a known drift rate keyed to cumulative raw descent meters", () => {
+    const trueDrift = 0.0004;
+    const points: EffortTrendPoint[] = [];
+    for (let t = 0.2; t < 5; t += 0.1) {
+      const cumulativeDescentM = t * 400; // a steady downhill grind, ~2000m accumulated by the end
+      const ceiling = ceilingPower(
+        { tMin: t * 60, altitudeM: 0, elapsedHours: t, descentExposure: cumulativeDescentM },
+        { ...baseParams, durabilityDriftPerDescentUnit: trueDrift },
+      );
+      points.push({ tHours: t, grossPowerWPerKg: ceiling, altitudeM: 0, dtS: 360, cumulativeDescentM });
+    }
+    const result = fitDurabilityDriftPerDescentUnit(points, "descentMeters", baseParams);
+    expect(result).not.toBeNull();
+    expect(result!.durabilityDriftPerDescentUnit).toBeGreaterThan(trueDrift * 0.5);
+    expect(result!.durabilityDriftPerDescentUnit).toBeLessThan(trueDrift * 1.5);
+    expect(Math.abs(result!.trendAtFitPctPerHour)).toBeLessThan(1);
+  });
+
+  it("also recovers a known drift rate under the descentImpact and descentImpactSquared bases", () => {
+    const trueDrift = 0.00002;
+    const points: EffortTrendPoint[] = [];
+    for (let t = 0.2; t < 5; t += 0.1) {
+      const cumulativeDescentImpact = t * 4000;
+      const ceiling = ceilingPower(
+        { tMin: t * 60, altitudeM: 0, elapsedHours: t, descentExposure: cumulativeDescentImpact },
+        { ...baseParams, durabilityDriftPerDescentUnit: trueDrift },
+      );
+      points.push({ tHours: t, grossPowerWPerKg: ceiling, altitudeM: 0, dtS: 360, cumulativeDescentImpact });
+    }
+    const result = fitDurabilityDriftPerDescentUnit(points, "descentImpact", baseParams);
+    expect(result).not.toBeNull();
+    expect(result!.durabilityDriftPerDescentUnit).toBeGreaterThan(trueDrift * 0.5);
+    expect(result!.durabilityDriftPerDescentUnit).toBeLessThan(trueDrift * 1.5);
+  });
+
+  it("returns null when the points carry no descent exposure at all", () => {
+    // makeConstantEffortPoints doesn't set any cumulativeDescent* field --
+    // a rate can't be identified from zero exposure across the whole race.
+    const points = makeConstantEffortPoints(baseParams, 5);
+    expect(fitDurabilityDriftPerDescentUnit(points, "descentMeters", baseParams)).toBeNull();
+    expect(fitDurabilityDriftPerDescentUnit(points, "descentImpact", baseParams)).toBeNull();
+    expect(fitDurabilityDriftPerDescentUnit(points, "descentImpactSquared", baseParams)).toBeNull();
+  });
+});
+
+describe("fitDurabilityDriftPerDescentUnitAcrossRaces", () => {
+  const baseParams: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, f0: 0.94, fInf: 0.38, tauMin: 250 };
+
+  /** One race with a linearly-ramping cumulative descent exposure, targeting
+   * ceilingPower's own drift mechanism at trueDrift directly -- so a perfect
+   * fit should flatten every pooled race's trend to ~0 at once. */
+  function makeDescentDriftRace(totalHours: number, descentPerHour: number, trueDrift: number, stepMinutes = 6): EffortTrendPoint[] {
+    const points: EffortTrendPoint[] = [];
+    const stepHours = stepMinutes / 60;
+    for (let t = 0.2; t < totalHours; t += stepHours) {
+      const cumulativeDescentM = t * descentPerHour;
+      const ceiling = ceilingPower(
+        { tMin: t * 60, altitudeM: 0, elapsedHours: t, descentExposure: cumulativeDescentM },
+        { ...baseParams, durabilityDriftPerDescentUnit: trueDrift },
+      );
+      points.push({ tHours: t, grossPowerWPerKg: ceiling, altitudeM: 0, dtS: stepMinutes * 60, cumulativeDescentM });
+    }
+    return points;
+  }
+
+  it("recovers a shared drift rate pooled across two races with very different exposure scales/durations", () => {
+    const trueDrift = 0.0003;
+    const raceA = makeDescentDriftRace(5, 300, trueDrift); // ~1500m of exposure by the end
+    const raceB = makeDescentDriftRace(8, 150, trueDrift); // ~1200m of exposure, over a longer race
+    const result = fitDurabilityDriftPerDescentUnitAcrossRaces([raceA, raceB], "descentMeters", baseParams);
+    expect(result).not.toBeNull();
+    expect(result!.durabilityDriftPerDescentUnit).toBeGreaterThan(trueDrift * 0.5);
+    expect(result!.durabilityDriftPerDescentUnit).toBeLessThan(trueDrift * 1.5);
+    expect(result!.perRace).toHaveLength(2);
+    for (const race of result!.perRace) {
+      expect(Math.abs(race.trendAtFitPctPerHour)).toBeLessThan(Math.abs(race.trendAtCurrentPctPerHour));
+      expect(race.unresponsive).toBe(false);
+    }
+  });
+
+  it("flags a race with negligible descent exposure as unresponsive when pooled with one that has real exposure", () => {
+    const trueDrift = 0.0003;
+    const responsive = makeDescentDriftRace(5, 300, trueDrift);
+    const flat: EffortTrendPoint[] = makeConstantEffortPoints(baseParams, 5).map((p) => ({ ...p, cumulativeDescentM: 0 }));
+    const result = fitDurabilityDriftPerDescentUnitAcrossRaces([responsive, flat], "descentMeters", baseParams);
+    expect(result).not.toBeNull();
+    expect(result!.perRace[0].unresponsive).toBe(false);
+    expect(result!.perRace[1].unresponsive).toBe(true);
+  });
+
+  it("ignores a race with too few points and still fits from the rest", () => {
+    const goodRace = makeDescentDriftRace(6, 300, 0.0003);
+    const tooShort = makeConstantEffortPoints(baseParams, 0.1, 1);
+    const result = fitDurabilityDriftPerDescentUnitAcrossRaces([goodRace, tooShort], "descentMeters", baseParams);
+    expect(result).not.toBeNull();
+    expect(result!.perRace).toHaveLength(1);
+  });
+
+  it("returns null when no race has any descent exposure at all", () => {
+    const flatOnly: EffortTrendPoint[] = makeConstantEffortPoints(baseParams, 5).map((p) => ({ ...p, cumulativeDescentM: 0 }));
+    expect(fitDurabilityDriftPerDescentUnitAcrossRaces([flatOnly], "descentMeters", baseParams)).toBeNull();
+  });
+
+  it("returns null when no race has enough trimmed points", () => {
+    const tooShort = makeConstantEffortPoints(baseParams, 0.1, 1);
+    expect(fitDurabilityDriftPerDescentUnitAcrossRaces([tooShort], "descentMeters", baseParams)).toBeNull();
+  });
+});
+
+describe("buildEffortTrendPoints -- cumulative descent fields", () => {
+  const params: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, f0: 0.94, fInf: 0.38, tauMin: 250 };
+  const analysisInputs = {
+    bodyMassKg: 70,
+    ceilingParams: params,
+    fueling: { intakeGPerH: 60, gutMaxGPerH: 60 },
+    glycogenStoreG: 500,
+    reserveG: 60,
+  };
+
+  /** Mixed climb/descent/flat course, elevation deltas and speeds chosen so
+   * raw descent, descent-impact, and descent-impact-squared all diverge
+   * from each other (not just scaled copies of the same shape). */
+  function descentTestSegments(): CourseSegment[] {
+    const steps: { eleDelta: number; distance3D: number; dtS: number }[] = [
+      { eleDelta: 0, distance3D: 200, dtS: 100 }, // first segment: no prior elevation, gradient 0 -> falls back to 0 descent
+      { eleDelta: -20, distance3D: 200, dtS: 100 }, // descend 20m @ 2 m/s
+      { eleDelta: -30, distance3D: 450, dtS: 100 }, // descend 30m @ 4.5 m/s
+      { eleDelta: 10, distance3D: 100, dtS: 100 }, // climb -- no descent contribution
+      { eleDelta: -30, distance3D: 90, dtS: 100 }, // descend 30m @ 0.9 m/s
+      { eleDelta: 0, distance3D: 100, dtS: 100 }, // flat -- no descent contribution
+    ];
+    let elevation = 0;
+    let cumulativeDistance3D = 0;
+    return steps.map((s, index) => {
+      elevation += s.eleDelta;
+      cumulativeDistance3D += s.distance3D;
+      return {
+        index,
+        cumulativeDistance3D,
+        distanceHorizontal: s.distance3D,
+        distance3D: s.distance3D,
+        elevation,
+        gradient: 0,
+        time: null,
+        dtS: s.dtS,
+        paused: false,
+        heartRateBpm: null,
+        powerWatts: null,
+      };
+    });
+  }
+
+  it("tracks cumulative descent exposure *before* each segment, matching descentImpact.ts's whole-array sums by the last point", () => {
+    const segments = descentTestSegments();
+    const analysis = analyzeRun(segments, analysisInputs);
+    const points = buildEffortTrendPoints(segments, analysis.segments, false);
+
+    // Every segment here is unpaused with a positive ceiling, so all 6
+    // should survive analyzeRun's effortFraction filter.
+    expect(points).toHaveLength(6);
+
+    // The first point has nothing accumulated before it yet.
+    expect(points[0].cumulativeDescentM).toBe(0);
+    expect(points[0].cumulativeDescentImpact).toBe(0);
+    expect(points[0].cumulativeDescentImpactSquared).toBe(0);
+
+    // The last segment (flat) contributes no further descent of its own, so
+    // the exposure recorded "before" it equals the whole race's total --
+    // the same total descentImpact.ts's own whole-array functions compute.
+    const last = points[points.length - 1];
+    expect(last.cumulativeDescentM).toBeCloseTo(descentMeters(segments), 6);
+    expect(last.cumulativeDescentImpact).toBeCloseTo(descentImpact(segments), 6);
+    expect(last.cumulativeDescentImpactSquared).toBeCloseTo(descentImpactSquared(segments), 6);
+
+    // Sanity: the three metrics should actually differ from each other on
+    // this course (not accidentally scaled copies), since speed varies
+    // across the descending segments.
+    expect(descentMeters(segments)).toBeCloseTo(80, 6); // 20 + 30 + 30
+    expect(descentImpact(segments)).toBeCloseTo(20 * 2 + 30 * 4.5 + 30 * 0.9, 6);
+    expect(descentImpactSquared(segments)).toBeCloseTo(20 * 2 * 2 + 30 * 4.5 * 4.5 + 30 * 0.9 * 0.9, 6);
+  });
+
+  it("leaves cumulative descent fields undefined when omitted by hand-built points (backward compatible)", () => {
+    // Every existing test/caller in this file builds points without the new
+    // fields -- computeEffortTrend and the tau/fInf fits must behave exactly
+    // as before for them.
+    const points = makeConstantEffortPoints(params, 3);
+    expect(points[0]).not.toHaveProperty("cumulativeDescentM");
   });
 });

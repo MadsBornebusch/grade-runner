@@ -7,6 +7,7 @@ import type { CourseSegment } from "../gpx/pipeline";
 import { costOfRunning, costOfWalking, maxDescentSpeedMs } from "./minetti";
 import { grossToNet, netToGross } from "./energetics";
 import { type CeilingParams, ceilingPower, maxAerobicPower } from "./ceiling";
+import type { DescentExposureBasis } from "./pacingFit";
 import {
   type FuelingParams,
   type SubstrateParams,
@@ -30,6 +31,15 @@ export interface SolverInputs {
   forceWalkAboveGrade?: number;
   /** Apply per-segment Cerretelli altitude correction. Default true. */
   altitudeAdjustment?: boolean;
+  /**
+   * PLAN.md §12/§13 stage 5: which cumulative descent-exposure metric to
+   * feed into ceilingPower's optional durabilityDriftPerDescentUnit term
+   * (see ceilingParams). Undefined (the default) means no descent-based
+   * drift is applied, regardless of what durabilityDriftPerDescentUnit is
+   * set to -- matches ceilingPower's own "no exposure means no effect"
+   * contract.
+   */
+  descentExposureBasis?: DescentExposureBasis;
 }
 
 export interface SegmentResult {
@@ -78,13 +88,37 @@ export function simulate(theta: number, inputs: SolverInputs): SimulationResult 
   let bonkIndex: number | null = null;
   let feasible = true;
 
+  // Running cumulative descent-based exposure (PLAN.md §12/§13 stage 5),
+  // updated only when a basis is configured. Deliberately NOT computed via
+  // descentImpact.ts's descentStepForSegment: that derives speed from the
+  // segment's recorded dtS, which is null for a typical planning-mode
+  // course (a route with no timestamps) and, even when present, reflects a
+  // past recorded pace rather than the pace this simulation is predicting.
+  // Weighted by this segment's own just-computed simulated `speed` instead.
+  // "Before this segment" convention, same as pacingFit.ts's cumulative
+  // fields and elapsedHours above: reflects exposure from segments already
+  // paced, not the descent about to happen in the segment being priced.
+  let cumulativeDescentM = 0;
+  let cumulativeDescentImpact = 0;
+  let cumulativeDescentImpactSquared = 0;
+  let previousElevation: number | null = null;
+
   for (const seg of inputs.segments) {
     const elapsedMin = cumulativeTimeS / 60;
     const elapsedHours = cumulativeTimeS / 3600;
     const altitudeM = useAltitude ? seg.elevation : 0;
 
+    const descentExposure =
+      inputs.descentExposureBasis === "descentMeters"
+        ? cumulativeDescentM
+        : inputs.descentExposureBasis === "descentImpact"
+          ? cumulativeDescentImpact
+          : inputs.descentExposureBasis === "descentImpactSquared"
+            ? cumulativeDescentImpactSquared
+            : undefined;
+
     const ceilingGross = ceilingPower(
-      { tMin: elapsedMin, altitudeM, elapsedHours },
+      { tMin: elapsedMin, altitudeM, elapsedHours, ...(descentExposure !== undefined ? { descentExposure } : {}) },
       inputs.ceilingParams,
     );
     const targetNet = Math.max(0, grossToNet(theta * ceilingGross));
@@ -103,6 +137,16 @@ export function simulate(theta: number, inputs: SolverInputs): SimulationResult 
     if (speed <= 0) {
       feasible = false;
       break;
+    }
+
+    const eleDelta =
+      previousElevation !== null ? seg.elevation - previousElevation : seg.gradient * seg.distanceHorizontal;
+    previousElevation = seg.elevation;
+    if (eleDelta < 0) {
+      const descentM = -eleDelta;
+      cumulativeDescentM += descentM;
+      cumulativeDescentImpact += descentM * speed;
+      cumulativeDescentImpactSquared += descentM * speed * speed;
     }
 
     const cost = mode === "run" ? costRun : costWalk;

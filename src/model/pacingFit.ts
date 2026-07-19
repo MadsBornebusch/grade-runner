@@ -16,6 +16,7 @@
 import type { CourseSegment } from "../gpx/pipeline";
 import type { AnalysisSegmentResult } from "./analysis";
 import { type CeilingParams, ceilingPower } from "./ceiling";
+import { descentStepForSegment } from "./descentImpact";
 
 export interface EffortTrendPoint {
   /** Hours elapsed since the start of the run, at the start of this segment. */
@@ -24,6 +25,47 @@ export interface EffortTrendPoint {
   altitudeM: number;
   /** Segment duration, seconds -- used as the regression weight. */
   dtS: number;
+  /**
+   * Cumulative descent-based exposure accumulated *before* this segment
+   * (same "so far, at the start of this segment" convention as tHours) --
+   * three parallel readings (PLAN.md §12/§13 stage 5), one per candidate
+   * descent-exposure basis. Optional so existing hand-built points (tests,
+   * or any future caller that doesn't care about descent drift) don't need
+   * to supply them; fitDurabilityDriftPerDescentUnit treats a missing value
+   * as 0 exposure.
+   */
+  cumulativeDescentM?: number;
+  cumulativeDescentImpact?: number;
+  cumulativeDescentImpactSquared?: number;
+}
+
+/**
+ * Running per-segment descent sums as of the *start* of each courseSegments
+ * index -- i.e. not yet including that segment's own descent, mirroring how
+ * tHours excludes the current segment's own duration. Kept as a single
+ * one-pass walk (shared by every analysisSegments entry that lands on a
+ * given index) rather than recomputing descentImpact.ts's whole-array sums
+ * per point.
+ */
+function cumulativeDescentBeforeEachSegment(
+  courseSegments: CourseSegment[],
+): { m: number; impact: number; impactSquared: number }[] {
+  const result: { m: number; impact: number; impactSquared: number }[] = [];
+  let m = 0;
+  let impact = 0;
+  let impactSquared = 0;
+  let previousElevation: number | null = null;
+  for (const seg of courseSegments) {
+    result.push({ m, impact, impactSquared });
+    const { descentM, speedMs } = descentStepForSegment(seg, previousElevation);
+    previousElevation = seg.elevation;
+    if (speedMs !== null) {
+      m += descentM;
+      impact += descentM * speedMs;
+      impactSquared += descentM * speedMs * speedMs;
+    }
+  }
+  return result;
 }
 
 /**
@@ -38,6 +80,7 @@ export function buildEffortTrendPoints(
   analysisSegments: AnalysisSegmentResult[],
   altitudeAdjustment: boolean,
 ): EffortTrendPoint[] {
+  const cumulativeDescent = cumulativeDescentBeforeEachSegment(courseSegments);
   return analysisSegments
     .filter((s) => s.effortFraction !== null)
     .map((s) => ({
@@ -45,6 +88,9 @@ export function buildEffortTrendPoints(
       grossPowerWPerKg: s.grossPowerWPerKg,
       altitudeM: altitudeAdjustment ? courseSegments[s.index]?.elevation ?? 0 : 0,
       dtS: s.timeS,
+      cumulativeDescentM: cumulativeDescent[s.index]?.m ?? 0,
+      cumulativeDescentImpact: cumulativeDescent[s.index]?.impact ?? 0,
+      cumulativeDescentImpactSquared: cumulativeDescent[s.index]?.impactSquared ?? 0,
     }));
 }
 
@@ -55,8 +101,20 @@ export interface TrendFit {
 
 /** Weighted least-squares slope of effort (grossPower/ceiling) vs. elapsed hours.
  * Exported for reuse by withinRaceDescentDiagnostic.ts, which needs the same
- * slope computation restricted to a sub-window of a race's points. */
-export function computeEffortTrend(points: EffortTrendPoint[], ceilingParams: CeilingParams): TrendFit | null {
+ * slope computation restricted to a sub-window of a race's points.
+ *
+ * descentExposureSelector is optional and omitted by every caller except
+ * fitDurabilityDriftPerDescentUnit below -- when provided, it's read off
+ * each point and passed through to ceilingPower as descentExposure, so the
+ * descent-based drift term (if ceilingParams.durabilityDriftPerDescentUnit
+ * is set) actually has something to act on. Omitting it leaves behavior
+ * byte-for-byte identical to before this parameter existed.
+ */
+export function computeEffortTrend(
+  points: EffortTrendPoint[],
+  ceilingParams: CeilingParams,
+  descentExposureSelector?: (p: EffortTrendPoint) => number,
+): TrendFit | null {
   const xs: number[] = [];
   const ys: number[] = [];
   const ws: number[] = [];
@@ -64,7 +122,15 @@ export function computeEffortTrend(points: EffortTrendPoint[], ceilingParams: Ce
   let sumWX = 0;
   let sumWY = 0;
   for (const p of points) {
-    const ceiling = ceilingPower({ tMin: p.tHours * 60, altitudeM: p.altitudeM, elapsedHours: p.tHours }, ceilingParams);
+    const ceiling = ceilingPower(
+      {
+        tMin: p.tHours * 60,
+        altitudeM: p.altitudeM,
+        elapsedHours: p.tHours,
+        ...(descentExposureSelector ? { descentExposure: descentExposureSelector(p) } : {}),
+      },
+      ceilingParams,
+    );
     if (ceiling <= 0) continue;
     const y = p.grossPowerWPerKg / ceiling;
     xs.push(p.tHours);
@@ -535,5 +601,218 @@ export function fitDurabilityDriftPerHour(
   return {
     durabilityDriftPerHour: fine,
     trendAtFitPctPerHour: fittedTrend.slopePerHour * 100,
+  };
+}
+
+/** PLAN.md §12/§13 stage 5's three candidate descent-exposure metrics --
+ * kept as live alternatives rather than picking one, since there's no
+ * established result yet saying which scaling (raw descent, descent x
+ * speed, or descent x speed^2) actually predicts muscular fatigue best. */
+export type DescentExposureBasis = "descentMeters" | "descentImpact" | "descentImpactSquared";
+
+function descentExposureSelectorFor(basis: DescentExposureBasis): (p: EffortTrendPoint) => number {
+  switch (basis) {
+    case "descentMeters":
+      return (p) => p.cumulativeDescentM ?? 0;
+    case "descentImpact":
+      return (p) => p.cumulativeDescentImpact ?? 0;
+    case "descentImpactSquared":
+      return (p) => p.cumulativeDescentImpactSquared ?? 0;
+  }
+}
+
+export interface DescentDriftFitResult {
+  durabilityDriftPerDescentUnit: number;
+  trendAtFitPctPerHour: number;
+}
+
+/**
+ * Same "hold tau/f0/fInf fixed, search one axis" shape as
+ * fitDurabilityDriftPerHour above, but keyed to cumulative descent exposure
+ * (under the chosen basis) instead of elapsed time -- the muscular-endurance
+ * term from PLAN.md §12/§13 stage 5, distinct from that function's
+ * wall-clock-time mechanism. Same lower-confidence framing applies: this is
+ * an alternative reading of a downward trend, not something identifiable
+ * jointly with tau from a single race.
+ *
+ * Unlike fitDurabilityDriftPerHour's fixed [0, 0.06] default range --
+ * elapsed hours are always on the same rough scale (a handful to a few tens
+ * of hours) -- descent exposure's scale varies by orders of magnitude
+ * depending on the basis (raw meters vs. meters*speed vs. meters*speed^2),
+ * so the default range is derived from the max cumulative exposure actually
+ * observed across the points, the same way fitTauMinutes derives its own
+ * range from the race's duration rather than a flat constant.
+ */
+export function fitDurabilityDriftPerDescentUnit(
+  points: EffortTrendPoint[],
+  basis: DescentExposureBasis,
+  ceilingParams: CeilingParams,
+  range?: [number, number],
+): DescentDriftFitResult | null {
+  const trimmed = trimForPacingFit(points);
+  if (trimmed.length < MIN_FIT_POINTS) return null;
+
+  const selector = descentExposureSelectorFor(basis);
+  const maxExposure = Math.max(...trimmed.map(selector));
+  if (!(maxExposure > 0)) return null; // no descent recorded -- a rate isn't identifiable from nothing to act on
+
+  // Upper bound chosen so the rate can, at the most-exposed point observed,
+  // fully saturate the ceiling to 0 (driftFactor = max(0, 1 - rate*exposure)) --
+  // comfortably past any physiologically real value, the same "let the
+  // search range include the degenerate extreme rather than clip short of
+  // it" approach fitDurabilityDriftPerHour's [0, 0.06] already takes (0.06
+  // over a ~17h race also approaches full saturation).
+  const resolvedRange: [number, number] = range ?? [0, 1.5 / maxExposure];
+
+  const search = (lo: number, hi: number, step: number) => {
+    let best = lo;
+    let bestAbsSlope = Infinity;
+    for (let drift = lo; drift <= hi; drift += step) {
+      const trend = computeEffortTrend(trimmed, { ...ceilingParams, durabilityDriftPerDescentUnit: drift }, selector);
+      if (trend && Math.abs(trend.slopePerHour) < bestAbsSlope) {
+        bestAbsSlope = Math.abs(trend.slopePerHour);
+        best = drift;
+      }
+    }
+    return best;
+  };
+
+  const [lo, hi] = resolvedRange;
+  const coarseStep = (hi - lo) / 30;
+  const coarse = search(lo, hi, coarseStep);
+  const fine = search(Math.max(lo, coarse - coarseStep), Math.min(hi, coarse + coarseStep), coarseStep / 10);
+
+  const fittedTrend = computeEffortTrend(trimmed, { ...ceilingParams, durabilityDriftPerDescentUnit: fine }, selector);
+  if (!fittedTrend) return null;
+
+  return {
+    durabilityDriftPerDescentUnit: fine,
+    trendAtFitPctPerHour: fittedTrend.slopePerHour * 100,
+  };
+}
+
+export interface MultiRaceDescentDriftFitResult {
+  durabilityDriftPerDescentUnit: number;
+  perRace: {
+    trendAtCurrentPctPerHour: number;
+    trendAtFitPctPerHour: number;
+    /** True if this race barely accumulated any descent exposure under the
+     * chosen basis -- the fitted rate has essentially no effect on its own
+     * ceiling regardless of what the rate is, the same "sat through this
+     * fit without actually informing it" idea as fitTauAcrossRaces's own
+     * unresponsive flag, just measured via exposure instead of ceiling
+     * saturation. */
+    unresponsive: boolean;
+  }[];
+  hitSearchBoundary: "lower" | "upper" | null;
+}
+
+/**
+ * Same "pool per-race squared slope, not one flat concatenated regression"
+ * shape as fitTauAcrossRaces above (see its own doc comment for why:
+ * concatenating races across different average efforts confounds cross-
+ * race effort differences with fatigue shape) -- applied here to the
+ * descent-exposure drift term instead of tau. Holds tau/f0/fInf fixed at
+ * whatever's in ceilingParams, exactly as fitTauAcrossRaces holds f0/fInf
+ * fixed for its own tau search. Backtest tooling (scripts/backtestFinishTime.ts)
+ * is the reason this pooled version exists at all -- fitting a shared
+ * drift rate across a training set of races, not just recovering one from
+ * a single race.
+ *
+ * Important interpretive caveat this function can't enforce on its own:
+ * within a single race, cumulative descent exposure is close to monotonic
+ * in elapsed time, so an in-sample fit here is easily confounded with
+ * tau/time-based drift already explaining the same downward trend -- a
+ * good in-sample fit is close to guaranteed by construction and is NOT by
+ * itself evidence that descent exposure matters physiologically. Real
+ * evidence has to come from out-of-sample prediction accuracy (comparing a
+ * held-out race's actual finish time against candidates with and without
+ * this term), not from how well it flattens the training races it was fit
+ * on.
+ */
+export function fitDurabilityDriftPerDescentUnitAcrossRaces(
+  races: EffortTrendPoint[][],
+  basis: DescentExposureBasis,
+  ceilingParams: CeilingParams,
+  opts: FitTauAcrossRacesOptions = {},
+): MultiRaceDescentDriftFitResult | null {
+  const halfLifeDays = opts.halfLifeDays ?? DEFAULT_RECENCY_HALF_LIFE_DAYS;
+  const now = opts.now ?? new Date();
+  const selector = descentExposureSelectorFor(basis);
+
+  const trimmedWithWeight = races
+    .map((r, i) => {
+      const date = opts.raceDates?.[i] ?? null;
+      return {
+        points: trimForPacingFit(r),
+        recencyWeight: date ? Math.exp((-Math.LN2 * daysAgo(date, now)) / halfLifeDays) : 1,
+      };
+    })
+    .filter((r) => r.points.length >= MIN_FIT_POINTS);
+  if (trimmedWithWeight.length === 0) return null;
+
+  const trimmed = trimmedWithWeight.map((r) => r.points);
+  const recencyWeights = trimmedWithWeight.map((r) => r.recencyWeight);
+
+  const currentTrends = trimmed.map((r) => computeEffortTrend(r, ceilingParams, selector));
+  if (currentTrends.some((t) => !t)) return null;
+
+  // Range derived from the max exposure observed across ALL pooled races,
+  // not any single one -- a rate scaled to the most-exposed race would
+  // barely register on a race with much less exposure, and vice versa.
+  const maxExposurePerRace = trimmed.map((r) => Math.max(...r.map(selector)));
+  const overallMaxExposure = Math.max(...maxExposurePerRace);
+  if (!(overallMaxExposure > 0)) return null; // no descent recorded anywhere -- a rate isn't identifiable from nothing
+
+  const lo = 0;
+  const hi = 1.5 / overallMaxExposure;
+
+  const pooledSquaredSlope = (rate: number) => {
+    let sum = 0;
+    for (let i = 0; i < trimmed.length; i++) {
+      const trend = computeEffortTrend(trimmed[i], { ...ceilingParams, durabilityDriftPerDescentUnit: rate }, selector);
+      if (!trend) return Infinity;
+      sum += recencyWeights[i] * trend.slopePerHour ** 2;
+    }
+    return sum;
+  };
+
+  const search = (searchLo: number, searchHi: number, step: number) => {
+    let bestRate = searchLo;
+    let bestScore = Infinity;
+    for (let rate = searchLo; rate <= searchHi; rate += step) {
+      const score = pooledSquaredSlope(rate);
+      if (score < bestScore) {
+        bestScore = score;
+        bestRate = rate;
+      }
+    }
+    return bestRate;
+  };
+
+  const coarseStep = (hi - lo) / 40;
+  const coarse = search(lo, hi, coarseStep);
+  const fine = search(Math.max(lo, coarse - coarseStep), Math.min(hi, coarse + coarseStep), Math.max(coarseStep / 100, (hi - lo) / 10000));
+
+  const durabilityDriftPerDescentUnit = fine;
+  const fittedTrends = trimmed.map((r) => computeEffortTrend(r, { ...ceilingParams, durabilityDriftPerDescentUnit }, selector));
+  if (fittedTrends.some((t) => !t)) return null;
+
+  const boundaryEpsilon = (hi - lo) / 1000;
+  const hitSearchBoundary =
+    durabilityDriftPerDescentUnit <= lo + boundaryEpsilon
+      ? "lower"
+      : durabilityDriftPerDescentUnit >= hi - boundaryEpsilon
+        ? "upper"
+        : null;
+
+  return {
+    durabilityDriftPerDescentUnit,
+    perRace: currentTrends.map((current, i) => ({
+      trendAtCurrentPctPerHour: current!.slopePerHour * 100,
+      trendAtFitPctPerHour: fittedTrends[i]!.slopePerHour * 100,
+      unresponsive: durabilityDriftPerDescentUnit * maxExposurePerRace[i] < MIN_CEILING_DROP_FRACTION,
+    })),
+    hitSearchBoundary,
   };
 }

@@ -16,6 +16,16 @@ export interface CeilingParams {
   tauMin?: number;
   /** Fraction lost per hour of elapsed racing, applied on top of the ceiling. 0 = off (default). */
   durabilityDriftPerHour?: number;
+  /**
+   * PLAN.md §12/§13 stage 5: a second, independent durability term keyed to
+   * cumulative descent-based exposure instead of elapsed time (see
+   * CeilingInput.descentExposure) -- muscular/eccentric-load fatigue,
+   * distinct from durabilityDriftPerHour's wall-clock-time mechanism.
+   * Fraction lost per unit of that exposure. 0 = off (default). Additive,
+   * not a replacement: both terms can be active at once, multiplying
+   * together, or either can be used alone.
+   */
+  durabilityDriftPerDescentUnit?: number;
 }
 
 const DEFAULTS: Required<CeilingParams> = {
@@ -25,6 +35,7 @@ const DEFAULTS: Required<CeilingParams> = {
   fInf: 0.38,
   tauMin: 250,
   durabilityDriftPerHour: 0,
+  durabilityDriftPerDescentUnit: 0,
 };
 
 /**
@@ -57,6 +68,18 @@ export interface CeilingInput {
   altitudeM?: number;
   /** Elapsed event duration so far, hours — drives optional durability drift. Defaults to tMin/60. */
   elapsedHours?: number;
+  /**
+   * Cumulative descent-based exposure so far, in whatever unit the caller
+   * chose (raw descent meters, descent impact, or descent impact squared --
+   * see descentImpact.ts) -- drives the optional durabilityDriftPerDescentUnit
+   * term. ceilingPower doesn't care which metric this represents; tracking
+   * and accumulating it is entirely the caller's responsibility (pacingFit.ts
+   * for fitting, solver.ts for prediction), the same way elapsedHours above
+   * doesn't have to be real wall-clock time either. Undefined (the default)
+   * means no descent-based drift is applied, regardless of
+   * durabilityDriftPerDescentUnit.
+   */
+  descentExposure?: number;
 }
 
 /**
@@ -97,6 +120,11 @@ export function ceilingPower(
       1 - merged.durabilityDriftPerHour * elapsedHours,
     );
     power *= driftFactor;
+  }
+
+  if (merged.durabilityDriftPerDescentUnit > 0 && input.descentExposure !== undefined) {
+    const descentDriftFactor = Math.max(0, 1 - merged.durabilityDriftPerDescentUnit * input.descentExposure);
+    power *= descentDriftFactor;
   }
 
   return power;
