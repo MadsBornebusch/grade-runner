@@ -844,59 +844,72 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    is NOT evidence the term matters. Only the backtest script's held-out
    comparison is.
 
-   **Real results, both named cases (2026-07-19 run):**
+   **General mechanism added mid-investigation:
+   `informativeRaceCount`.** The first Soria Moria run below fit an
+   implausible tauMin (34.6h, longer than the race itself). Investigating
+   why surfaced a general failure mode, not a Soria-Moria-specific one: a
+   pooled fit's "unresponsive" races (already tracked) contribute
+   approximately nothing to the pooled objective, so if only ONE race in
+   the training set is actually responsive, the "pooled across N races"
+   result is really just that one race's own idiosyncratic pacing wearing
+   a multi-race label. `fitTauAcrossRaces`, `fitFInfAndTauAcrossRaces`, and
+   `fitDurabilityDriftPerDescentUnitAcrossRaces` now all report
+   `informativeRaceCount` alongside their per-race `unresponsive` flags;
+   `MIN_INFORMATIVE_RACES` (2) gates trust in `backtestFinishTime.ts`'s
+   three-tier fallback (joint fit → tau-only fit → hold current defaults,
+   each tier requiring enough informative races) and in a new
+   `RunLibraryPanel.tsx` warning, mirroring the existing
+   `durationDiversityRatio` treatment. Not a backyard-ultra-specific fix —
+   it generalizes to any training set where only one race (for any reason)
+   actually constrains the parameter.
 
-   *Ecotrail 80* (target: 2025-05-24, 80km; trained on 25 races from
-   2024-01-01 to 2025-05-24, jointly-fit fInf=0.529/tauMin=169min): baseline
-   underpredicted the actual 8h24m50s finish by -5.0% (7h59m37s). All three
-   descent bases improved on it — `descentMeters` nearly exactly
-   (8h23m58s, -0.2% error), `descentImpact` -2.1%, `descentImpactSquared`
-   -3.5%. This is the first real out-of-sample evidence in this project
-   that the descent term helps, with the "clean" (non-speed-weighted)
-   basis winning — consistent with the speed-basis-mismatch caveat below
-   predicting the speed-weighted forms would underperform it.
+   **Real results, both named cases, re-run with the gate (2026-07-19):**
 
    *Soria Moria til Verdens Ende* (target: 2026-05-30, 171km/~24.5h;
-   trained on 27 races from 2025-01-01 to 2026-05-30, jointly-fit
-   fInf=0.623/tauMin=2075min ≈ 34.6h): all three descent-drift rates fit to
-   exactly **0** (27/27 training races flagged unresponsive) — the training
-   set (mostly 8-30km runs, one 106.9km backyard ultra) gave the fit no
-   residual downward trend to explain once tau/fInf had already been fit,
-   so the descent term genuinely couldn't be tested here; all 4 candidates
-   predicted identically. More strikingly, baseline underpredicted the
-   actual 24h33m16s finish by **-26.8%** (17h58m23s) — a 6.5-hour miss. A
-   fitted tauMin longer than the race itself (34.6h fit vs. a 24.5h race)
-   means the model treats this whole race as still inside the early,
-   barely-decayed plateau — worth investigating on its own (possibly an
-   artifact of pooling very short training runs with one long, irregular
-   backyard-ultra effort whose looped/forced-pace dynamics may not
-   represent continuous-effort ultra pacing well), independent of whether
-   descent-based durability is the right fix for it.
+   27 candidate races from 2025-01-01 to 2026-05-30): the joint fInf/tau
+   fit's own tau-only fallback reported **informativeRaceCount=1/27** — the
+   previous 34.6h tauMin (and, after excluding the 106.9km backyard ultra
+   with `--exclude="Backyard"`, the revised-but-still-implausible 19.7h)
+   were both driven by a single race, confirmed by re-running with and
+   without the exclusion: identical informativeRaceCount=1/27 either way,
+   so the backyard ultra was never the actual cause. With the gate
+   correctly refusing both and holding tau=250min/fInf=0.38 (the
+   configured defaults) instead, the baseline prediction improved
+   dramatically: **-9.2% error** (22h17m33s vs. the actual 24h33m16s) —
+   far closer than either "fitted" version's -26.8%/-24.7%. All three
+   descent-drift bases were also correctly skipped (0/27 informative each).
+   This is real evidence the mechanism works: refusing an unsupported fit
+   and falling back to sane defaults out-predicted trusting the fit, not
+   just "looked safer" in the abstract. What's left unresolved: this
+   athlete's real training data (as backfilled so far) simply doesn't
+   contain more than one race anywhere near ultra-length, so tau/fInf
+   aren't genuinely identifiable for this distance scale yet, and the
+   descent term has no signal to learn from either — more long training
+   races, not a smarter fit, is what Soria Moria actually needs next.
 
-   **Follow-up: re-ran Soria Moria excluding the backyard ultra**
-   (`--exclude="Backyard"`, added to `backtestFinishTime.ts` specifically
-   for this) to test that theory directly. Result: fInf dropped from an
-   implausibly-high 0.623 to 0.339, and tauMin from 34.6h to 19.7h (still
-   longer than sensible, but no longer longer than the race itself) —
-   confirming the backyard ultra's looped/forced pacing was distorting the
-   fit as suspected. But the underprediction barely moved: -24.7%
-   (18h29m07s vs. the actual 24h33m16s), down only slightly from -26.8%,
-   and all three descent-drift rates *still* fit to exactly 0. So the
-   backyard ultra wasn't the whole story — even a cleaner 27-race training
-   set (including a real 80km race) contains nothing long/technical enough
-   to exhibit whatever actually costs this athlete ~6 hours on a 171km,
-   ~24.5h effort. That's a real model gap, not (yet) evidence for or
-   against descent-based durability specifically — the descent term simply
-   has no training signal to learn from at this distance scale until a
-   comparably long, continuously-paced race is available to train on.
+   *Ecotrail 80* (target: 2025-05-24, 80km; 25 candidate races from
+   2024-01-01 to 2025-05-24): the joint fit here IS well-supported —
+   informativeRaceCount=15/25, durationDiversityRatio=9.6, fInf=0.529,
+   tauMin=169min — a genuine pooled result, unlike Soria Moria's. Baseline
+   underpredicted the actual 8h24m50s finish by -5.0% (7h59m37s).
+   `descentMeters` (informativeRaceCount=4/25) improved on it substantially
+   — 8h23m58s, essentially exact at -0.2% error. `descentImpact` and
+   `descentImpactSquared`, previously reported as -2.1%/-3.5% improvements,
+   turned out to be supported by only 1/25 and 0/25 informative races
+   respectively once checked — the gate now correctly skips both rather
+   than reporting numbers from what amounts to zero or one race's descent
+   pattern. So the real, trustworthy result here is narrower than first
+   reported: **one supportive out-of-sample data point, `descentMeters`
+   only.**
 
-   Net: one real, supportive out-of-sample result for the descent term
-   (Ecotrail 80, `descentMeters` basis), and one race (Soria Moria) the
-   model underpredicts substantially regardless of which candidate is
-   used — a gap the descent term hasn't been shown to explain, only shown
-   to be untestable against with the training data available so far. Not
-   enough to declare any basis "the" answer yet — more held-out cases, and
-   especially more *long* training races, are the natural next steps.
+   Net, honestly: one real, well-supported out-of-sample result favoring
+   the descent term (Ecotrail 80, `descentMeters` basis, -0.2% vs. -5.0%
+   baseline), and one race (Soria Moria) where neither tau/fInf nor any
+   descent basis could be tested at all due to insufficient long training
+   data — not a null result on descent-based durability, an absence of a
+   result. Not enough to declare any basis "the" answer yet — more
+   held-out cases, and especially more *long* training races for the
+   athlete's ultra distances, are the natural next steps.
 
    **Second interpretive caveat, specific to the two speed-weighted
    bases:** `descentImpact`/`descentImpactSquared` are fit (in
