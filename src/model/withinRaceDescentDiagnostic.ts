@@ -37,6 +37,16 @@ import type { BuildRaceDiagnosticPointOptions } from "./raceDiagnosticPoint";
  * broad (dilutes a genuinely early-only effect) or fine. */
 const DEFAULT_EARLY_FRACTION = 0.5;
 
+/** MIN_FIT_POINTS alone isn't enough of a floor: it guards against too few
+ * *points* for a numerically stable regression, but says nothing about
+ * elapsed *time* -- a short race can clear it with a late window of only
+ * ~20 minutes, nowhere near enough time for a real muscular-fatigue effect
+ * to develop, yet its resulting residual can still swing wildly (confirmed
+ * on real data: two ~20min late windows read -27%/h and -55%/h, dwarfing
+ * every other race and dominating a small correlation). Physiologically
+ * motivated default, not derived from data. */
+const DEFAULT_MIN_LATE_WINDOW_HOURS = 1;
+
 export interface WithinRaceDiagnosticPoint {
   label: string;
   /** The late window's own residual trend, evaluated at the whole race's
@@ -70,14 +80,19 @@ export interface WithinRaceDiagnosticResult {
 /**
  * Null under the same conditions raceDiagnosticPoint.ts's builder skips a
  * race for (no timestamps, zero distance, no reliable whole-race tau fit),
- * plus a new one: the late window itself needs at least MIN_FIT_POINTS of
- * its own trimmed points to compute a meaningful residual trend.
+ * plus two new ones: the late window needs at least MIN_FIT_POINTS of its
+ * own trimmed points *and* at least `minLateWindowHours` of its own
+ * elapsed time (see DEFAULT_MIN_LATE_WINDOW_HOURS) to compute a meaningful
+ * residual trend -- a point-count floor alone isn't enough, since a short
+ * race can clear it with a late window too brief for any real fatigue
+ * effect to show up in.
  */
 export function buildWithinRaceDiagnosticPoint(
   label: string,
   course: PipelineResult,
   options: BuildRaceDiagnosticPointOptions,
   earlyFraction: number = DEFAULT_EARLY_FRACTION,
+  minLateWindowHours: number = DEFAULT_MIN_LATE_WINDOW_HOURS,
 ): WithinRaceDiagnosticPoint | null {
   if (!course.hasTimestamps) return null;
   const distanceKm = course.totalDistance3D / 1000;
@@ -94,6 +109,7 @@ export function buildWithinRaceDiagnosticPoint(
   const startHours = trimmed[0].tHours;
   const endHours = trimmed[trimmed.length - 1].tHours;
   const splitHours = startHours + earlyFraction * (endHours - startHours);
+  if (endHours - splitHours < minLateWindowHours) return null;
 
   const latePoints = trimmed.filter((p) => p.tHours >= splitHours);
   if (latePoints.length < MIN_FIT_POINTS) return null;

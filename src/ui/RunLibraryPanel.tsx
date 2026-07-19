@@ -881,12 +881,15 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
           zero if a single clean fade shape explains the whole race, negative if the back half faded faster than
           that shape predicts. The hypothesis predicts a <strong>negative</strong> correlation (more early descent
           going with a worse-than-expected late residual). Works with any race that has some early descent -- it
-          doesn't need a specially-shaped race, since the comparison is within each race, not between them.
+          doesn't need a specially-shaped race, since the comparison is within each race, not between them. Races
+          whose late half is under an hour are excluded -- not just too few points to fit, but too little time for
+          a real muscular-fatigue effect to plausibly show up in at all (confirmed on real data: a couple of
+          ~20-minute late windows swung wildly and dominated an otherwise-small sample).
         </p>
         {withinRaceDiagnostic.points.length < 3 ? (
           <p className="placeholder">
-            Need at least 3 runs with full data already fetched, a reliable whole-race tau fit, and enough points in
-            the late half specifically -- currently {withinRaceDiagnostic.points.length}.
+            Need at least 3 runs with full data already fetched, a reliable whole-race tau fit, and a late half of at
+            least an hour -- currently {withinRaceDiagnostic.points.length}.
           </p>
         ) : (
           <>

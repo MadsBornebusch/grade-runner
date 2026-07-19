@@ -170,4 +170,56 @@ describe("buildWithinRaceDiagnosticPoint / computeWithinRaceDescentDiagnostic", 
     const course = courseFrom(shortSegments);
     expect(buildWithinRaceDiagnosticPoint("too short", course, OPTIONS)).toBeNull();
   });
+
+  it("returns null when the late window has enough points but not enough elapsed time", () => {
+    // A 90-minute race splits into a ~45min late window -- comfortably more
+    // than MIN_FIT_POINTS worth of 2-minute samples, but well under the
+    // default 1-hour floor. This is exactly the real case that motivated
+    // the floor: a short race's late window can look "enough data" by point
+    // count while being nowhere near long enough for a real fatigue effect
+    // to develop, producing a wildly unstable residual instead.
+    function buildShortRace(): CourseSegment[] {
+      // A shorter true tau here, proportioned to a 90min race -- the whole-
+      // race fit's own search range scales with the race's duration, so
+      // pairing a 90min race with the outer TRUE_PARAMS.tauMin (300) would
+      // put the true value outside that range and fail for an unrelated
+      // reason (the whole-race fit itself hitting its boundary) before ever
+      // reaching the late-window duration check this test targets.
+      const shortRaceParams: CeilingParams = { ...TRUE_PARAMS, tauMin: 60 };
+      const totalHours = 1.5;
+      const dtS = STEP_MINUTES * 60;
+      const totalSteps = Math.round((totalHours * 60) / STEP_MINUTES);
+      const segments: CourseSegment[] = [];
+      let cumulativeDistance3D = 0;
+      for (let i = 0; i < totalSteps; i++) {
+        const tMin = i * STEP_MINUTES;
+        const targetGrossPower = ceilingPower({ tMin, altitudeM: 0, elapsedHours: tMin / 60 }, shortRaceParams) * EFFORT_LEVEL;
+        const cost = costOfRunning(0);
+        const speed = (targetGrossPower - RESTING_METABOLISM_W_PER_KG) / cost;
+        const distance3D = speed * dtS;
+        cumulativeDistance3D += distance3D;
+        segments.push({
+          index: i,
+          cumulativeDistance3D,
+          distanceHorizontal: distance3D,
+          distance3D,
+          elevation: 0,
+          gradient: 0,
+          time: null,
+          dtS,
+          paused: false,
+          heartRateBpm: null,
+          powerWatts: null,
+        });
+      }
+      return segments;
+    }
+
+    const course = courseFrom(buildShortRace());
+    expect(buildWithinRaceDiagnosticPoint("90min race", course, OPTIONS)).toBeNull();
+    // Confirm it's specifically the new duration floor doing the work here,
+    // not the point-count floor -- passing a permissive duration override
+    // should let this same race through.
+    expect(buildWithinRaceDiagnosticPoint("90min race", course, OPTIONS, 0.5, 0)).not.toBeNull();
+  });
 });
