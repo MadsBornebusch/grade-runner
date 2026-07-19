@@ -848,6 +848,22 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    Ecotrail 80 against ~2024-2025 data) is the natural next step, not a
    "done" claim to make without having seen the numbers.
 
+   **Second interpretive caveat, specific to the two speed-weighted
+   bases:** `descentImpact`/`descentImpactSquared` are fit (in
+   `pacingFit.ts`, via `descentStepForSegment`) against each training
+   race's *actual recorded* descending speed, but predicted (in
+   `solver.ts`'s `simulate`) against the solver's own *simulated* pace for
+   the target race — those two speeds aren't the same thing, so a rate
+   fit under one doesn't necessarily transfer cleanly to the other.
+   `descentMeters` has no speed term and isn't affected by this — it's the
+   clean primary basis to trust at face value; read `descentImpact`/`²`
+   backtest results with this mismatch in mind, not as directly comparable
+   to `descentMeters`'s. The principled fix (re-deriving exposure from the
+   solver's own simulated speeds on the training races, not their recorded
+   ones) is real work and only worth doing if the backtest shows a
+   speed-weighted basis outperforming `descentMeters` despite the handicap
+   — not worth building speculatively before that signal exists.
+
 Stages 1-5 are now built. Stages 1-4 (plus the avgIntensity/within-race
 fixes folded into stage 4 above) are well-supported by existing literature
 and directly extend code that already existed; stage 5 is explicitly
