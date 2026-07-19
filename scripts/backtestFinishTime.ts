@@ -24,6 +24,7 @@
 //
 // Usage:
 //   npx tsx scripts/backtestFinishTime.ts --target="Soria Moria" --since=2025-01-01 --until=2026-01-01
+//   npx tsx scripts/backtestFinishTime.ts --target="Soria Moria" --since=2025-01-01 --until=2026-01-01 --exclude="Backyard,Race Simulation"
 
 import { fileURLToPath } from "node:url";
 import { runPipeline } from "../src/gpx/pipeline.ts";
@@ -46,6 +47,15 @@ const BASE_URL = arg("base", "http://localhost:3000");
 const TARGET = arg("target", "");
 const SINCE_DATE = new Date(arg("since", "2015-01-01"));
 const UNTIL_DATE = new Date(arg("until", new Date().toISOString().slice(0, 10)));
+/** Comma-separated name substrings (case-insensitive) to drop from the
+ * training set entirely -- e.g. a backyard ultra's looped, forced-pace
+ * structure may not represent continuous-effort ultra pacing well, and
+ * pooling it in alongside it can visibly skew the fInf/tau fit. Distinct
+ * from --target: this drops runs from TRAINING, not from being predicted. */
+const EXCLUDE_TERMS = arg("exclude", "")
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
 const SESSION_FILE = fileURLToPath(new URL("../.strava-session.local", import.meta.url));
 const SUGGESTION_COUNT = 10;
 /** PLAN.md §11's "~2x+ duration range" precondition for a jointly-fit fInf
@@ -127,11 +137,16 @@ async function main() {
   console.log(`Target race: ${targetRun.name} (${targetRun.date ?? "unknown date"})\n`);
 
   const trainingRuns = allRuns.filter(
-    (r) => r.id !== targetRun.id && r.date && new Date(r.date) >= SINCE_DATE && new Date(r.date) < UNTIL_DATE,
+    (r) =>
+      r.id !== targetRun.id &&
+      r.date &&
+      new Date(r.date) >= SINCE_DATE &&
+      new Date(r.date) < UNTIL_DATE &&
+      !EXCLUDE_TERMS.some((term) => r.name.toLowerCase().includes(term)),
   );
   console.log(
     `Training window [${SINCE_DATE.toISOString().slice(0, 10)}, ${UNTIL_DATE.toISOString().slice(0, 10)}): ` +
-      `${trainingRuns.length} candidate runs (target excluded).`,
+      `${trainingRuns.length} candidate runs (target excluded${EXCLUDE_TERMS.length ? `, plus names matching [${EXCLUDE_TERMS.join(", ")}] excluded` : ""}).`,
   );
 
   const suggestions = suggestRunsForFit(trainingRuns, SUGGESTION_COUNT);
