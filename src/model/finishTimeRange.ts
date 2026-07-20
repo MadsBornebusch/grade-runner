@@ -8,25 +8,24 @@
 // project has only two backtest residuals (-0.2%, -9.2%) to speak of,
 // nowhere near enough to calibrate a real-world range from.
 //
-// Deliberately does NOT bootstrap the joint (fInf, tau) fit -- that 2-D
-// grid search is far more expensive per call than the 1-D tau search, and
-// running it ~100 times per button click would be too slow for interactive
-// use. Bootstrap resamples vary tau only, holding fInf at whatever the
-// point estimate resolved to -- consistent with this project's existing
-// "tau is the higher-confidence, primary parameter; fInf is documented
-// lower-confidence" framing (see fitFInfAndTauAcrossRaces's own doc).
-//
-// A resample that can't itself clear the same informative-race-count gate
-// the point estimate had to clear is SKIPPED, not replaced with a default
-// value: mixing "genuinely refit" samples with "fell back to defaults"
-// samples in one distribution produces a bimodal, meaningless spread, not
-// a wide-but-honest one -- the reason nonparametric bootstrap-over-races
-// is degenerate at low informativeRaceCount, caught before building this
-// (see the real Soria Moria case, informativeRaceCount=1/27).
+// Built directly on pacingFit.ts's own bootstrapTauConfidenceInterval --
+// this module's whole job is running each retained tau resample through
+// the solver to turn "how much could tau vary" into "how much could the
+// predicted finish time vary." Deliberately does NOT bootstrap the joint
+// (fInf, tau) fit -- see bootstrapTauConfidenceInterval's own doc for why
+// (that 2-D grid search is far more expensive per call than the 1-D tau
+// search, and running it ~100 times per button click would be too slow
+// for interactive use).
 
 import type { CourseSegment } from "../gpx/pipeline";
 import type { CeilingParams } from "./ceiling";
-import { type EffortTrendPoint, fitTauAcrossRaces, fitTauFInfWithSupportGate, MIN_INFORMATIVE_RACES } from "./pacingFit";
+import {
+  type BootstrapOptions,
+  bootstrapTauConfidenceInterval,
+  BOOTSTRAP_YIELD_EVERY,
+  type EffortTrendPoint,
+  percentile,
+} from "./pacingFit";
 import { findSustainableTheta, type SolverInputs } from "./solver";
 
 export interface FinishTimeRangeResult {
@@ -39,42 +38,22 @@ export interface FinishTimeRangeResult {
   medianFinishTimeS: number;
   highFinishTimeS: number;
   /** Resamples that produced a usable tau-only fit and were included in
-   * low/median/high below. */
+   * low/median/high below. Mirrors bootstrapTauConfidenceInterval's own
+   * sampleCount/skippedCount -- see its doc for why a resample that can't
+   * clear the support gate is skipped, not substituted with a default. */
   sampleCount: number;
-  /** Resamples dropped for failing the same support gate the point
-   * estimate had to clear -- see the module doc comment on why these are
-   * skipped rather than substituted with a default value. */
   skippedCount: number;
 }
 
-const DEFAULT_BOOTSTRAP_SAMPLES = 100;
-/** Yield to the event loop this often during the bootstrap loop so the
- * browser tab stays responsive across ~100 sequential fit+solve calls. */
-const YIELD_EVERY = 10;
-
-/** Linear-interpolation percentile over an already-sorted array. */
-function percentile(sorted: number[], p: number): number {
-  if (sorted.length === 1) return sorted[0];
-  const rank = p * (sorted.length - 1);
-  const lo = Math.floor(rank);
-  const hi = Math.ceil(rank);
-  if (lo === hi) return sorted[lo];
-  return sorted[lo] + (sorted[hi] - sorted[lo]) * (rank - lo);
-}
-
-export interface PredictFinishTimeRangeOptions {
-  bootstrapSamples?: number;
-  /** Injectable for deterministic tests -- defaults to Math.random. */
-  rng?: () => number;
-}
+export type PredictFinishTimeRangeOptions = BootstrapOptions;
 
 /**
- * Null when the point estimate itself can't clear the support gate (the
- * real Soria Moria case: not enough informative races even for a tau-only
- * fit) -- refusing a number here mirrors fitTauFInfWithSupportGate's own
- * "defaults" tier refusing to trust a single-race-driven fit. Otherwise,
- * bootstraps tau (holding fInf fixed) to build a p10/p50/p90 band around
- * the point estimate's own predicted finish time on targetSegments.
+ * Null when the underlying tau fit itself can't clear the support gate
+ * (the real Soria Moria case: not enough informative races even for a
+ * tau-only fit) -- see bootstrapTauConfidenceInterval's own doc. Otherwise
+ * runs findSustainableTheta once at the point estimate and once per
+ * retained bootstrap tau sample, on targetSegments, to build a p10/p50/p90
+ * band around the predicted finish time.
  */
 export async function predictFinishTimeRange(
   races: EffortTrendPoint[][],
@@ -84,59 +63,40 @@ export async function predictFinishTimeRange(
   targetSegments: CourseSegment[],
   opts: PredictFinishTimeRangeOptions = {},
 ): Promise<FinishTimeRangeResult | null> {
-  const bootstrapSamples = opts.bootstrapSamples ?? DEFAULT_BOOTSTRAP_SAMPLES;
-  const rng = opts.rng ?? Math.random;
+  const tauBootstrap = await bootstrapTauConfidenceInterval(races, raceDates, ceilingParams, opts);
+  if (!tauBootstrap) return null;
 
-  const pointFit = fitTauFInfWithSupportGate(races, ceilingParams, { raceDates });
-  if (pointFit.tier === "defaults") return null;
-
-  const pointEstimateFinishTimeS = findSustainableTheta({
-    ...solverBaseInputs,
-    segments: targetSegments,
-    ceilingParams: pointFit.ceilingParams,
-  }).result.finishTimeS;
-
-  const bootstrapFinishTimes: number[] = [];
-  let skippedCount = 0;
-
-  for (let i = 0; i < bootstrapSamples; i++) {
-    if (i > 0 && i % YIELD_EVERY === 0) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-
-    const indices = races.map(() => Math.floor(rng() * races.length));
-    const resampledRaces = indices.map((idx) => races[idx]);
-    const resampledDates = indices.map((idx) => raceDates[idx]);
-
-    const tauFit = fitTauAcrossRaces(resampledRaces, pointFit.ceilingParams, { raceDates: resampledDates });
-    if (!tauFit || tauFit.informativeRaceCount < MIN_INFORMATIVE_RACES || tauFit.hitSearchBoundary) {
-      skippedCount++;
-      continue;
-    }
-
-    const { result } = findSustainableTheta({
+  const solve = (tauMin: number) =>
+    findSustainableTheta({
       ...solverBaseInputs,
       segments: targetSegments,
-      ceilingParams: { ...pointFit.ceilingParams, tauMin: tauFit.tauMin },
-    });
-    bootstrapFinishTimes.push(result.finishTimeS);
+      ceilingParams: { ...tauBootstrap.pointEstimateCeilingParams, tauMin },
+    }).result.finishTimeS;
+
+  const pointEstimateFinishTimeS = solve(tauBootstrap.pointEstimateTauMin);
+
+  const bootstrapFinishTimes: number[] = [];
+  for (let i = 0; i < tauBootstrap.tauSamples.length; i++) {
+    if (i > 0 && i % BOOTSTRAP_YIELD_EVERY === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    bootstrapFinishTimes.push(solve(tauBootstrap.tauSamples[i]));
   }
-
   bootstrapFinishTimes.sort((a, b) => a - b);
-  const sampleCount = bootstrapFinishTimes.length;
 
+  const sampleCount = bootstrapFinishTimes.length;
   const [low, median, high] =
     sampleCount > 0
       ? [percentile(bootstrapFinishTimes, 0.1), percentile(bootstrapFinishTimes, 0.5), percentile(bootstrapFinishTimes, 0.9)]
       : [pointEstimateFinishTimeS, pointEstimateFinishTimeS, pointEstimateFinishTimeS];
 
   return {
-    tier: pointFit.tier,
+    tier: tauBootstrap.tier,
     pointEstimateFinishTimeS,
     lowFinishTimeS: low,
     medianFinishTimeS: median,
     highFinishTimeS: high,
     sampleCount,
-    skippedCount,
+    skippedCount: tauBootstrap.skippedCount,
   };
 }

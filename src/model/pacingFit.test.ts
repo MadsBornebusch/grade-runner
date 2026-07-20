@@ -4,6 +4,7 @@ import { ceilingPower, type CeilingParams } from "./ceiling";
 import { descentImpact, descentImpactSquared, descentMeters } from "./descentImpact";
 import type { CourseSegment } from "../gpx/pipeline";
 import {
+  bootstrapTauConfidenceInterval,
   buildEffortTrendPoints,
   type EffortTrendPoint,
   fitDurabilityDriftPerDescentUnit,
@@ -356,6 +357,104 @@ describe("fitTauFInfWithSupportGate", () => {
     const result = fitTauFInfWithSupportGate([race15, race20, race18], withTauMin);
     expect(result.tier).toBe("defaults");
     expect(result.ceilingParams).toEqual(withTauMin); // completely untouched
+  });
+});
+
+describe("bootstrapTauConfidenceInterval", () => {
+  const baseParams: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, f0: 0.94, fInf: 0.38 };
+
+  /** Deterministic seeded PRNG (mulberry32) -- tests can't rely on real
+   * Math.random(). */
+  function seededRng(seed: number): () => number {
+    let a = seed;
+    return () => {
+      a |= 0;
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function makeRealisticRace(totalMinutes: number, baseLevel: number, trendPerHour: number, stepMinutes = 1) {
+    const points = [];
+    const refCeiling = ceilingPower({ tMin: 0, altitudeM: 0, elapsedHours: 0 }, baseParams);
+    for (let t = 0; t < totalMinutes; t += stepMinutes) {
+      const hours = t / 60;
+      points.push({ tHours: hours, grossPowerWPerKg: refCeiling * (baseLevel + trendPerHour * hours), altitudeM: 0, dtS: stepMinutes * 60 });
+    }
+    return points;
+  }
+
+  it("returns null when the underlying fit can't clear the support gate (the real Soria Moria case)", async () => {
+    const race15 = makeRealisticRace(15, 0.8, -0.1, 1);
+    const race20 = makeRealisticRace(20, 0.78, -0.05, 1);
+    const race18 = makeRealisticRace(18, 0.76, -0.08, 1);
+    const result = await bootstrapTauConfidenceInterval(
+      [race15, race20, race18],
+      [null, null, null],
+      { ...baseParams, tauMin: 250 },
+      { rng: seededRng(1) },
+    );
+    expect(result).toBeNull();
+  });
+
+  it("returns a sensible, ordered interval on a well-supported synthetic training set", async () => {
+    const trueParams: CeilingParams = { ...baseParams, fInf: 0.55, tauMin: 300 };
+    const races = [1, 3, 6, 10, 15].map((h) => makeConstantEffortPoints(trueParams, h));
+    const result = await bootstrapTauConfidenceInterval(races, races.map(() => null), trueParams, {
+      rng: seededRng(42),
+      bootstrapSamples: 40,
+    });
+    expect(result).not.toBeNull();
+    expect(["joint", "tauOnly"]).toContain(result!.tier);
+    expect(result!.sampleCount + result!.skippedCount).toBe(40);
+    expect(result!.tauSamples).toHaveLength(result!.sampleCount);
+    // Sorted ascending.
+    for (let i = 1; i < result!.tauSamples.length; i++) {
+      expect(result!.tauSamples[i]).toBeGreaterThanOrEqual(result!.tauSamples[i - 1]);
+    }
+    expect(result!.lowTauMin).toBeLessThanOrEqual(result!.medianTauMin);
+    expect(result!.medianTauMin).toBeLessThanOrEqual(result!.highTauMin);
+    expect(result!.pointEstimateCeilingParams.tauMin).toBe(result!.pointEstimateTauMin);
+  });
+
+  it("is deterministic given the same seeded rng", async () => {
+    const trueParams: CeilingParams = { ...baseParams, fInf: 0.55, tauMin: 300 };
+    const races = [1, 3, 6, 10, 15].map((h) => makeConstantEffortPoints(trueParams, h));
+    const raceDates = races.map(() => null);
+    const a = await bootstrapTauConfidenceInterval(races, raceDates, trueParams, { rng: seededRng(7), bootstrapSamples: 20 });
+    const b = await bootstrapTauConfidenceInterval(races, raceDates, trueParams, { rng: seededRng(7), bootstrapSamples: 20 });
+    expect(a).toEqual(b);
+  });
+
+  it("produces a narrower interval with more informative races than with fewer", async () => {
+    const trueParams: CeilingParams = { ...baseParams, fInf: 0.55, tauMin: 300 };
+    // Noiseless synthetic races all recover the same tau regardless of
+    // which get resampled -- real cross-race disagreement (a small,
+    // deterministic per-race tau jitter, uncorrelated with duration) is
+    // what bootstrap variance actually measures, same trap caught while
+    // testing finishTimeRange.ts's own equivalent claim.
+    const jitteredTau = (i: number) => trueParams.tauMin! + (((i * 37) % 21) - 10) * 3;
+    const manyRaces = [1, 2, 3, 5, 6, 8, 10, 12, 15, 18].map((h, i) =>
+      makeConstantEffortPoints({ ...trueParams, tauMin: jitteredTau(i) }, h),
+    );
+    const fewRaces = [10, 15].map((h, i) => makeConstantEffortPoints({ ...trueParams, tauMin: jitteredTau(i) }, h));
+
+    const many = await bootstrapTauConfidenceInterval(manyRaces, manyRaces.map(() => null), trueParams, {
+      rng: seededRng(3),
+      bootstrapSamples: 60,
+    });
+    const few = await bootstrapTauConfidenceInterval(fewRaces, fewRaces.map(() => null), trueParams, {
+      rng: seededRng(3),
+      bootstrapSamples: 60,
+    });
+
+    expect(many).not.toBeNull();
+    expect(few).not.toBeNull();
+    const manyWidth = many!.highTauMin - many!.lowTauMin;
+    const fewWidth = few!.highTauMin - few!.lowTauMin;
+    expect(manyWidth).toBeLessThan(fewWidth);
   });
 });
 

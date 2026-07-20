@@ -666,6 +666,130 @@ export function fitTauFInfWithSupportGate(
   return { ceilingParams, tier: "defaults", fInfFit, tauFit };
 }
 
+/** Linear-interpolation percentile over an already-sorted array. Shared by
+ * bootstrapTauConfidenceInterval below and finishTimeRange.ts's own
+ * percentile call on bootstrap finish times. */
+export function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 1) return sorted[0];
+  const rank = p * (sorted.length - 1);
+  const lo = Math.floor(rank);
+  const hi = Math.ceil(rank);
+  if (lo === hi) return sorted[lo];
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (rank - lo);
+}
+
+export interface BootstrapOptions {
+  bootstrapSamples?: number;
+  /** Injectable for deterministic tests -- defaults to Math.random. */
+  rng?: () => number;
+}
+
+export const DEFAULT_BOOTSTRAP_SAMPLES = 100;
+/** Yield to the event loop this often during a bootstrap loop so the
+ * browser tab stays responsive across ~100 sequential refits. */
+export const BOOTSTRAP_YIELD_EVERY = 10;
+
+export interface TauConfidenceInterval {
+  /** Which tier the POINT ESTIMATE (not each resample) used -- "defaults"
+   * never reaches this far; bootstrapTauConfidenceInterval returns null
+   * instead, since there's nothing to build an interval around. */
+  tier: "joint" | "tauOnly";
+  pointEstimateTauMin: number;
+  /** Full ceilingParams (fInf + tauMin) from the point estimate -- exposed
+   * so downstream callers (finishTimeRange.ts's solver-based band) don't
+   * need to re-run fitTauFInfWithSupportGate themselves. */
+  pointEstimateCeilingParams: CeilingParams;
+  lowTauMin: number;
+  medianTauMin: number;
+  highTauMin: number;
+  /** Retained per-resample tauMin values, sorted ascending -- exposed for
+   * callers that need more than tau's own percentiles (e.g.
+   * finishTimeRange.ts runs each one through the solver to build a
+   * finish-time distribution) without re-running the bootstrap themselves. */
+  tauSamples: number[];
+  /** Resamples that produced a usable tau-only fit and were included above. */
+  sampleCount: number;
+  /** Resamples dropped for failing the same support gate the point
+   * estimate had to clear -- see the module-level note on why these are
+   * skipped rather than substituted with a default value. */
+  skippedCount: number;
+}
+
+/**
+ * Nonparametric bootstrap confidence interval on tau: resamples races with
+ * replacement, refits tau on each resample (holding fInf fixed at whatever
+ * the point estimate resolved to -- see fitTauFInfWithSupportGate), and
+ * reports percentiles across the retained resamples. A cleaner question
+ * than finishTimeRange.ts's own sensitivity band: this is a standard
+ * "how much would tau vary if I'd sampled a slightly different set of my
+ * own training races" bootstrap CI on a fitted parameter, not a claim
+ * about real-world finish-time variance.
+ *
+ * Null when the point estimate itself can't clear the support gate (the
+ * real Soria Moria case: not enough informative races even for a tau-only
+ * fit) -- refusing a number here mirrors fitTauFInfWithSupportGate's own
+ * "defaults" tier refusing to trust a single-race-driven fit.
+ *
+ * A resample that can't itself clear the same informative-race-count gate
+ * is SKIPPED, not replaced with a default value: mixing "genuinely refit"
+ * samples with "fell back to defaults" samples in one distribution
+ * produces a bimodal, meaningless spread, not a wide-but-honest one --
+ * this is exactly why naive bootstrap-over-races is degenerate at low
+ * informativeRaceCount (the real Soria Moria case, informativeRaceCount=1/27).
+ */
+export async function bootstrapTauConfidenceInterval(
+  races: EffortTrendPoint[][],
+  raceDates: (Date | null)[],
+  ceilingParams: CeilingParams,
+  opts: BootstrapOptions = {},
+): Promise<TauConfidenceInterval | null> {
+  const bootstrapSamples = opts.bootstrapSamples ?? DEFAULT_BOOTSTRAP_SAMPLES;
+  const rng = opts.rng ?? Math.random;
+
+  const pointFit = fitTauFInfWithSupportGate(races, ceilingParams, { raceDates });
+  if (pointFit.tier === "defaults") return null;
+
+  const pointEstimateTauMin = pointFit.ceilingParams.tauMin!;
+  const tauSamples: number[] = [];
+  let skippedCount = 0;
+
+  for (let i = 0; i < bootstrapSamples; i++) {
+    if (i > 0 && i % BOOTSTRAP_YIELD_EVERY === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const indices = races.map(() => Math.floor(rng() * races.length));
+    const resampledRaces = indices.map((idx) => races[idx]);
+    const resampledDates = indices.map((idx) => raceDates[idx]);
+
+    const tauFit = fitTauAcrossRaces(resampledRaces, pointFit.ceilingParams, { raceDates: resampledDates });
+    if (!tauFit || tauFit.informativeRaceCount < MIN_INFORMATIVE_RACES || tauFit.hitSearchBoundary) {
+      skippedCount++;
+      continue;
+    }
+    tauSamples.push(tauFit.tauMin);
+  }
+
+  tauSamples.sort((a, b) => a - b);
+  const sampleCount = tauSamples.length;
+  const [low, median, high] =
+    sampleCount > 0
+      ? [percentile(tauSamples, 0.1), percentile(tauSamples, 0.5), percentile(tauSamples, 0.9)]
+      : [pointEstimateTauMin, pointEstimateTauMin, pointEstimateTauMin];
+
+  return {
+    tier: pointFit.tier,
+    pointEstimateTauMin,
+    pointEstimateCeilingParams: pointFit.ceilingParams,
+    lowTauMin: low,
+    medianTauMin: median,
+    highTauMin: high,
+    tauSamples,
+    sampleCount,
+    skippedCount,
+  };
+}
+
 export interface DriftFitResult {
   durabilityDriftPerHour: number;
   trendAtFitPctPerHour: number;
