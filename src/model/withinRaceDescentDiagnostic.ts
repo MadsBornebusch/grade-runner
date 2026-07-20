@@ -21,17 +21,23 @@
 //
 // Also carries runningImpact.ts's fitted "running impact" score as a fourth
 // early-window predictor, for a head-to-head comparison against the three
-// descent-specific ones. Worth flagging up front: that score is ~distance
-// dominated (the hill-surcharge term was a small fraction of the total on
-// the runs it was fit against), so cumulative early-window impact is even
-// more collinear with early-window elapsed time/distance than cumulative
-// descent is -- and it lumps ascent+flat+descent into one number, whereas
-// the eccentric-loading hypothesis this diagnostic exists to test is
-// specifically about descent. A correlation here is at real risk of just
-// re-detecting the already-modeled time-based tau decay rather than
-// isolating anything muscular; it clears the same bar as the descent
-// metrics (does the *late-window residual*, not raw fade, correlate) but
-// should be read as a weaker, more confounded probe, not a replacement.
+// descent-specific ones. Its distance term does NOT make this predictor
+// distance-collinear the way it might look: per-km normalization divides it
+// out to a constant (runningImpact(early)/earlyDistanceKm reduces exactly to
+// `distanceCoefficient + hillSurchargeCoefficient * (hillSurchargeKm /
+// earlyDistanceKm)`), and a Pearson correlation is invariant to adding a
+// constant -- so earlyRunningImpactPerKm is driven entirely by early-window
+// grade cost, a pure terrain-difficulty signal, not a time/distance proxy.
+// The real caveat is different: it lumps ascent+flat+descent into one
+// number (and, per runningImpact.ts's own module comment, has the *wrong
+// sign* for descent specifically -- gentle-to-moderate descent scores lower
+// on this metric, not higher, since it's built on Minetti metabolic cost
+// rather than an eccentric-damage model), whereas the hypothesis this
+// diagnostic exists to test is specifically about descent. A correlation
+// here reflects general early-race terrain difficulty, not an isolated
+// descent effect; it clears the same bar as the descent metrics (does the
+// *late-window residual*, not raw fade, correlate) but should be read as a
+// less targeted probe, not a replacement.
 
 import { analyzeRun } from "./analysis";
 import { descentImpact, descentImpactSquared, descentMeters } from "./descentImpact";
