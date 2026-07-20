@@ -152,10 +152,13 @@ must hold at *every* instant, not just at the finish.
   `fract(t) = f_inf + (f0 − f_inf)·exp(−t/τ)`, defaults `f0 = 0.94`, `f_inf ≈ 0.38`,
   `τ ≈ 250 min`. Always cap by LT2. Let the user calibrate to one recent race.
 - **Fuel = reservoir + flow limit, in grams.** Track glycogen forward:
-  `dGly/dt = carb_in_ox − carb_demand`, floored at reserve (~60 g).
-  Exogenous carb is **gut-limited independent of intake**:
-  `carb_in_ox = min(intake_g_per_h, gut_max)`, `gut_max ≈ 60 g/h` (glucose) to
-  ~90 g/h (glucose+fructose). Intake above gut_max is wasted (GI distress), not fuel.
+  `dGly/dt = carb_in_ox − carb_demand`, floored at reserve (0 by default --
+  restructure session: not user-editable, see §7). Exogenous carb is
+  `carb_in_ox = intake_g_per_h` directly -- **no gut-absorption cap is
+  modeled** (restructure session removed the earlier `min(intake, gut_max)`
+  version); the UI instead tells the user what's realistic (~60 g/h
+  glucose-only, up to ~90 g/h glucose+fructose) so planning far above that
+  doesn't silently overstate how much carb is actually usable.
   Bonk = glycogen hits reserve → sustainable power collapses to `fat_ceiling + exogenous_carb`.
 
 **Fat oxidation — energy-conserving default (P1).** Model the substrate split as a
@@ -291,23 +294,47 @@ cautious one likely warrant different values.
 
 | Param | Default | Notes |
 |---|---|---|
-| Body mass | 70 kg | |
-| VO₂max | 50 ml/kg/min | or infer from a recent race |
-| LT1 / LT2 (%VO₂max) | 0.65 / 0.85 | anchors fat curve + ceiling cap |
-| Duration→fraction curve | f0 0.94, f_inf 0.38, τ 250 min | calibrate to one race |
-| Carb intake | 60 g/h | fueling plan |
-| Gut oxidation max | 60 g/h (90 mixed) | caps exogenous carb, separate from intake |
-| Glycogen store | ~7–8 g/kg ⇒ ~500 g | + fed/fasted start fraction |
-| Glycogen reserve floor | 60 g | bonk threshold |
+| Body mass | 70 kg | Settings |
+| VO₂max | 50 ml/kg/min | Settings; or infer from a recent race |
+| LT1 / LT2 (%VO₂max) | 0.65 / 0.85 | Settings; anchors fat curve + ceiling cap. Advanced: enter as pace + pulse instead (heart rate is reference-only, not fed into any calculation) |
+| Duration→fraction curve | f0 0.94, f_inf 0.38, τ 250 min | Settings; found automatically from a Strava backfill+fit once it clears its own quality bar, or left at these defaults otherwise. Advanced: override manually |
+| Carb intake | 60 g/h | Course page (per-race, not an athlete constant) |
+| Glycogen store | 7.5 g/kg ⇒ ~525 g at 70kg | Course page, entered as g/kg (not a raw gram total) -- carb-loading or a fasted/depleted start are real per-race reasons to change this |
 | FO_peak (fat rate ceiling) | 0.55 g/min | ~1.0 for elites |
 | Resting metabolism | 1.2 W/kg | net→gross bridge |
-| Walk max speed / force-walk grade | 2.0 m/s / off | |
-| Smoothing window / segment length | 150 m / 50 m | see §5 GPX pipeline note re: why 150, not 40 |
+| Walk max speed / force-walk grade | 2.0 m/s / off | Settings |
+| Smoothing window / segment length | 150 m / 50 m | Course page; see §5 GPX pipeline note re: why 150, not 40 |
 | Altitude adjustment | on | Cerretelli per-segment |
-| Durability drift | off | decay Ė_sus over hours |
+| Durability drift | off | Settings; decay Ė_sus over hours |
+
+**Removed as user-editable (PLAN.md restructure session):**
+- **Gut oxidation max.** The model now assumes all planned carb intake is
+  absorbed and oxidized -- it doesn't enforce an absorption ceiling itself.
+  The UI instead tells the user what's realistic (~60 g/h glucose-only, up
+  to ~90 g/h glucose+fructose mixes) so they don't plan for more than a
+  real gut can handle. Simpler than modeling two numbers (intake, gut cap)
+  when the practical guidance is a single sensible ceiling on intake itself.
+- **Glycogen reserve floor.** Defaults to 0 (kept as an overridable
+  model-layer param purely for tests to exercise the floor mechanism, not
+  exposed anywhere in the UI). Unlike glycogen store, there's no real way
+  for an athlete to personally calibrate this -- it's a modeling floor
+  (glycogen depletion is never literally complete; the liver keeps
+  supplying some glucose), not a measured physiological constant, so it
+  wasn't worth a dedicated input.
 
 Everything above the fold works with zero physiology input; accuracy improves as the
 user supplies LT1/LT2, fat-ox points, and a calibration race.
+
+**UI structure (restructure session):** one-time athlete setup (mass,
+VO2max, LT1/LT2, walk speed, pacing curve, Strava connect+backfill+fit)
+lives in a gear-icon Settings modal, decoupled from the swipeable
+Course/Results flow -- the main loop is upload a course, see the plan.
+Fueling (intake, glycogen store) moved to the Course page since it's
+genuinely per-race, not an athlete constant. A true mmol/L lactate-profile
++ threshold-detection input tier (beyond LT1/LT2-by-pace) was scoped and
+explicitly deferred as a separate future item -- a real one needs genuine
+new exercise-science logic (e.g. modified-Dmax or fixed-4mmol detection),
+not reuse of anything already in the app.
 
 ---
 
