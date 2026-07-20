@@ -54,9 +54,6 @@ interface RunLibraryPanelProps {
 const BACKFILL_MAX_PAGES = 50;
 const BACKFILL_PER_PAGE = 100;
 const BACKFILL_PAGE_DELAY_MS = 300;
-/** Above this many summary-only runs selected for a fit, fetching full GPS
- * data would mean too many Strava API calls to do inline -- see PLAN.md §12. */
-const MAX_LAZY_FETCH = 8;
 
 const DEFAULT_HALF_LIFE_DAYS = 75;
 /** Only the strongest few estimates are shown -- see vo2MaxEstimates below
@@ -79,34 +76,9 @@ function runDate(run: StoredRun): Date | null {
   return firstPointTime ?? null;
 }
 
-/** Summary-only rows (points === null) read their distance/duration
- * straight off the stored Strava summary -- no pipeline run needed, and
- * it's the only data available anyway until points are fetched. Rows with
- * full points (manual uploads, or already-fetched Strava runs) still go
- * through the pipeline, since that's the only source of truth for those. */
-function summarize(run: StoredRun) {
-  if (run.points === null) {
-    return {
-      distanceKm: run.distanceKm ?? 0,
-      durationH: run.durationS !== undefined ? run.durationS / 3600 : null,
-      hasTimestamps: run.durationS !== undefined,
-    };
-  }
-  const course = runPipeline(run.points);
-  const durationH = course.hasTimestamps
-    ? course.segments.reduce((sum, s) => sum + (s.dtS ?? 0), 0) / 3600
-    : null;
-  return { distanceKm: course.totalDistance3D / 1000, durationH, hasTimestamps: course.hasTimestamps };
-}
-
 export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2MaxEntry, onRacesFitted }: RunLibraryPanelProps) {
   const { connected: stravaConnected } = useStravaSession();
   const [runs, setRuns] = useState<StoredRun[]>([]);
-  // Runs with full GPS data already downloaded (points !== null) are selected
-  // for the fit by default -- no manual scrolling/checking needed for the
-  // common case. This map only records *departures* from that default (a
-  // user unchecking a fetched run, or opting a summary-only one in).
-  const [selectionOverrides, setSelectionOverrides] = useState<Map<string, boolean>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [fitResult, setFitResult] = useState<MultiRaceTauFitResult | null>(null);
   const [fInfFitResult, setFInfFitResult] = useState<FInfTauFitResult | null>(null);
@@ -121,10 +93,6 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
   const [tauCI, setTauCI] = useState<TauConfidenceInterval | "insufficient" | null>(null);
   const [computingTauCI, setComputingTauCI] = useState(false);
   const [halfLifeDays, setHalfLifeDays] = useState(DEFAULT_HALF_LIFE_DAYS);
-  // Display-only filter for the run list below -- a large backfilled library
-  // is mostly summary-only rows; this doesn't affect selection, the fit, or
-  // the diagnostic, which all still operate on the full dedupedRuns.
-  const [showOnlyFetched, setShowOnlyFetched] = useState(false);
 
   const [backfillFrom, setBackfillFrom] = useState(oneYearAgoDateInput);
   const [backfilling, setBackfilling] = useState(false);
@@ -148,11 +116,6 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
   // from `dedupedRuns`, not `runs`, so a duplicate can't silently double-
   // count in the run list, a fit, the suggestions, or the diagnostic.
   const { kept: dedupedRuns, duplicateGroups } = useMemo(() => dedupeStoredRuns(runs), [runs]);
-
-  const visibleRuns = useMemo(
-    () => (showOnlyFetched ? dedupedRuns.filter((r) => r.points !== null) : dedupedRuns),
-    [dedupedRuns, showOnlyFetched],
-  );
 
   const [removingDuplicates, setRemovingDuplicates] = useState(false);
   const removeDuplicates = async () => {
@@ -191,29 +154,6 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
     [refresh],
   );
 
-  const isSelected = useCallback(
-    (run: StoredRun) => selectionOverrides.get(run.id) ?? run.points !== null,
-    [selectionOverrides],
-  );
-
-  const toggleSelected = (run: StoredRun) => {
-    setSelectionOverrides((prev) => {
-      const next = new Map(prev);
-      next.set(run.id, !isSelected(run));
-      return next;
-    });
-  };
-
-  const remove = async (id: string) => {
-    await deleteStoredRun(id);
-    setSelectionOverrides((prev) => {
-      const next = new Map(prev);
-      next.delete(id);
-      return next;
-    });
-    refresh();
-  };
-
   const [clearing, setClearing] = useState(false);
   const clearAll = async () => {
     if (!window.confirm("Delete every stored run? This clears the whole local run library and can't be undone.")) {
@@ -223,7 +163,6 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
     setError(null);
     try {
       await clearStoredRuns();
-      setSelectionOverrides(new Map());
       setFitResult(null);
       setFInfFitResult(null);
       setFitRan(false);
@@ -400,25 +339,18 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
   };
 
   const runFit = async () => {
-    const selectedRuns = dedupedRuns.filter(isSelected);
-    const unfetchedCount = selectedRuns.filter((r) => r.points === null).length;
-    if (unfetchedCount > MAX_LAZY_FETCH) {
-      const estimatedMinutes = Math.ceil((unfetchedCount * 2 * 9) / 60);
-      setError(
-        `${unfetchedCount} selected runs don't have their full GPS data yet -- fetching all of them would take ` +
-          `roughly ${estimatedMinutes} minutes and a large share of Strava's daily rate limit. Narrow your ` +
-          `selection to ${MAX_LAZY_FETCH} or fewer summary-only runs (try the suggested runs below, or the ` +
-          `filters in the Strava import panel), then fit again.`,
-      );
-      return;
-    }
+    // Automatic: every stored run with full GPS data already fetched joins
+    // the fit, no manual curation -- runs still summary-only (backfilled but
+    // not fetched) are simply left out until fetched via the suggestions
+    // below or a direct import.
+    const readyRuns = dedupedRuns.filter((r) => r.points !== null);
 
     setFitting(true);
     setError(null);
     try {
       const races: EffortTrendPoint[][] = [];
       const raceDates: (Date | null)[] = [];
-      for (const run of selectedRuns) {
+      for (const run of readyRuns) {
         const points = await ensurePoints(run);
         const course = runPipeline(points);
         if (!course.hasTimestamps) continue;
@@ -506,7 +438,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
     });
   };
 
-  const selectedCount = dedupedRuns.filter(isSelected).length;
+  const readyCount = dedupedRuns.filter((r) => r.points !== null).length;
 
   return (
     <div className="chart">
@@ -521,11 +453,10 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
       <p className="field-group-help">
         Store past runs here and fit one shared fade time constant (tau) across several of them at once, instead of
         just this course's recording. Pooling races is mainly about robustness -- one tau has to flatten every
-        selected race's own effort trend simultaneously, not just one run's idiosyncrasies. It doesn't separately
-        identify f0 or fInf: that needs races spanning a much wider range of durations than a typical library, plus
-        an anchor on the ceiling's absolute level that this fit doesn't have. Runs without a recorded timestamp can't
-        be used here. Runs with full GPS data already downloaded are selected for the fit automatically -- uncheck
-        any you want to leave out.
+        race's own effort trend simultaneously, not just one run's idiosyncrasies. It doesn't separately identify f0
+        or fInf: that needs races spanning a much wider range of durations than a typical library, plus an anchor on
+        the ceiling's absolute level that this fit doesn't have. Every stored run with full GPS data and a recorded
+        timestamp is used automatically -- no manual curation needed.
       </p>
 
       <label className="gpx-upload__control">
@@ -665,44 +596,6 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
       {dedupedRuns.length === 0 && <p className="placeholder">No runs stored yet.</p>}
 
       {dedupedRuns.length > 0 && (
-        <label className="strava-import__range-row">
-          <input type="checkbox" checked={showOnlyFetched} onChange={(e) => setShowOnlyFetched(e.target.checked)} />
-          <span>Only show downloaded runs ({dedupedRuns.filter((r) => r.points !== null).length} of {dedupedRuns.length})</span>
-        </label>
-      )}
-
-      {dedupedRuns.length > 0 && visibleRuns.length === 0 && (
-        <p className="placeholder">No downloaded runs yet -- fetch some above, or uncheck the filter.</p>
-      )}
-
-      {visibleRuns.length > 0 && (
-        <div className="fatox-rows">
-          {visibleRuns.map((run) => {
-            const summary = summarize(run);
-            return (
-              <div key={run.id} className="run-library-row">
-                <input
-                  type="checkbox"
-                  checked={isSelected(run)}
-                  disabled={!summary.hasTimestamps}
-                  onChange={() => toggleSelected(run)}
-                />
-                <span className="run-library-row__label">
-                  {run.name} &middot; {summary.distanceKm.toFixed(1)} km
-                  {summary.durationH !== null && ` · ${summary.durationH.toFixed(1)} h`}
-                  {!summary.hasTimestamps && " (no timestamps -- can't be used for a tau fit)"}
-                  {run.points === null && summary.hasTimestamps && " (summary only)"}
-                </span>
-                <button type="button" className="fatox-row__remove" onClick={() => remove(run.id)} aria-label="Remove run">
-                  ×
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {dedupedRuns.length > 0 && (
         <>
           <div className="strava-import__range-row">
             <span>Recency half-life</span>
@@ -712,10 +605,10 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
               value={halfLifeDays}
               onChange={(e) => setHalfLifeDays(Number(e.target.value))}
             />
-            <span>days -- older selected runs count for less</span>
+            <span>days -- older runs count for less</span>
           </div>
-          <button type="button" className="fatox-add" onClick={() => void runFit()} disabled={selectedCount === 0 || fitting}>
-            {fitting ? "Fitting…" : `Fit tau from ${selectedCount} selected run${selectedCount === 1 ? "" : "s"}`}
+          <button type="button" className="fatox-add" onClick={() => void runFit()} disabled={readyCount === 0 || fitting}>
+            {fitting ? "Fitting…" : `Fit tau from ${readyCount} downloaded run${readyCount === 1 ? "" : "s"}`}
           </button>
         </>
       )}
