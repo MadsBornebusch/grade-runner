@@ -14,6 +14,7 @@ import {
   fitTauAcrossRaces,
   fitTauFInfWithSupportGate,
   fitTauMinutes,
+  suggestFitImprovements,
   trimForPacingFit,
 } from "./pacingFit";
 
@@ -455,6 +456,99 @@ describe("bootstrapTauConfidenceInterval", () => {
     const manyWidth = many!.highTauMin - many!.lowTauMin;
     const fewWidth = few!.highTauMin - few!.lowTauMin;
     expect(manyWidth).toBeLessThan(fewWidth);
+  });
+});
+
+describe("suggestFitImprovements", () => {
+  const baseParams: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, f0: 0.94, fInf: 0.38 };
+
+  function makeRealisticRace(totalMinutes: number, baseLevel: number, trendPerHour: number, stepMinutes = 1) {
+    const points = [];
+    const refCeiling = ceilingPower({ tMin: 0, altitudeM: 0, elapsedHours: 0 }, baseParams);
+    for (let t = 0; t < totalMinutes; t += stepMinutes) {
+      const hours = t / 60;
+      points.push({ tHours: hours, grossPowerWPerKg: refCeiling * (baseLevel + trendPerHour * hours), altitudeM: 0, dtS: stepMinutes * 60 });
+    }
+    return points;
+  }
+
+  it("returns no suggestions when there's nothing to say yet", () => {
+    expect(suggestFitImprovements(null, null)).toEqual([]);
+  });
+
+  it("flags too few informative races when even the tau-only fit is under-supported (the real Soria Moria case)", () => {
+    const race15 = makeRealisticRace(15, 0.8, -0.1, 1);
+    const race20 = makeRealisticRace(20, 0.78, -0.05, 1);
+    const race18 = makeRealisticRace(18, 0.76, -0.08, 1);
+    const withTauMin: CeilingParams = { ...baseParams, tauMin: 250 };
+    const tauFit = fitTauAcrossRaces([race15, race20, race18], withTauMin);
+    const fInfFit = fitFInfAndTauAcrossRaces([race15, race20, race18], withTauMin);
+
+    const suggestions = suggestFitImprovements(tauFit, fInfFit);
+    expect(suggestions.some((s) => s.severity === "warning" && s.message.includes("multi-hour"))).toBe(true);
+  });
+
+  it("flags races that are too similar in length when duration diversity is too low", () => {
+    const trueParams: CeilingParams = { ...baseParams, fInf: 0.55, tauMin: 300 };
+    const races = [7, 7.5, 8, 8.5].map((h) => makeConstantEffortPoints(trueParams, h));
+    const tauFit = fitTauAcrossRaces(races, trueParams);
+    const fInfFit = fitFInfAndTauAcrossRaces(races, trueParams);
+
+    const suggestions = suggestFitImprovements(tauFit, fInfFit);
+    expect(suggestions.some((s) => s.message.includes("too similar in length"))).toBe(true);
+  });
+
+  it("reports a well-supported fit as looking fine when everything clears", () => {
+    const trueParams: CeilingParams = { ...baseParams, fInf: 0.55, tauMin: 300 };
+    const races = [1, 3, 6, 10, 15].map((h) => makeConstantEffortPoints(trueParams, h));
+    const tauFit = fitTauAcrossRaces(races, trueParams);
+    const fInfFit = fitFInfAndTauAcrossRaces(races, trueParams);
+
+    const suggestions = suggestFitImprovements(tauFit, fInfFit);
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0].severity).toBe("info");
+  });
+
+  it("flags a wide tau confidence interval when one is supplied", () => {
+    const trueParams: CeilingParams = { ...baseParams, fInf: 0.55, tauMin: 300 };
+    const races = [1, 3, 6, 10, 15].map((h) => makeConstantEffortPoints(trueParams, h));
+    const tauFit = fitTauAcrossRaces(races, trueParams);
+    const fInfFit = fitFInfAndTauAcrossRaces(races, trueParams);
+    const wideTauCI = {
+      tier: "joint" as const,
+      pointEstimateTauMin: 300,
+      pointEstimateCeilingParams: trueParams,
+      lowTauMin: 200,
+      medianTauMin: 300,
+      highTauMin: 400, // (400-200)/300 = 67% width, clearly above the heuristic threshold
+      tauSamples: [],
+      sampleCount: 10,
+      skippedCount: 0,
+    };
+
+    const suggestions = suggestFitImprovements(tauFit, fInfFit, wideTauCI);
+    expect(suggestions.some((s) => s.message.includes("confidence interval spans"))).toBe(true);
+  });
+
+  it("does not flag a narrow tau confidence interval", () => {
+    const trueParams: CeilingParams = { ...baseParams, fInf: 0.55, tauMin: 300 };
+    const races = [1, 3, 6, 10, 15].map((h) => makeConstantEffortPoints(trueParams, h));
+    const tauFit = fitTauAcrossRaces(races, trueParams);
+    const fInfFit = fitFInfAndTauAcrossRaces(races, trueParams);
+    const narrowTauCI = {
+      tier: "joint" as const,
+      pointEstimateTauMin: 300,
+      pointEstimateCeilingParams: trueParams,
+      lowTauMin: 295,
+      medianTauMin: 300,
+      highTauMin: 305, // (305-295)/300 ~= 3% width
+      tauSamples: [],
+      sampleCount: 10,
+      skippedCount: 0,
+    };
+
+    const suggestions = suggestFitImprovements(tauFit, fInfFit, narrowTauCI);
+    expect(suggestions.some((s) => s.message.includes("confidence interval spans"))).toBe(false);
   });
 });
 

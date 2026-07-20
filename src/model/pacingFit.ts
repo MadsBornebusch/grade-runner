@@ -790,6 +790,111 @@ export async function bootstrapTauConfidenceInterval(
   };
 }
 
+export interface FitImprovementSuggestion {
+  severity: "warning" | "info";
+  message: string;
+}
+
+/** Heuristic, not a statistically derived threshold: above this fraction of
+ * the point estimate, the tau confidence interval is called out as worth
+ * narrowing. There's no principled cutoff here -- it's a "this is
+ * noticeably wide" flag, not a calibrated significance test. */
+const WIDE_TAU_CI_FRACTION = 0.3;
+
+/**
+ * Turns the diagnostics fitTauAcrossRaces/fitFInfAndTauAcrossRaces/
+ * bootstrapTauConfidenceInterval already compute (informativeRaceCount,
+ * durationDiversityRatio, hitSearchBoundary, the CI's own width) into
+ * concrete, actionable suggestions for what to add to the training
+ * library -- rather than reporting numbers and leaving the athlete to
+ * work out what they imply. Checks tau's own fit first (the thing that
+ * blocks everything else if unsupported), then the joint fInf/tau fit,
+ * then the tau CI's width if one has been computed.
+ *
+ * Returns an empty array only when tauFit is null AND fInfFit is null AND
+ * no tauCI was supplied -- i.e. there's nothing at all to say yet. When a
+ * tauFit exists and every check clears, returns a single reassuring "info"
+ * entry rather than an empty list, so the UI has something to render
+ * either way.
+ */
+export function suggestFitImprovements(
+  tauFit: MultiRaceTauFitResult | null,
+  fInfFit: FInfTauFitResult | null,
+  tauCI?: TauConfidenceInterval | null,
+): FitImprovementSuggestion[] {
+  const suggestions: FitImprovementSuggestion[] = [];
+
+  if (!tauFit) {
+    if (!fInfFit) return suggestions;
+  } else if (tauFit.informativeRaceCount < MIN_INFORMATIVE_RACES) {
+    const needed = MIN_INFORMATIVE_RACES - tauFit.informativeRaceCount;
+    suggestions.push({
+      severity: "warning",
+      message:
+        `Only ${tauFit.informativeRaceCount} of your ${tauFit.perRace.length} selected runs are actually long ` +
+        `enough to inform tau -- add at least ${needed} more multi-hour effort${needed === 1 ? "" : "s"} (see which ` +
+        `ones are flagged "unresponsive" above).`,
+    });
+  } else if (tauFit.hitSearchBoundary) {
+    const direction = tauFit.hitSearchBoundary === "upper" ? "longer" : "shorter";
+    suggestions.push({
+      severity: "warning",
+      message:
+        `Your tau estimate landed at the ${tauFit.hitSearchBoundary} edge of the search range -- the true value ` +
+        `may be even ${tauFit.hitSearchBoundary === "upper" ? "larger" : "smaller"}. Add a ${direction} run to pin it down.`,
+    });
+  }
+
+  if (fInfFit) {
+    if (fInfFit.durationDiversityRatio < MIN_DURATION_DIVERSITY_RATIO) {
+      suggestions.push({
+        severity: "warning",
+        message:
+          `Your runs span only a ${fInfFit.durationDiversityRatio.toFixed(1)}x duration range (longest ÷ ` +
+          `shortest) -- your long runs are too similar in length. Add one at least ${MIN_DURATION_DIVERSITY_RATIO}x ` +
+          `longer or shorter than your current spread to also estimate fInf, not just tau.`,
+      });
+    } else if (fInfFit.informativeRaceCount < MIN_INFORMATIVE_RACES) {
+      suggestions.push({
+        severity: "warning",
+        message:
+          `Your runs span a wide duration range, but only ${fInfFit.informativeRaceCount} of them actually ` +
+          `inform the joint fInf/tau fit -- add more multi-hour efforts, not just longer ones.`,
+      });
+    } else if (fInfFit.hitSearchBoundary.fInf || fInfFit.hitSearchBoundary.tau) {
+      const params = [fInfFit.hitSearchBoundary.fInf && "fInf", fInfFit.hitSearchBoundary.tau && "tau"]
+        .filter(Boolean)
+        .join(" and ");
+      suggestions.push({
+        severity: "warning",
+        message: `The joint fit hit a search boundary on ${params} -- treat those as bounds, and add more (or longer) runs to narrow them down.`,
+      });
+    }
+  }
+
+  if (tauCI) {
+    const widthFraction = (tauCI.highTauMin - tauCI.lowTauMin) / tauCI.pointEstimateTauMin;
+    if (widthFraction > WIDE_TAU_CI_FRACTION) {
+      suggestions.push({
+        severity: "warning",
+        message:
+          `Your tau confidence interval spans ${(widthFraction * 100).toFixed(0)}% of the point estimate ` +
+          `(${tauCI.lowTauMin.toFixed(0)}-${tauCI.highTauMin.toFixed(0)} min around ${tauCI.pointEstimateTauMin.toFixed(0)} min) ` +
+          `-- more runs, especially long ones, would narrow this down.`,
+      });
+    }
+  }
+
+  if (suggestions.length === 0 && tauFit) {
+    suggestions.push({
+      severity: "info",
+      message: "This fit looks well-supported. More long runs would still tighten it further, but nothing here looks broken.",
+    });
+  }
+
+  return suggestions;
+}
+
 export interface DriftFitResult {
   durabilityDriftPerHour: number;
   trendAtFitPctPerHour: number;
