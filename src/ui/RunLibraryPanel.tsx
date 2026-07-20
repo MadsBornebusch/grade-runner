@@ -66,6 +66,22 @@ function oneYearAgoDateInput(): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Same quality bar this panel already warns about in its own UI (see the
+ * informativeRaceCount/hitSearchBoundary notes below) -- reused both to
+ * decide whether to auto-apply a fit and to render the same verdict. */
+function isGoodTauFit(fit: MultiRaceTauFitResult | null): fit is MultiRaceTauFitResult {
+  return fit !== null && fit.informativeRaceCount >= MIN_INFORMATIVE_RACES && !fit.hitSearchBoundary;
+}
+
+function isGoodFInfFit(fit: FInfTauFitResult | null): fit is FInfTauFitResult {
+  return (
+    fit !== null &&
+    fit.informativeRaceCount >= MIN_INFORMATIVE_RACES &&
+    !fit.hitSearchBoundary.fInf &&
+    !fit.hitSearchBoundary.tau
+  );
+}
+
 /** A run's own calendar date, for recency-weighting the multi-race fit --
  * Strava summaries carry it directly; GPX-derived runs (manual upload, or a
  * Strava run whose points have already been fetched) fall back to the
@@ -334,8 +350,17 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
         races.push(buildEffortTrendPoints(course.segments, analysis.segments, formInputs.altitudeAdjustment));
         raceDates.push(runDate(run));
       }
-      setFitResult(fitTauAcrossRaces(races, ceilingParams, { raceDates, halfLifeDays }));
-      setFInfFitResult(fitFInfAndTauAcrossRaces(races, ceilingParams, { raceDates, halfLifeDays }));
+      const tauFit = fitTauAcrossRaces(races, ceilingParams, { raceDates, halfLifeDays });
+      const fInfFit = fitFInfAndTauAcrossRaces(races, ceilingParams, { raceDates, halfLifeDays });
+      setFitResult(tauFit);
+      setFInfFitResult(fInfFit);
+      // Auto-apply once a fit clears the same quality bar its own UI already
+      // warns about -- enough informative races, no search-boundary hit --
+      // so "select a date, click to fit" is one step instead of fit-then-
+      // separately-click-apply. Manual Apply buttons below still work too
+      // (e.g. after tweaking the half-life and re-fitting).
+      if (isGoodTauFit(tauFit)) onApplyTau(tauFit.tauMin);
+      if (isGoodFInfFit(fInfFit)) onApplyFInf(fInfFit.fInf);
       setFitRan(true);
       setLastFittedRaces({ races, raceDates });
       setTauCI(null); // stale relative to the new fit above -- re-estimate on demand
@@ -616,6 +641,11 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
           <button type="button" className="fatox-add" onClick={() => onApplyTau(fitResult.tauMin)}>
             Apply tau = {fitResult.tauMin} min
           </button>
+          <p className="field-group-note">
+            {isGoodTauFit(fitResult)
+              ? "Applied automatically -- this fit had enough informative races and stayed within its search range."
+              : "Not applied automatically -- see the notes above; you can still apply it manually if you trust it."}
+          </p>
           {fitResult.hitSearchBoundary && (
             <p className="field-group-note">
               This landed at the {fitResult.hitSearchBoundary} edge of the search range -- treat it as a bound, not a
@@ -692,6 +722,11 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
           <button type="button" className="fatox-add" onClick={() => onApplyFInf(fInfFitResult.fInf)}>
             Apply fInf = {fInfFitResult.fInf.toFixed(2)}
           </button>
+          <p className="field-group-note">
+            {isGoodFInfFit(fInfFitResult)
+              ? "Applied automatically -- this fit had enough informative races and stayed within its search range."
+              : "Not applied automatically -- see the notes above; you can still apply it manually if you trust it."}
+          </p>
           {(fInfFitResult.hitSearchBoundary.fInf || fInfFitResult.hitSearchBoundary.tau) && (
             <p className="field-group-note">
               Hit a search boundary on{" "}
