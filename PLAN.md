@@ -986,12 +986,53 @@ is the concrete E_hard proxy to test in stage 4's diagnostic, not a vaguer
 - **Terrain roughness penalty**, especially downhill — nothing tracks
   course technicality; Minetti's own paper flags treadmill-smooth data
   understating real-terrain cost.
-- **Prediction intervals, not just a point estimate.** Planning mode
-  outputs one deterministic finish time. Bayesian uncertainty
-  quantification on the fade *coefficients* is a distinct idea from the
-  time-varying-tracking Bayesian approach §12 already rejected (Marchal et
-  al. 2025) — that rejection was about tracking drift over months, not
-  about uncertainty on a single calibration fit.
+- **Prediction intervals, not just a point estimate — built.** Planning
+  mode used to output one deterministic finish time only. Before building
+  anything, consulted on what the range should actually represent: a full
+  Bayesian uncertainty quantification (or anything folding in day-of
+  execution variance and structural model error) would need real-world
+  calibration data this project doesn't have -- only two backtest
+  residuals exist so far (-0.2%, -9.2%), nowhere near enough. Settled on a
+  narrower, honest scope instead: a **fade-parameter sensitivity band** --
+  how much the predicted finish time would shift if tau were slightly
+  different, given how well the athlete's own training data actually pins
+  it down. Explicitly NOT a real-world confidence interval; explicitly
+  documented as excluding weather, fueling execution, and structural
+  model error.
+
+  `src/model/finishTimeRange.ts`'s `predictFinishTimeRange` bootstraps tau
+  only (not the joint fInf/tau fit -- ~15-25x cheaper per call, and running
+  the full 2-D search ~100 times would be too slow for an interactive
+  button), holding fInf at whatever the point estimate resolved to. Reuses
+  a newly-extracted `fitTauFInfWithSupportGate` (promoted from
+  `scripts/backtestFinishTime.ts`'s own inline three-tier fallback) for
+  both the point estimate and, cheaply, each resample. A resample that
+  can't itself clear the same `informativeRaceCount` gate the point
+  estimate had to clear is **skipped, not substituted with a default** --
+  mixing "genuinely refit" and "fell back to defaults" samples in one
+  distribution produces a bimodal, meaningless spread. This was a real
+  risk flagged before writing any code: naive bootstrap-over-races is
+  degenerate at low `informativeRaceCount` (exactly Soria Moria's real
+  regime), and the fix generalizes directly from the guard already built
+  for that case -- when the point estimate itself can't clear the gate,
+  `predictFinishTimeRange` returns `null` (no band at all) rather than a
+  falsely narrow or bimodal one.
+
+  Verified with synthetic tests: null on an under-supported fit,
+  monotonic low/median/high ordering plus full sample/skip accounting on a
+  well-supported one, deterministic given the same seeded RNG, and (once a
+  noiseless-synthetic-data trap was caught -- perfectly clean races all
+  recover the same tau regardless of which get resampled, so real
+  cross-race disagreement had to be injected to test this at all) a
+  measurably narrower band from more informative races than fewer.
+
+  Wired into the UI: `RunLibraryPanel` reports the races/raceDates behind
+  its latest fit up to `App.tsx` via a new `onRacesFitted` callback; the
+  Results tab's new `FinishTimeRangePanel` is an explicit on-demand button
+  (bootstrap is too expensive for a live recompute-on-keystroke) showing
+  either the band with its caveat text, or an insufficient-data message
+  when `informativeRaceCount` is too low -- smoke-tested against a real
+  dev server via headless Playwright.
 - Poles/hiking economy adjustment — real but niche.
 
 **One citation flag:** the doc states Riegel's exponent runs "1.1–1.2+ for
@@ -1002,8 +1043,9 @@ coaching blogs." Everything else checked (the CP 2-20min validity window,
 Maunder/durability, the Minetti downhill/eccentric findings) independently
 confirmed against sources already verified for §12.
 
-**Disposition:** W′/CP, the glycogen-dependent fat ceiling, terrain
-roughness, and prediction intervals are logged as candidate future stages,
-each its own scope of work — not folded into stage 4/5. Proceeding with
-stage 4 as scoped, testing tau against descent load specifically (not just
-generic "intensity") per the sharpened stage 5 target above.
+**Disposition:** W′/CP, the glycogen-dependent fat ceiling, and terrain
+roughness are logged as candidate future stages, each its own scope of
+work — not folded into stage 4/5. Prediction intervals (above) are now
+built. Proceeding with stage 4 as scoped, testing tau against descent load
+specifically (not just generic "intensity") per the sharpened stage 5
+target above.
