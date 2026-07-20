@@ -28,9 +28,8 @@ function baseInputs(overrides: Partial<SolverInputs> = {}): SolverInputs {
   return {
     segments: makeSegments(200, 50, 0), // flat 10km
     bodyMassKg: 70,
-    fueling: { intakeGPerH: 60, gutMaxGPerH: 60 },
+    fueling: { intakeGPerH: 60 },
     glycogenStoreG: 500,
-    reserveG: 60,
     ...overrides,
   };
 }
@@ -82,7 +81,7 @@ describe("simulate", () => {
   it("bonks when glycogen is exhausted with no fueling", () => {
     const noFuel = baseInputs({
       segments: makeSegments(2000, 50, 0), // 100km
-      fueling: { intakeGPerH: 0, gutMaxGPerH: 0 },
+      fueling: { intakeGPerH: 0 },
       glycogenStoreG: 200,
     });
     const result = simulate(0.8, noFuel);
@@ -95,7 +94,7 @@ describe("simulate", () => {
   it("stays feasible over a long course when adequately fueled at low effort", () => {
     const wellFueled = baseInputs({
       segments: makeSegments(2000, 50, 0), // 100km
-      fueling: { intakeGPerH: 60, gutMaxGPerH: 60 },
+      fueling: { intakeGPerH: 60 },
       glycogenStoreG: 500,
     });
     const result = simulate(0.4, wellFueled);
@@ -115,7 +114,7 @@ describe("findSustainableTheta", () => {
   it("finds an intermediate theta for a course that bonks at full effort but not at low effort", () => {
     const long = baseInputs({
       segments: makeSegments(3000, 50, 0), // 150km
-      fueling: { intakeGPerH: 40, gutMaxGPerH: 60 },
+      fueling: { intakeGPerH: 40 },
       glycogenStoreG: 400,
     });
 
@@ -155,8 +154,11 @@ describe("findSustainableTheta", () => {
     }));
     const hillyInputs = baseInputs({
       segments: hilly,
-      fueling: { intakeGPerH: 30, gutMaxGPerH: 60 },
-      glycogenStoreG: 450,
+      fueling: { intakeGPerH: 30 },
+      // 390, not 450 -- preserves the same usable-glycogen margin as before
+      // the reserve floor moved from 60 to 0 (450-60 == 390-0), so this
+      // scenario still lands on the same fuel-bound-not-ceiling-bound edge.
+      glycogenStoreG: 390,
     });
     const { theta, result } = findSustainableTheta(hillyInputs);
     expect(result.feasible).toBe(true);
@@ -165,13 +167,13 @@ describe("findSustainableTheta", () => {
   });
 
   it("reports a real bonk point, not a degenerate stall, when no theta is feasible", () => {
-    // Starting glycogen == reserve: any positive carb demand at all bonks
-    // immediately, at every effort level, so no theta can ever be feasible.
+    // Starting glycogen == reserve (0, the default floor): any positive carb
+    // demand at all bonks immediately, at every effort level, so no theta
+    // can ever be feasible.
     const impossible = baseInputs({
       segments: makeSegments(5000, 50, 0), // 250km
-      fueling: { intakeGPerH: 0, gutMaxGPerH: 0 },
-      glycogenStoreG: 60,
-      reserveG: 60,
+      fueling: { intakeGPerH: 0 },
+      glycogenStoreG: 0,
     });
     const { result } = findSustainableTheta(impossible, { lo: 0.05 });
     expect(result.feasible).toBe(false);

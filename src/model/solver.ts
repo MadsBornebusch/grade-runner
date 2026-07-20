@@ -68,7 +68,10 @@ export interface SimulationResult {
 }
 
 const DEFAULT_WALK_MAX_MS = 2.0;
-const DEFAULT_RESERVE_G = 60;
+/** No FormInputs field feeds this in production -- glycogen simply depletes
+ * toward zero. Kept as an overridable model-layer param (not hardcoded)
+ * purely so tests can exercise the floor mechanism directly. */
+const DEFAULT_RESERVE_G = 0;
 
 /**
  * Forward-simulates the course at a fixed effort fraction `theta` of the

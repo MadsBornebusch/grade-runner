@@ -66,9 +66,8 @@ function options(overrides: Partial<CeilingParams> = {}): BuildRaceDiagnosticPoi
   return {
     bodyMassKg: 70,
     ceilingParams: { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, f0: 0.94, fInf: 0.38, tauMin: 60, ...overrides },
-    fueling: { intakeGPerH: 60, gutMaxGPerH: 60 },
+    fueling: { intakeGPerH: 60 },
     glycogenStoreG: 500,
-    reserveG: 60,
     walkMaxMs: 2.0,
     altitudeAdjustment: true,
   };

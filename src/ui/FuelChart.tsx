@@ -6,12 +6,11 @@ import { useDomainZoom } from "./useDomainZoom";
 
 interface FuelChartProps {
   points: ChartPoint[];
-  reserveG: number;
 }
 
 const HEIGHT = 220;
 
-export function FuelChart({ points, reserveG }: FuelChartProps) {
+export function FuelChart({ points }: FuelChartProps) {
   const [containerRef, width] = useContainerWidth<HTMLDivElement>();
   const data = downsample(points, 800);
   const { startIndex, endIndex, isZoomed, domain, onBrushChange, reset } = useDomainZoom(data);
@@ -43,7 +42,7 @@ export function FuelChart({ points, reserveG }: FuelChartProps) {
               formatter={(value) => [`${Number(value).toFixed(0)} g`, "glycogen"]}
               labelFormatter={(v) => `${Number(v).toFixed(2)} km`}
             />
-            <ReferenceLine y={reserveG} stroke="#e05252" strokeDasharray="4 4" label="reserve" />
+            <ReferenceLine y={0} stroke="#e05252" strokeDasharray="4 4" label="bonk" />
             <Line
               type="monotone"
               dataKey="glycogenG"

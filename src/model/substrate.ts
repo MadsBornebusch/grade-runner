@@ -104,6 +104,19 @@ export function fatOxPointToFraction(
 }
 
 /**
+ * Converts a flat-ground pace into gross metabolic power (W/kg), via the
+ * same walk/run speed threshold and Minetti flat-cost lookup used
+ * throughout this app. Shared by `fatOxPacePointToPowerFraction` below and
+ * formInputs.ts's pace-based LT1/LT2 conversion, so the two stay consistent
+ * rather than reimplementing this in two places.
+ */
+export function paceToGrossPowerWPerKg(paceMinPerKm: number, walkMaxMs = 2.0): number {
+  const speedMs = 1000 / (paceMinPerKm * 60);
+  const cost = speedMs <= walkMaxMs ? costOfWalking(0) : costOfRunning(0);
+  return netToGross(cost * speedMs);
+}
+
+/**
  * Converts a (pace, fat-ox, carb-ox) calibration point measured on flat
  * ground into a (gross power, carb-energy-fraction) pair, in absolute W/kg
  * rather than %VO2max — for users who have their own fat/carb-oxidation-vs-pace
@@ -124,9 +137,7 @@ export function fatOxPacePointToPowerFraction(
   carbGPerMin: number,
   walkMaxMs = 2.0,
 ): { x: number; fC: number } {
-  const speedMs = 1000 / (paceMinPerKm * 60);
-  const cost = speedMs <= walkMaxMs ? costOfWalking(0) : costOfRunning(0);
-  const pGrossWPerKg = netToGross(cost * speedMs);
+  const pGrossWPerKg = paceToGrossPowerWPerKg(paceMinPerKm, walkMaxMs);
   const fatKJPerMin = fatGPerMin * FAT_KJ_PER_G;
   const carbKJPerMin = carbGPerMin * CARB_KJ_PER_G;
   const totalKJPerMin = fatKJPerMin + carbKJPerMin;
@@ -169,10 +180,12 @@ export function splitPower(
 }
 
 export interface FuelingParams {
-  /** Planned exogenous carb intake, g/h. */
+  /** Planned exogenous carb intake, g/h -- assumed fully absorbed and
+   * oxidized. Real guts cap absorption at roughly 60 g/h (glucose-only) to
+   * ~90 g/h (glucose+fructose mixes); this model doesn't enforce that cap
+   * itself, so planning an intake far above it will overstate how much carb
+   * actually gets used -- see the UI's own guidance on sensible values. */
   intakeGPerH: number;
-  /** Gut oxidation ceiling, g/h (~60 glucose-only, ~90 glucose+fructose). */
-  gutMaxGPerH: number;
 }
 
 export interface GlycogenState {
@@ -195,7 +208,7 @@ export function stepGlycogen(
 ): GlycogenState {
   const carbDemandGPerS =
     (carbRateWPerKg * bodyMassKg) / (CARB_KJ_PER_G * 1000);
-  const carbInOxGPerS = Math.min(fueling.intakeGPerH, fueling.gutMaxGPerH) / 3600;
+  const carbInOxGPerS = fueling.intakeGPerH / 3600;
   const deltaG = (carbInOxGPerS - carbDemandGPerS) * dtSeconds;
   return { glycogenG: Math.max(reserveG, state.glycogenG + deltaG) };
 }
@@ -210,7 +223,7 @@ export function bonkPowerWPerKg(
   params: SubstrateParams = {},
 ): number {
   const { foPeakGPerMin } = resolveParams(params);
-  const carbInOxGPerS = Math.min(fueling.intakeGPerH, fueling.gutMaxGPerH) / 3600;
+  const carbInOxGPerS = fueling.intakeGPerH / 3600;
   const carbInOxWPerKg = (carbInOxGPerS * CARB_KJ_PER_G * 1000) / bodyMassKg;
   return fatCeilingWPerKg(foPeakGPerMin, bodyMassKg) + carbInOxWPerKg;
 }

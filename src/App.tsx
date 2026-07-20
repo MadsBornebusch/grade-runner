@@ -4,7 +4,7 @@ import { rawCourseStats, runPipeline } from "./gpx/pipeline";
 import { findSustainableTheta, type SolverInputs } from "./model/solver";
 import { analyzeRun, type AnalysisInputs } from "./model/analysis";
 import { GpxUpload } from "./ui/GpxUpload";
-import { AthleteFields, CourseProcessingFields } from "./ui/InputsPanel";
+import { AthleteFields, CourseProcessingFields, FuelingFields } from "./ui/InputsPanel";
 import { PageCarousel } from "./ui/PageCarousel";
 import { ElevationProfileChart } from "./ui/ElevationProfileChart";
 import { FinishTimeRangePanel } from "./ui/FinishTimeRangePanel";
@@ -23,8 +23,10 @@ import { AnalysisSummary } from "./ui/AnalysisSummary";
 import { buildAnalysisChartPoints, buildChartPoints } from "./ui/chartData";
 import {
   loadFormInputs,
+  resolveCeilingParams,
+  resolveGlycogenStoreG,
+  resolveLt1Lt2Fractions,
   resolveSubstrateAnchors,
-  resolveVo2Max,
   saveFormInputs,
   type FormInputs,
   type Vo2MaxEntry,
@@ -114,22 +116,15 @@ function App() {
   // re-upload, no spinner.
   const solverInputs = useMemo<SolverInputs | null>(() => {
     if (!courseResult || courseResult.segments.length === 0) return null;
-    const { x0, k, intensityIsAbsolutePower } = resolveSubstrateAnchors(formInputs);
+    const { lt1Fraction, lt2Fraction } = resolveLt1Lt2Fractions(formInputs);
+    const { x0, k, intensityIsAbsolutePower } = resolveSubstrateAnchors({ ...formInputs, lt1Fraction, lt2Fraction });
     return {
       segments: courseResult.segments,
       bodyMassKg: formInputs.bodyMassKg,
-      ceilingParams: {
-        vo2MaxMlPerKgPerMin: resolveVo2Max(formInputs.vo2MaxHistory),
-        lt2Fraction: formInputs.lt2Fraction,
-        f0: formInputs.f0,
-        fInf: formInputs.fInf,
-        tauMin: formInputs.tauMin,
-        durabilityDriftPerHour: formInputs.durabilityDriftPerHour,
-      },
+      ceilingParams: resolveCeilingParams(formInputs),
       substrateParams: { x0, k, intensityIsAbsolutePower, foPeakGPerMin: formInputs.foPeakGPerMin },
-      fueling: { intakeGPerH: formInputs.intakeGPerH, gutMaxGPerH: formInputs.gutMaxGPerH },
-      glycogenStoreG: formInputs.glycogenStoreG,
-      reserveG: formInputs.reserveG,
+      fueling: { intakeGPerH: formInputs.intakeGPerH },
+      glycogenStoreG: resolveGlycogenStoreG(formInputs),
       walkMaxMs: formInputs.walkMaxMs,
       forceWalkAboveGrade: formInputs.forceWalkAboveGrade ?? undefined,
       altitudeAdjustment: formInputs.altitudeAdjustment,
@@ -164,7 +159,8 @@ function App() {
     ) {
       return null;
     }
-    const { x0, k, intensityIsAbsolutePower } = resolveSubstrateAnchors(formInputs);
+    const { lt1Fraction, lt2Fraction } = resolveLt1Lt2Fractions(formInputs);
+    const { x0, k, intensityIsAbsolutePower } = resolveSubstrateAnchors({ ...formInputs, lt1Fraction, lt2Fraction });
     return {
       bodyMassKg: formInputs.bodyMassKg,
       // Full ceilingParams, matching solverInputs below -- analyzeRun's
@@ -172,18 +168,10 @@ function App() {
       // needs the pacing-fade/LT2/drift params too, not just VO2max. Passing
       // only vo2MaxMlPerKgPerMin here silently fell back to ceiling.ts's
       // defaults for everyone who'd customized their pacing curve.
-      ceilingParams: {
-        vo2MaxMlPerKgPerMin: resolveVo2Max(formInputs.vo2MaxHistory),
-        lt2Fraction: formInputs.lt2Fraction,
-        f0: formInputs.f0,
-        fInf: formInputs.fInf,
-        tauMin: formInputs.tauMin,
-        durabilityDriftPerHour: formInputs.durabilityDriftPerHour,
-      },
+      ceilingParams: resolveCeilingParams(formInputs),
       substrateParams: { x0, k, intensityIsAbsolutePower, foPeakGPerMin: formInputs.foPeakGPerMin },
-      fueling: { intakeGPerH: formInputs.intakeGPerH, gutMaxGPerH: formInputs.gutMaxGPerH },
-      glycogenStoreG: formInputs.glycogenStoreG,
-      reserveG: formInputs.reserveG,
+      fueling: { intakeGPerH: formInputs.intakeGPerH },
+      glycogenStoreG: resolveGlycogenStoreG(formInputs),
       walkMaxMs: formInputs.walkMaxMs,
       altitudeAdjustment: formInputs.altitudeAdjustment,
     };
@@ -282,6 +270,7 @@ function App() {
                   </p>
                 )}
                 <CourseProcessingFields values={formInputs} onChange={setFormInputs} />
+                <FuelingFields values={formInputs} onChange={setFormInputs} />
                 {formInputs.showCourseDebug && rawStats && (
                   <CourseDebugChart
                     raw={rawStats}
@@ -358,7 +347,7 @@ function App() {
                         {chartPoints.length >= 5 && (
                           <>
                             <ElevationProfileChart points={chartPoints} />
-                            <FuelChart points={chartPoints} reserveG={formInputs.reserveG} />
+                            <FuelChart points={chartPoints} />
                             <SplitTable points={chartPoints} />
                           </>
                         )}
@@ -401,7 +390,7 @@ function App() {
                                 }
                               />
                             )}
-                            <FuelChart points={analysisChartPoints} reserveG={formInputs.reserveG} />
+                            <FuelChart points={analysisChartPoints} />
                             <SubstrateChart points={substratePoints} />
                             <SplitTable points={analysisChartPoints} />
                           </>

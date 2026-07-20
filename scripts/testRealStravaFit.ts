@@ -28,7 +28,7 @@ import {
   computeWithinRaceDescentDiagnostic,
   type WithinRaceDiagnosticPoint,
 } from "../src/model/withinRaceDescentDiagnostic.ts";
-import { DEFAULT_FORM_INPUTS, resolveVo2Max } from "../src/ui/formInputs.ts";
+import { DEFAULT_FORM_INPUTS, resolveCeilingParams, resolveGlycogenStoreG } from "../src/ui/formInputs.ts";
 import { arg, backfill, fetchActivityPoints, loadCookie } from "./stravaScriptHelpers.ts";
 
 const BASE_URL = arg("base", "http://localhost:3000");
@@ -41,14 +41,7 @@ async function main() {
   const formInputs = DEFAULT_FORM_INPUTS;
   // Same shape RunLibraryPanel.tsx builds -- default athlete params, not any
   // saved profile (this script has no access to localStorage).
-  const ceilingParams = {
-    vo2MaxMlPerKgPerMin: resolveVo2Max(formInputs.vo2MaxHistory),
-    lt2Fraction: formInputs.lt2Fraction,
-    f0: formInputs.f0,
-    fInf: formInputs.fInf,
-    tauMin: formInputs.tauMin,
-    durabilityDriftPerHour: formInputs.durabilityDriftPerHour,
-  };
+  const ceilingParams = resolveCeilingParams(formInputs);
 
   console.log(`Backfilling run summaries since ${SINCE_DATE.toISOString().slice(0, 10)} from ${BASE_URL}...`);
   const runs = await backfill(BASE_URL, cookie, SINCE_DATE);
@@ -87,9 +80,8 @@ async function main() {
     const analysisInputs = {
       bodyMassKg: formInputs.bodyMassKg,
       ceilingParams,
-      fueling: { intakeGPerH: formInputs.intakeGPerH, gutMaxGPerH: formInputs.gutMaxGPerH },
-      glycogenStoreG: formInputs.glycogenStoreG,
-      reserveG: formInputs.reserveG,
+      fueling: { intakeGPerH: formInputs.intakeGPerH },
+      glycogenStoreG: resolveGlycogenStoreG(formInputs),
       walkMaxMs: formInputs.walkMaxMs,
       altitudeAdjustment: formInputs.altitudeAdjustment,
     };

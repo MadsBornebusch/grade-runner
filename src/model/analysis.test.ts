@@ -22,9 +22,8 @@ function makeSegment(overrides: Partial<CourseSegment>): CourseSegment {
 function baseInputs(overrides: Partial<AnalysisInputs> = {}): AnalysisInputs {
   return {
     bodyMassKg: 70,
-    fueling: { intakeGPerH: 60, gutMaxGPerH: 60 },
+    fueling: { intakeGPerH: 60 },
     glycogenStoreG: 500,
-    reserveG: 60,
     ...overrides,
   };
 }
@@ -76,10 +75,7 @@ describe("analyzeRun", () => {
 
   it("flags a bonk when glycogen depletes below reserve, but keeps going through the whole run", () => {
     const segments = makeRunningSegments(2000); // 100km at ~3.3 m/s
-    const result = analyzeRun(
-      segments,
-      baseInputs({ fueling: { intakeGPerH: 0, gutMaxGPerH: 0 }, glycogenStoreG: 250 }),
-    );
+    const result = analyzeRun(segments, baseInputs({ fueling: { intakeGPerH: 0 }, glycogenStoreG: 250 }));
     expect(result.bonked).toBe(true);
     expect(result.bonkIndex).not.toBeNull();
     // unlike the planning solver, analysis reconstructs the whole recorded run

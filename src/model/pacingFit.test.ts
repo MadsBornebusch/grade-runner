@@ -703,9 +703,8 @@ describe("buildEffortTrendPoints -- cumulative descent fields", () => {
   const analysisInputs = {
     bodyMassKg: 70,
     ceilingParams: params,
-    fueling: { intakeGPerH: 60, gutMaxGPerH: 60 },
+    fueling: { intakeGPerH: 60 },
     glycogenStoreG: 500,
-    reserveG: 60,
   };
 
   /** Mixed climb/descent/flat course, elevation deltas and speeds chosen so

@@ -66,9 +66,8 @@ function makeFlatSegments(n: number, segLenM = 50): CourseSegment[] {
 
 const solverBaseInputs: Omit<SolverInputs, "segments" | "ceilingParams"> = {
   bodyMassKg: 70,
-  fueling: { intakeGPerH: 60, gutMaxGPerH: 60 },
+  fueling: { intakeGPerH: 60 },
   glycogenStoreG: 500,
-  reserveG: 60,
 };
 
 /** Deterministic seeded PRNG (mulberry32) -- tests can't rely on real

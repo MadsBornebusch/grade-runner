@@ -3,8 +3,10 @@ import {
   displayToPaceMinPerKm,
   equivalentLT1LT2,
   paceMinPerKmToDisplay,
+  paceToVo2MaxFraction,
   rateFromGPerMin,
   rateToGPerMin,
+  resolveGlycogenStoreG,
   resolveVo2Max,
   speedFromMs,
   speedToMs,
@@ -291,6 +293,94 @@ function Vo2MaxRows({ history, onChange }: Vo2MaxRowsProps) {
   );
 }
 
+interface LtThresholdFieldProps {
+  label: string;
+  paceMinPerKm: number | null;
+  heartRateBpm: number | null;
+  fraction: number;
+  fractionMin: number;
+  fractionMax: number;
+  walkMaxMs: number;
+  vo2Max: number | undefined;
+  /** Pace to seed the field with on switching into pace mode -- just a
+   * plausible starting point for the user to overwrite, not a real guess. */
+  defaultPaceMinPerKm: number;
+  onFractionChange: (v: number) => void;
+  onPaceChange: (v: number | null) => void;
+  onHeartRateChange: (v: number | null) => void;
+}
+
+/**
+ * LT1/LT2 as either a raw %VO2max fraction (the base representation) or a
+ * pace + heart rate the athlete actually knows -- pace converts to the
+ * equivalent fraction via the same Minetti pace->power conversion the fat-ox
+ * curve uses (paceToVo2MaxFraction); heart rate is reference-only (this
+ * app's ceiling model is power/pace-based, not HR-based) and just carried
+ * alongside for the athlete's own record.
+ */
+function LtThresholdField({
+  label,
+  paceMinPerKm,
+  heartRateBpm,
+  fraction,
+  fractionMin,
+  fractionMax,
+  walkMaxMs,
+  vo2Max,
+  defaultPaceMinPerKm,
+  onFractionChange,
+  onPaceChange,
+  onHeartRateChange,
+}: LtThresholdFieldProps) {
+  const usingPace = paceMinPerKm !== null;
+  return (
+    <>
+      <label className="field field--checkbox">
+        <input
+          type="checkbox"
+          checked={usingPace}
+          onChange={(e) => onPaceChange(e.target.checked ? defaultPaceMinPerKm : null)}
+        />
+        <span>Enter {label} as pace + pulse instead</span>
+      </label>
+      {!usingPace && (
+        <NumberField
+          label={label}
+          hint="fraction of VO2max"
+          value={fraction}
+          step={0.01}
+          min={fractionMin}
+          max={fractionMax}
+          onChange={onFractionChange}
+        />
+      )}
+      {usingPace && (
+        <>
+          <NumberField
+            label={`${label} pace`}
+            hint="min/km"
+            value={paceMinPerKm}
+            step={0.05}
+            min={2}
+            onChange={onPaceChange}
+          />
+          <NumberField
+            label={`${label} heart rate`}
+            hint="bpm, reference only -- not used in any calculation"
+            value={heartRateBpm ?? 0}
+            step={1}
+            min={0}
+            onChange={(v) => onHeartRateChange(v > 0 ? v : null)}
+          />
+          <p className="field-group-note">
+            ≈ {(paceToVo2MaxFraction(paceMinPerKm, walkMaxMs, vo2Max) * 100).toFixed(0)}% of VO2max
+          </p>
+        </>
+      )}
+    </>
+  );
+}
+
 /** Athlete physiology, fueling, pacing fade, and walk/run settings (Page 2). */
 export function AthleteFields({ values, onChange }: FieldsProps) {
   const set = <K extends keyof FormInputs>(key: K, value: FormInputs[K]) =>
@@ -326,23 +416,33 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
           directly.
         </p>
         <Vo2MaxRows history={values.vo2MaxHistory} onChange={(vo2MaxHistory) => set("vo2MaxHistory", vo2MaxHistory)} />
-        <NumberField
+        <LtThresholdField
           label="LT1"
-          hint="fraction of VO2max"
-          value={values.lt1Fraction}
-          step={0.01}
-          min={0.1}
-          max={0.95}
-          onChange={(v) => set("lt1Fraction", v)}
+          paceMinPerKm={values.lt1PaceMinPerKm}
+          heartRateBpm={values.lt1HeartRateBpm}
+          fraction={values.lt1Fraction}
+          fractionMin={0.1}
+          fractionMax={0.95}
+          walkMaxMs={values.walkMaxMs}
+          vo2Max={resolveVo2Max(values.vo2MaxHistory)}
+          defaultPaceMinPerKm={6.0}
+          onFractionChange={(v) => set("lt1Fraction", v)}
+          onPaceChange={(v) => set("lt1PaceMinPerKm", v)}
+          onHeartRateChange={(v) => set("lt1HeartRateBpm", v)}
         />
-        <NumberField
+        <LtThresholdField
           label="LT2"
-          hint="fraction of VO2max"
-          value={values.lt2Fraction}
-          step={0.01}
-          min={values.lt1Fraction + 0.01}
-          max={0.99}
-          onChange={(v) => set("lt2Fraction", v)}
+          paceMinPerKm={values.lt2PaceMinPerKm}
+          heartRateBpm={values.lt2HeartRateBpm}
+          fraction={values.lt2Fraction}
+          fractionMin={values.lt1Fraction + 0.01}
+          fractionMax={0.99}
+          walkMaxMs={values.walkMaxMs}
+          vo2Max={resolveVo2Max(values.vo2MaxHistory)}
+          defaultPaceMinPerKm={5.0}
+          onFractionChange={(v) => set("lt2Fraction", v)}
+          onPaceChange={(v) => set("lt2PaceMinPerKm", v)}
+          onHeartRateChange={(v) => set("lt2HeartRateBpm", v)}
         />
         {usingFatOxCurve && (
           <p className="field-group-note">
@@ -362,78 +462,40 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
 
       <fieldset>
         <legend>Fat oxidation curve</legend>
-        <p className="field-group-help">
-          If you know your fat and carb oxidation rates at different paces (e.g. from a metabolic test), enter both
-          here instead of relying on the default LT1/LT2 curve — the model needs both numbers to work out the fuel
-          split at that pace. Add at least 2-3 points across a range of paces for a reliable fit — one point just
-          shifts the default curve. Assumes the points were measured on flat ground.
-        </p>
-        <FatOxRows
-          points={values.fatOxPoints}
-          speedUnit={values.fatOxSpeedDisplayUnit}
-          rateUnit={values.fatOxRateDisplayUnit}
-          onSpeedUnitChange={(unit) => set("fatOxSpeedDisplayUnit", unit)}
-          onRateUnitChange={(unit) => set("fatOxRateDisplayUnit", unit)}
-          onChange={(fatOxPoints) => {
-            const peak = suggestedFoPeakGPerMin(fatOxPoints);
-            onChange({ ...values, fatOxPoints, ...(peak !== null ? { foPeakGPerMin: peak } : {}) });
-          }}
-        />
-        <NumberField
-          label="Fat oxidation peak"
-          hint={RATE_UNIT_LABELS[values.fatOxRateDisplayUnit]}
-          value={Math.round(rateFromGPerMin(values.foPeakGPerMin, values.fatOxRateDisplayUnit) * 1000) / 1000}
-          step={values.fatOxRateDisplayUnit === "ghour" ? 3 : 0.05}
-          min={values.fatOxRateDisplayUnit === "ghour" ? 6 : 0.1}
-          onChange={(v) => set("foPeakGPerMin", rateToGPerMin(v, values.fatOxRateDisplayUnit))}
-        />
-        {usingFatOxCurve && (
-          <p className="field-group-note">
-            Auto-filled from your highest measured fat-oxidation rate above — override if you know your true peak is
-            higher (e.g. the test didn't reach it).
+        <details>
+          <summary>Advanced: full fat-ox curve (overrides LT1/LT2 above)</summary>
+          <p className="field-group-help">
+            If you know your fat and carb oxidation rates at different paces (e.g. from a metabolic test), enter both
+            here instead of relying on the default LT1/LT2 curve — the model needs both numbers to work out the fuel
+            split at that pace. Add at least 2-3 points across a range of paces for a reliable fit — one point just
+            shifts the default curve. Assumes the points were measured on flat ground.
           </p>
-        )}
-      </fieldset>
-
-      <fieldset>
-        <legend>Fueling</legend>
-        <p className="field-group-help">
-          Your fueling plan and body's carb tank. Glycogen store is what you're carrying at the start; the reserve
-          floor is the level treated as "empty" (a bonk) — the model never simulates below it. Gut oxidation max caps
-          how much of your carb intake actually gets absorbed; anything above it is wasted, not banked.
-        </p>
-        <NumberField
-          label="Carb intake"
-          hint="g/h"
-          value={values.intakeGPerH}
-          step={5}
-          min={0}
-          onChange={(v) => onChange({ ...values, intakeGPerH: v, gutMaxGPerH: v })}
-        />
-        <NumberField
-          label="Gut oxidation max"
-          hint="g/h"
-          value={values.gutMaxGPerH}
-          step={5}
-          min={0}
-          onChange={(v) => set("gutMaxGPerH", v)}
-        />
-        <NumberField
-          label="Glycogen store"
-          hint="g"
-          value={values.glycogenStoreG}
-          step={10}
-          min={0}
-          onChange={(v) => set("glycogenStoreG", v)}
-        />
-        <NumberField
-          label="Reserve floor"
-          hint="g, bonk threshold"
-          value={values.reserveG}
-          step={5}
-          min={0}
-          onChange={(v) => set("reserveG", v)}
-        />
+          <FatOxRows
+            points={values.fatOxPoints}
+            speedUnit={values.fatOxSpeedDisplayUnit}
+            rateUnit={values.fatOxRateDisplayUnit}
+            onSpeedUnitChange={(unit) => set("fatOxSpeedDisplayUnit", unit)}
+            onRateUnitChange={(unit) => set("fatOxRateDisplayUnit", unit)}
+            onChange={(fatOxPoints) => {
+              const peak = suggestedFoPeakGPerMin(fatOxPoints);
+              onChange({ ...values, fatOxPoints, ...(peak !== null ? { foPeakGPerMin: peak } : {}) });
+            }}
+          />
+          <NumberField
+            label="Fat oxidation peak"
+            hint={RATE_UNIT_LABELS[values.fatOxRateDisplayUnit]}
+            value={Math.round(rateFromGPerMin(values.foPeakGPerMin, values.fatOxRateDisplayUnit) * 1000) / 1000}
+            step={values.fatOxRateDisplayUnit === "ghour" ? 3 : 0.05}
+            min={values.fatOxRateDisplayUnit === "ghour" ? 6 : 0.1}
+            onChange={(v) => set("foPeakGPerMin", rateToGPerMin(v, values.fatOxRateDisplayUnit))}
+          />
+          {usingFatOxCurve && (
+            <p className="field-group-note">
+              Auto-filled from your highest measured fat-oxidation rate above — override if you know your true peak is
+              higher (e.g. the test didn't reach it).
+            </p>
+          )}
+        </details>
       </fieldset>
 
       <fieldset>
@@ -442,59 +504,69 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
           How much of your aerobic max you can hold shrinks the longer you race — you can hold a high effort briefly,
           but only a much lower one all day. This curve models that fade: it starts near <strong>f0</strong> (the
           fraction of max you can hold at the start) and decays toward <strong>f_inf</strong> (the fraction you can
-          sustain indefinitely), with <strong>tau</strong> controlling how many minutes that fade takes. The defaults
-          are reasonable for most people — only change these if you know how you personally fade over a long race
-          (e.g. from pacing data on a past ultra).
+          sustain indefinitely), with <strong>tau</strong> controlling how many minutes that fade takes. Found from
+          fitting your own past runs below (see the Strava/fit section) whenever that fit clears its own quality bar,
+          or left at reasonable defaults otherwise.
         </p>
-        <NumberField
-          label="f0"
-          hint="starting sustainable fraction"
-          value={values.f0}
-          step={0.01}
-          min={0.5}
-          max={1}
-          onChange={(v) => set("f0", v)}
-        />
-        <NumberField
-          label="f_inf"
-          hint="asymptotic sustainable fraction"
-          value={values.fInf}
-          step={0.01}
-          min={0.1}
-          max={0.9}
-          onChange={(v) => set("fInf", v)}
-        />
-        <NumberField
-          label="tau"
-          hint="minutes, decay time constant"
-          value={values.tauMin}
-          step={10}
-          min={10}
-          onChange={(v) => set("tauMin", v)}
-        />
-        <label className="field field--checkbox">
-          <input
-            type="checkbox"
-            checked={values.durabilityDriftPerHour > 0}
-            onChange={(e) => set("durabilityDriftPerHour", e.target.checked ? 0.01 : 0)}
-          />
-          <span>Durability drift</span>
-        </label>
-        <p className="field-group-help">
-          Optional extra fade on top of the curve above, to model accumulated muscular fatigue (not just aerobic
-          fade) over a very long day. Off by default — most people don't need this.
+        <p className="field-group-note">
+          Current: f0 {values.f0.toFixed(2)}, f_inf {values.fInf.toFixed(2)}, tau {values.tauMin} min.
         </p>
-        {values.durabilityDriftPerHour > 0 && (
+        <details>
+          <summary>Advanced: override the pacing curve manually</summary>
+          <p className="field-group-help">
+            Only change these if you know how you personally fade over a long race (e.g. from pacing data on a past
+            ultra) and don't want to rely on the fit below.
+          </p>
           <NumberField
-            label="Drift rate"
-            hint="fraction lost per hour"
-            value={values.durabilityDriftPerHour}
-            step={0.001}
-            min={0}
-            max={0.1}
-            onChange={(v) => set("durabilityDriftPerHour", v)}
+            label="f0"
+            hint="starting sustainable fraction"
+            value={values.f0}
+            step={0.01}
+            min={0.5}
+            max={1}
+            onChange={(v) => set("f0", v)}
           />
-        )}
+          <NumberField
+            label="f_inf"
+            hint="asymptotic sustainable fraction"
+            value={values.fInf}
+            step={0.01}
+            min={0.1}
+            max={0.9}
+            onChange={(v) => set("fInf", v)}
+          />
+          <NumberField
+            label="tau"
+            hint="minutes, decay time constant"
+            value={values.tauMin}
+            step={10}
+            min={10}
+            onChange={(v) => set("tauMin", v)}
+          />
+          <label className="field field--checkbox">
+            <input
+              type="checkbox"
+              checked={values.durabilityDriftPerHour > 0}
+              onChange={(e) => set("durabilityDriftPerHour", e.target.checked ? 0.01 : 0)}
+            />
+            <span>Durability drift</span>
+          </label>
+          <p className="field-group-help">
+            Optional extra fade on top of the curve above, to model accumulated muscular fatigue (not just aerobic
+            fade) over a very long day. Off by default — most people don't need this.
+          </p>
+          {values.durabilityDriftPerHour > 0 && (
+            <NumberField
+              label="Drift rate"
+              hint="fraction lost per hour"
+              value={values.durabilityDriftPerHour}
+              step={0.001}
+              min={0}
+              max={0.1}
+              onChange={(v) => set("durabilityDriftPerHour", v)}
+            />
+          )}
+        </details>
       </fieldset>
 
       <fieldset>
@@ -531,6 +603,52 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
             onChange={(v) => set("forceWalkAboveGrade", v)}
           />
         )}
+      </fieldset>
+    </div>
+  );
+}
+
+/** Per-race fueling plan: carb intake and glycogen store (Course page) --
+ * genuinely race-specific (carb-loaded or not, aid-station plan or not),
+ * unlike the one-time athlete physiology in AthleteFields above. */
+export function FuelingFields({ values, onChange }: FieldsProps) {
+  const set = <K extends keyof FormInputs>(key: K, value: FormInputs[K]) =>
+    onChange({ ...values, [key]: value });
+
+  return (
+    <div className="inputs-panel">
+      <fieldset>
+        <legend>Fueling</legend>
+        <p className="field-group-help">
+          Your fueling plan for this race, and your body's carb tank. The model assumes everything you plan to take
+          in gets absorbed and used — it doesn't enforce a gut-absorption ceiling itself, so don't plan for much more
+          than a real gut can handle: roughly 60 g/h for glucose-only products, up to ~90 g/h with glucose+fructose
+          mixes (common in modern gels/drinks). Planning above that overstates how much carb you're actually getting.
+        </p>
+        <NumberField
+          label="Carb intake"
+          hint="g/h"
+          value={values.intakeGPerH}
+          step={5}
+          min={0}
+          onChange={(v) => set("intakeGPerH", v)}
+        />
+        <NumberField
+          label="Glycogen store"
+          hint="g/kg body mass"
+          value={values.glycogenGPerKg}
+          step={0.1}
+          min={0}
+          onChange={(v) => set("glycogenGPerKg", v)}
+        />
+        <p className="field-group-note">
+          ≈ {resolveGlycogenStoreG(values).toFixed(0)} g total at {values.bodyMassKg} kg body mass.
+        </p>
+        <p className="field-group-help">
+          ~7-8 g/kg (liver + muscle glycogen) is typical for a fed, trained endurance athlete. Carb-loading in the
+          days before a big race can push this higher; starting already fasted, tapered off carbs, or fatigued from
+          back-to-back hard days should push it lower.
+        </p>
       </fieldset>
     </div>
   );

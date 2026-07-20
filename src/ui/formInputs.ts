@@ -1,8 +1,9 @@
 // Shared shape for the user-editable parameters in PLAN.md §7, persisted to
 // localStorage so a returning user doesn't have to re-enter their physiology.
 
+import type { CeilingParams } from "../model/ceiling";
 import { maxAerobicPower } from "../model/ceiling";
-import { fatOxPacePointToPowerFraction, fitCarbFractionAnchors } from "../model/substrate";
+import { fatOxPacePointToPowerFraction, fitCarbFractionAnchors, paceToGrossPowerWPerKg } from "../model/substrate";
 
 export interface FatOxPoint {
   paceMinPerKm: number;
@@ -29,13 +30,25 @@ export interface FormInputs {
   vo2MaxHistory: Vo2MaxEntry[];
   lt1Fraction: number;
   lt2Fraction: number;
+  /** Overrides lt1Fraction/lt2Fraction respectively when set, converting
+   * pace into a %VO2max fraction via the same Minetti pace->power
+   * conversion the fat-ox curve uses -- for athletes who know their
+   * thresholds in pace terms rather than an abstract VO2max fraction. */
+  lt1PaceMinPerKm: number | null;
+  lt2PaceMinPerKm: number | null;
+  /** Reference-only -- this app's ceiling model is power/pace-based, not
+   * HR-based, so these aren't fed into any calculation. Captured purely so
+   * an athlete entering pace-based thresholds can record the heart rate
+   * they saw there too. */
+  lt1HeartRateBpm: number | null;
+  lt2HeartRateBpm: number | null;
   f0: number;
   fInf: number;
   tauMin: number;
   intakeGPerH: number;
-  gutMaxGPerH: number;
-  glycogenStoreG: number;
-  reserveG: number;
+  /** Glycogen store, expressed per kg body mass (not a raw gram total) --
+   * see resolveGlycogenStoreG. */
+  glycogenGPerKg: number;
   foPeakGPerMin: number;
   walkMaxMs: number;
   /** Grade fraction (e.g. 0.25 = 25%) above which walking is forced. Null = off. */
@@ -66,13 +79,18 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   vo2MaxHistory: [{ date: DEFAULT_VO2MAX_DATE, value: 50, source: "manual" }],
   lt1Fraction: 0.65,
   lt2Fraction: 0.85,
+  lt1PaceMinPerKm: null,
+  lt2PaceMinPerKm: null,
+  lt1HeartRateBpm: null,
+  lt2HeartRateBpm: null,
   f0: 0.94,
   fInf: 0.38,
   tauMin: 250,
   intakeGPerH: 60,
-  gutMaxGPerH: 60,
-  glycogenStoreG: 500,
-  reserveG: 60,
+  // ~7-8 g/kg (liver + muscle glycogen) is a standard range for a fed,
+  // trained endurance athlete -- see PLAN.md §5/§7. At the default 70kg body
+  // mass this gives ~525g, close to this field's pre-g/kg default of 500g.
+  glycogenGPerKg: 7.5,
   foPeakGPerMin: 0.55,
   walkMaxMs: 2.0,
   forceWalkAboveGrade: null,
@@ -104,6 +122,14 @@ export function loadFormInputs(): FormInputs {
         { date: new Date().toISOString().slice(0, 10), value: parsed.vo2MaxMlPerKgPerMin, source: "manual" },
       ];
     }
+    // Migrate a pre-g/kg save (a raw glycogenStoreG gram total, no
+    // glycogenGPerKg yet) into the equivalent per-kg figure at that user's
+    // own body mass, so a customized store carries forward instead of
+    // silently reverting to the 7.5 g/kg default.
+    if (!parsed.glycogenGPerKg && typeof parsed.glycogenStoreG === "number") {
+      const bodyMassKg = typeof parsed.bodyMassKg === "number" ? parsed.bodyMassKg : DEFAULT_FORM_INPUTS.bodyMassKg;
+      if (bodyMassKg > 0) merged.glycogenGPerKg = parsed.glycogenStoreG / bodyMassKg;
+    }
     return merged;
   } catch {
     return DEFAULT_FORM_INPUTS;
@@ -112,6 +138,11 @@ export function loadFormInputs(): FormInputs {
 
 export function saveFormInputs(inputs: FormInputs): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(inputs));
+}
+
+/** Total glycogen store in grams, from the per-kg figure the UI collects. */
+export function resolveGlycogenStoreG(inputs: Pick<FormInputs, "glycogenGPerKg" | "bodyMassKg">): number {
+  return inputs.glycogenGPerKg * inputs.bodyMassKg;
 }
 
 /** Derives the substrate logistic anchors (x0, k) from LT1/LT2, per PLAN.md §5. */
@@ -146,6 +177,24 @@ export function resolveSubstrateAnchors(
   }
   const { x0, k } = substrateAnchorsFromThresholds(inputs.lt1Fraction, inputs.lt2Fraction);
   return { x0, k, intensityIsAbsolutePower: false };
+}
+
+/**
+ * Converts a flat-ground pace into a %VO2max fraction, via the same
+ * pace->gross-power conversion the fat-ox curve uses (see
+ * `paceToGrossPowerWPerKg`), divided by the athlete's own aerobic ceiling
+ * at sea level. Lets an athlete who knows their LT1/LT2 in pace terms enter
+ * that directly instead of guessing an abstract %VO2max fraction. Same
+ * flat-ground/gait-threshold assumptions as the fat-ox curve's pace
+ * conversion.
+ */
+export function paceToVo2MaxFraction(
+  paceMinPerKm: number,
+  walkMaxMs: number,
+  vo2MaxMlPerKgPerMin: number | undefined,
+): number {
+  const pGrossWPerKg = paceToGrossPowerWPerKg(paceMinPerKm, walkMaxMs);
+  return pGrossWPerKg / maxAerobicPower(0, { vo2MaxMlPerKgPerMin });
 }
 
 // Rough SEE (standard error of estimate), ml/kg/min, per source -- inverse-
@@ -188,6 +237,53 @@ export function resolveVo2Max(history: Vo2MaxEntry[], now: Date = new Date()): n
     totalWeight += weight;
   }
   return totalWeight > 0 ? weightedSum / totalWeight : undefined;
+}
+
+/**
+ * Resolves LT1/LT2 as %VO2max fractions, honoring a pace-based override for
+ * either threshold independently -- an athlete might know one in pace terms
+ * and not the other. This sits *below* the fat-ox curve in the override
+ * order: `resolveSubstrateAnchors` still overrides both entirely when
+ * `fatOxPoints` is non-empty, regardless of what this returns. Also feeds
+ * `ceilingParams.lt2Fraction` directly (the hard cap on sustainable
+ * fraction), so both consumers of LT2 stay in sync with whichever
+ * representation the athlete actually entered.
+ */
+export function resolveLt1Lt2Fractions(
+  inputs: Pick<
+    FormInputs,
+    "lt1Fraction" | "lt2Fraction" | "lt1PaceMinPerKm" | "lt2PaceMinPerKm" | "walkMaxMs" | "vo2MaxHistory"
+  >,
+): { lt1Fraction: number; lt2Fraction: number } {
+  const vo2Max = resolveVo2Max(inputs.vo2MaxHistory);
+  const lt1Fraction =
+    inputs.lt1PaceMinPerKm !== null
+      ? paceToVo2MaxFraction(inputs.lt1PaceMinPerKm, inputs.walkMaxMs, vo2Max)
+      : inputs.lt1Fraction;
+  const lt2Fraction =
+    inputs.lt2PaceMinPerKm !== null
+      ? paceToVo2MaxFraction(inputs.lt2PaceMinPerKm, inputs.walkMaxMs, vo2Max)
+      : inputs.lt2Fraction;
+  return { lt1Fraction, lt2Fraction };
+}
+
+/**
+ * Builds the `CeilingParams` every solver/analysis/diagnostic call site
+ * needs, in one place -- previously duplicated as a near-identical object
+ * literal at 8 call sites across App.tsx, RunLibraryPanel.tsx, and two
+ * scripts, each of which had to remember to resolve VO2max and (now)
+ * LT1/LT2 consistently.
+ */
+export function resolveCeilingParams(inputs: FormInputs): CeilingParams {
+  const { lt2Fraction } = resolveLt1Lt2Fractions(inputs);
+  return {
+    vo2MaxMlPerKgPerMin: resolveVo2Max(inputs.vo2MaxHistory),
+    lt2Fraction,
+    f0: inputs.f0,
+    fInf: inputs.fInf,
+    tauMin: inputs.tauMin,
+    durabilityDriftPerHour: inputs.durabilityDriftPerHour,
+  };
 }
 
 /**

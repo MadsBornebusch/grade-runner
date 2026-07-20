@@ -40,7 +40,7 @@ import {
 } from "../src/model/pacingFit.ts";
 import { findSustainableTheta, type SolverInputs } from "../src/model/solver.ts";
 import { suggestRunsForFit } from "../src/model/suggestRuns.ts";
-import { DEFAULT_FORM_INPUTS, resolveVo2Max } from "../src/ui/formInputs.ts";
+import { DEFAULT_FORM_INPUTS, resolveCeilingParams, resolveGlycogenStoreG } from "../src/ui/formInputs.ts";
 import { arg, backfill, fetchActivityPoints, loadCookie } from "./stravaScriptHelpers.ts";
 
 const BASE_URL = arg("base", "http://localhost:3000");
@@ -88,19 +88,11 @@ async function main() {
   // athlete params, not any saved profile (this script has no access to
   // localStorage). tauMin/fInf below are starting points only -- both get
   // overwritten by the training-set fit before the target race is predicted.
-  const ceilingParams: CeilingParams = {
-    vo2MaxMlPerKgPerMin: resolveVo2Max(formInputs.vo2MaxHistory),
-    lt2Fraction: formInputs.lt2Fraction,
-    f0: formInputs.f0,
-    fInf: formInputs.fInf,
-    tauMin: formInputs.tauMin,
-    durabilityDriftPerHour: formInputs.durabilityDriftPerHour,
-  };
+  const ceilingParams: CeilingParams = resolveCeilingParams(formInputs);
   const commonInputs = {
     bodyMassKg: formInputs.bodyMassKg,
-    fueling: { intakeGPerH: formInputs.intakeGPerH, gutMaxGPerH: formInputs.gutMaxGPerH },
-    glycogenStoreG: formInputs.glycogenStoreG,
-    reserveG: formInputs.reserveG,
+    fueling: { intakeGPerH: formInputs.intakeGPerH },
+    glycogenStoreG: resolveGlycogenStoreG(formInputs),
     walkMaxMs: formInputs.walkMaxMs,
     forceWalkAboveGrade: formInputs.forceWalkAboveGrade ?? undefined,
     altitudeAdjustment: formInputs.altitudeAdjustment,

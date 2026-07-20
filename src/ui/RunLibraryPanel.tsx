@@ -34,7 +34,7 @@ import {
   upsertStoredRunSummary,
   type StoredRun,
 } from "../storage/runLibrary";
-import { resolveVo2Max, type FormInputs, type Vo2MaxEntry } from "./formInputs";
+import { resolveCeilingParams, resolveGlycogenStoreG, type FormInputs, type Vo2MaxEntry } from "./formInputs";
 import { StravaImport } from "./StravaImport";
 import { fetchStravaActivity } from "./stravaClient";
 import { useStravaSession } from "./useStravaSession";
@@ -207,14 +207,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
     }
   }, [backfillFrom, refresh]);
 
-  const ceilingParams = {
-    vo2MaxMlPerKgPerMin: resolveVo2Max(formInputs.vo2MaxHistory),
-    lt2Fraction: formInputs.lt2Fraction,
-    f0: formInputs.f0,
-    fInf: formInputs.fInf,
-    tauMin: formInputs.tauMin,
-    durabilityDriftPerHour: formInputs.durabilityDriftPerHour,
-  };
+  const ceilingParams = resolveCeilingParams(formInputs);
 
   // PLAN.md §12 stage 4 / §13: does descent load (or generic intensity)
   // actually predict this athlete's own tau? Only races with full points
@@ -222,14 +215,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
   // populate a diagnostic. Races whose own single-race fit hit a search
   // boundary are excluded too (an unreliable estimate would just add noise).
   const tauDiagnostic = useMemo(() => {
-    const diagnosticCeilingParams = {
-      vo2MaxMlPerKgPerMin: resolveVo2Max(formInputs.vo2MaxHistory),
-      lt2Fraction: formInputs.lt2Fraction,
-      f0: formInputs.f0,
-      fInf: formInputs.fInf,
-      tauMin: formInputs.tauMin,
-      durabilityDriftPerHour: formInputs.durabilityDriftPerHour,
-    };
+    const diagnosticCeilingParams = resolveCeilingParams(formInputs);
     const points: RaceDiagnosticPoint[] = [];
     for (const run of dedupedRuns) {
       if (run.points === null) continue;
@@ -237,9 +223,8 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
       const point = buildRaceDiagnosticPoint(run.name, course, {
         bodyMassKg: formInputs.bodyMassKg,
         ceilingParams: diagnosticCeilingParams,
-        fueling: { intakeGPerH: formInputs.intakeGPerH, gutMaxGPerH: formInputs.gutMaxGPerH },
-        glycogenStoreG: formInputs.glycogenStoreG,
-        reserveG: formInputs.reserveG,
+        fueling: { intakeGPerH: formInputs.intakeGPerH },
+        glycogenStoreG: resolveGlycogenStoreG(formInputs),
         walkMaxMs: formInputs.walkMaxMs,
         altitudeAdjustment: formInputs.altitudeAdjustment,
       });
@@ -255,14 +240,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
   // this compares each race's own late-window behavior to its own early-
   // window descent instead. See withinRaceDescentDiagnostic.ts.
   const withinRaceDiagnostic = useMemo(() => {
-    const diagnosticCeilingParams = {
-      vo2MaxMlPerKgPerMin: resolveVo2Max(formInputs.vo2MaxHistory),
-      lt2Fraction: formInputs.lt2Fraction,
-      f0: formInputs.f0,
-      fInf: formInputs.fInf,
-      tauMin: formInputs.tauMin,
-      durabilityDriftPerHour: formInputs.durabilityDriftPerHour,
-    };
+    const diagnosticCeilingParams = resolveCeilingParams(formInputs);
     const points: WithinRaceDiagnosticPoint[] = [];
     for (const run of dedupedRuns) {
       if (run.points === null) continue;
@@ -270,9 +248,8 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
       const point = buildWithinRaceDiagnosticPoint(run.name, course, {
         bodyMassKg: formInputs.bodyMassKg,
         ceilingParams: diagnosticCeilingParams,
-        fueling: { intakeGPerH: formInputs.intakeGPerH, gutMaxGPerH: formInputs.gutMaxGPerH },
-        glycogenStoreG: formInputs.glycogenStoreG,
-        reserveG: formInputs.reserveG,
+        fueling: { intakeGPerH: formInputs.intakeGPerH },
+        glycogenStoreG: resolveGlycogenStoreG(formInputs),
         walkMaxMs: formInputs.walkMaxMs,
         altitudeAdjustment: formInputs.altitudeAdjustment,
       });
@@ -292,14 +269,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
   // most likely to have actually been run near-maximally, without needing a
   // separate intensity signal.
   const vo2MaxEstimates = useMemo(() => {
-    const estimateCeilingParams = {
-      vo2MaxMlPerKgPerMin: resolveVo2Max(formInputs.vo2MaxHistory),
-      lt2Fraction: formInputs.lt2Fraction,
-      f0: formInputs.f0,
-      fInf: formInputs.fInf,
-      tauMin: formInputs.tauMin,
-      durabilityDriftPerHour: formInputs.durabilityDriftPerHour,
-    };
+    const estimateCeilingParams = resolveCeilingParams(formInputs);
     const results: { run: StoredRun; estimateMlPerKgPerMin: number }[] = [];
     for (const run of dedupedRuns) {
       if (run.points === null) continue;
@@ -308,9 +278,8 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
       const analysis = analyzeRun(course.segments, {
         bodyMassKg: formInputs.bodyMassKg,
         ceilingParams: estimateCeilingParams,
-        fueling: { intakeGPerH: formInputs.intakeGPerH, gutMaxGPerH: formInputs.gutMaxGPerH },
-        glycogenStoreG: formInputs.glycogenStoreG,
-        reserveG: formInputs.reserveG,
+        fueling: { intakeGPerH: formInputs.intakeGPerH },
+        glycogenStoreG: resolveGlycogenStoreG(formInputs),
         walkMaxMs: formInputs.walkMaxMs,
         altitudeAdjustment: formInputs.altitudeAdjustment,
       });
@@ -357,9 +326,8 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
         const analysis = analyzeRun(course.segments, {
           bodyMassKg: formInputs.bodyMassKg,
           ceilingParams,
-          fueling: { intakeGPerH: formInputs.intakeGPerH, gutMaxGPerH: formInputs.gutMaxGPerH },
-          glycogenStoreG: formInputs.glycogenStoreG,
-          reserveG: formInputs.reserveG,
+          fueling: { intakeGPerH: formInputs.intakeGPerH },
+          glycogenStoreG: resolveGlycogenStoreG(formInputs),
           walkMaxMs: formInputs.walkMaxMs,
           altitudeAdjustment: formInputs.altitudeAdjustment,
         });

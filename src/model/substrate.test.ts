@@ -131,7 +131,7 @@ describe("splitPower", () => {
 describe("stepGlycogen", () => {
   it("depletes glycogen when demand exceeds exogenous supply", () => {
     const state = { glycogenG: 400 };
-    const next = stepGlycogen(state, 6, 70, { intakeGPerH: 60, gutMaxGPerH: 60 }, 60);
+    const next = stepGlycogen(state, 6, 70, { intakeGPerH: 60 }, 60);
     expect(next.glycogenG).toBeLessThan(state.glycogenG);
   });
 
@@ -141,7 +141,7 @@ describe("stepGlycogen", () => {
       state,
       20,
       70,
-      { intakeGPerH: 0, gutMaxGPerH: 60 },
+      { intakeGPerH: 0 },
       3600, // a full hour of huge deficit
       60,
     );
@@ -150,17 +150,17 @@ describe("stepGlycogen", () => {
 
   it("replenishes when exogenous supply exceeds demand", () => {
     const state = { glycogenG: 300 };
-    const next = stepGlycogen(state, 1, 70, { intakeGPerH: 60, gutMaxGPerH: 60 }, 60);
+    const next = stepGlycogen(state, 1, 70, { intakeGPerH: 60 }, 60);
     expect(next.glycogenG).toBeGreaterThan(state.glycogenG);
   });
 });
 
 describe("bonkPowerWPerKg", () => {
-  it("is positive and combines fat ceiling with gut-limited exogenous carb", () => {
-    const power = bonkPowerWPerKg(70, { intakeGPerH: 90, gutMaxGPerH: 60 });
+  it("is positive and scales with exogenous carb intake -- no gut-absorption cap is modeled", () => {
+    const power = bonkPowerWPerKg(70, { intakeGPerH: 90 });
     expect(power).toBeGreaterThan(0);
-    // gut caps exogenous carb at 60 g/h even though intake is 90
-    const withHigherIntake = bonkPowerWPerKg(70, { intakeGPerH: 200, gutMaxGPerH: 60 });
-    expect(withHigherIntake).toBeCloseTo(power, 10);
+    // No cap: more planned intake means more assumed-absorbed carb, full stop.
+    const withHigherIntake = bonkPowerWPerKg(70, { intakeGPerH: 200 });
+    expect(withHigherIntake).toBeGreaterThan(power);
   });
 });

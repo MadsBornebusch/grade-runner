@@ -100,9 +100,8 @@ function courseFrom(segments: CourseSegment[]): PipelineResult {
 const OPTIONS: BuildRaceDiagnosticPointOptions = {
   bodyMassKg: 70,
   ceilingParams: TRUE_PARAMS,
-  fueling: { intakeGPerH: 60, gutMaxGPerH: 60 },
+  fueling: { intakeGPerH: 60 },
   glycogenStoreG: 500,
-  reserveG: 60,
   walkMaxMs: 2.0,
   altitudeAdjustment: false,
 };
