@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import type { GpxPoint } from "../gpx/pipeline";
 import { fetchStravaActivity } from "./stravaClient";
+import { StravaConnectionStatus } from "./StravaConnectionStatus";
 import { useStravaSession } from "./useStravaSession";
 
 interface StravaActivitySummary {
@@ -33,7 +34,7 @@ function endOfDayEpoch(dateInput: string): number {
 }
 
 export function StravaImport({ onImport }: StravaImportProps) {
-  const { connected, athleteName, loading } = useStravaSession();
+  const { connected, loading } = useStravaSession();
   const [activities, setActivities] = useState<StravaActivitySummary[] | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [page, setPage] = useState(1);
@@ -114,11 +115,7 @@ export function StravaImport({ onImport }: StravaImportProps) {
   if (loading) return null;
 
   if (!connected) {
-    return (
-      <a className="strava-import__connect" href="/api/strava/login">
-        Connect Strava
-      </a>
-    );
+    return <StravaConnectionStatus />;
   }
 
   const visibleActivities =
@@ -134,10 +131,7 @@ export function StravaImport({ onImport }: StravaImportProps) {
 
   return (
     <div className="strava-import">
-      <div className="strava-import__header">
-        <span>Connected to Strava as {athleteName}</span>
-        <a href="/api/strava/logout">Disconnect</a>
-      </div>
+      <StravaConnectionStatus />
 
       <div className="strava-import__link-row">
         <input

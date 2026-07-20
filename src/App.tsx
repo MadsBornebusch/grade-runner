@@ -4,7 +4,7 @@ import { rawCourseStats, runPipeline } from "./gpx/pipeline";
 import { findSustainableTheta, type SolverInputs } from "./model/solver";
 import { analyzeRun, type AnalysisInputs } from "./model/analysis";
 import { GpxUpload } from "./ui/GpxUpload";
-import { AthleteFields, CourseProcessingFields, FuelingFields } from "./ui/InputsPanel";
+import { CourseProcessingFields, FuelingFields } from "./ui/InputsPanel";
 import { PageCarousel } from "./ui/PageCarousel";
 import { ElevationProfileChart } from "./ui/ElevationProfileChart";
 import { FinishTimeRangePanel } from "./ui/FinishTimeRangePanel";
@@ -14,7 +14,7 @@ import { SubstrateChart } from "./ui/SubstrateChart";
 import { PaceEffortChart } from "./ui/PaceEffortChart";
 import { PacingFitPanel } from "./ui/PacingFitPanel";
 import { PowerHrChart } from "./ui/PowerHrChart";
-import { RunLibraryPanel } from "./ui/RunLibraryPanel";
+import { SettingsModal } from "./ui/SettingsModal";
 import { StravaImport } from "./ui/StravaImport";
 import { buildEffortTrendPoints, type EffortTrendPoint } from "./model/pacingFit";
 import { SplitTable } from "./ui/SplitTable";
@@ -40,10 +40,11 @@ function App() {
   const [resultMode, setResultMode] = useState<ResultMode>("planning");
   const [formInputs, setFormInputs] = useState(() => loadFormInputs());
   const { connected: stravaConnected } = useStravaSession();
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // The races/raceDates behind the Athlete tab's most recent tau/fInf fit --
-  // lifted up here (rather than kept local to RunLibraryPanel) so the
-  // Results tab's finish-time-range feature can reuse the exact same
+  // The races/raceDates behind the Settings modal's most recent tau/fInf
+  // fit -- lifted up here (rather than kept local to RunLibraryPanel) so
+  // the Results tab's finish-time-range feature can reuse the exact same
   // training data without RunLibraryPanel needing to know about Planning
   // mode's course or the solver.
   const [fittedRaces, setFittedRaces] = useState<{ races: EffortTrendPoint[][]; raceDates: (Date | null)[] } | null>(
@@ -239,6 +240,14 @@ function App() {
     <div className="app">
       <header className="app__header">
         <h1>Grade Runner</h1>
+        <button
+          type="button"
+          className="app__settings-button"
+          onClick={() => setSettingsOpen(true)}
+          aria-label="Open settings"
+        >
+          ⚙
+        </button>
       </header>
 
       <PageCarousel
@@ -281,23 +290,6 @@ function App() {
                     smoothingWindowM={formInputs.smoothingWindowM}
                   />
                 )}
-              </>
-            ),
-          },
-          {
-            label: "Athlete",
-            content: (
-              <>
-                <AthleteFields values={formInputs} onChange={setFormInputs} />
-                <RunLibraryPanel
-                  formInputs={formInputs}
-                  onApplyTau={(tauMin) => setFormInputs({ ...formInputs, tauMin })}
-                  onApplyFInf={(fInf) => setFormInputs({ ...formInputs, fInf })}
-                  onAddVo2MaxEntry={(entry: Vo2MaxEntry) =>
-                    setFormInputs({ ...formInputs, vo2MaxHistory: [...formInputs.vo2MaxHistory, entry] })
-                  }
-                  onRacesFitted={(races, raceDates) => setFittedRaces({ races, raceDates })}
-                />
               </>
             ),
           },
@@ -403,6 +395,19 @@ function App() {
             ),
           },
         ]}
+      />
+
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        formInputs={formInputs}
+        onChange={setFormInputs}
+        onApplyTau={(tauMin) => setFormInputs({ ...formInputs, tauMin })}
+        onApplyFInf={(fInf) => setFormInputs({ ...formInputs, fInf })}
+        onAddVo2MaxEntry={(entry: Vo2MaxEntry) =>
+          setFormInputs({ ...formInputs, vo2MaxHistory: [...formInputs.vo2MaxHistory, entry] })
+        }
+        onRacesFitted={(races, raceDates) => setFittedRaces({ races, raceDates })}
       />
     </div>
   );
