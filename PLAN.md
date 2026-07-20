@@ -1048,6 +1048,21 @@ is the concrete E_hard proxy to test in stage 4's diagnostic, not a vaguer
   `RunLibraryPanel`'s Athlete tab next to the existing tau fit ("Estimate
   tau confidence interval"), reusing that fit's own races/raceDates with no
   need for a Planning course.
+
+  **Follow-up: actionable "what would improve this fit" advice.** The fit
+  already computed `informativeRaceCount`, `durationDiversityRatio`,
+  `hitSearchBoundary`, and now the tau CI's own width -- but a caller had
+  to interpret those numbers itself to know what to actually do.
+  `pacingFit.ts`'s new `suggestFitImprovements` turns them into concrete
+  advice: too few informative races -> add multi-hour efforts; low
+  duration diversity -> add a race at least MIN_DURATION_DIVERSITY_RATIO x
+  longer or shorter ("your long runs are too similar in length"); a hit
+  search boundary -> add a longer/shorter run in that direction; a tau CI
+  wider than ~30% of its own point estimate (a heuristic flag, not a
+  calibrated threshold) -> add more, especially long, runs. Reports a
+  reassuring "looks fine" entry when every check clears rather than an
+  empty list. Surfaced as a combined "What would improve this fit?"
+  section in the Athlete tab, next to the tau/fInf fits and the CI.
 - Poles/hiking economy adjustment — real but niche.
 
 **One citation flag:** the doc states Riegel's exponent runs "1.1–1.2+ for
