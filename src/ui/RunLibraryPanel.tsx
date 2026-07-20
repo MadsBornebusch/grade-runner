@@ -8,6 +8,7 @@ import {
   fitFInfAndTauAcrossRaces,
   fitTauAcrossRaces,
   MIN_INFORMATIVE_RACES,
+  suggestFitImprovements,
   type EffortTrendPoint,
   type FInfTauFitResult,
   type MultiRaceTauFitResult,
@@ -462,6 +463,11 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
     }
   };
 
+  const fitImprovementSuggestions = useMemo(
+    () => suggestFitImprovements(fitResult, fInfFitResult, tauCI === "insufficient" ? null : tauCI),
+    [fitResult, fInfFitResult, tauCI],
+  );
+
   const suggestions = useMemo(() => suggestRunsForFit(dedupedRuns), [dedupedRuns]);
   const approvedSuggestions = useMemo(() => {
     // A run can appear in more than one bucket (e.g. the single longest run
@@ -837,6 +843,19 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
               -- treat as a bound, not a precise value.
             </p>
           )}
+        </div>
+      )}
+
+      {fitImprovementSuggestions.length > 0 && (
+        <div className="run-library__fit-improvements">
+          <p className="field-group-note">What would improve this fit?</p>
+          <ul className="run-library__fit-notes">
+            {fitImprovementSuggestions.map((s, i) => (
+              <li key={i} className={s.severity === "warning" ? "warning" : "field-group-note"}>
+                {s.message}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
