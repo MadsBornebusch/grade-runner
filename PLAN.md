@@ -1033,6 +1033,21 @@ is the concrete E_hard proxy to test in stage 4's diagnostic, not a vaguer
   either the band with its caveat text, or an insufficient-data message
   when `informativeRaceCount` is too low -- smoke-tested against a real
   dev server via headless Playwright.
+
+  **Follow-up: a confidence interval on tau itself.** A CI on the fitted
+  parameter is a cleaner statistical question than the finish-time band --
+  "how much would tau vary across resamples of my own training data" needs
+  no day-of/structural-error scoping the finish-time range needed, and
+  needs no target course or solver at all. The bootstrap machinery already
+  existed inside `predictFinishTimeRange`; it just discarded the resampled
+  `tauMin` values after handing them to the solver. Extracted into
+  `pacingFit.ts`'s `bootstrapTauConfidenceInterval` (same skip-don't-
+  substitute-defaults discipline as before), which `finishTimeRange.ts` now
+  calls as a first pass before running the solver on each retained tau
+  sample -- one shared bootstrap loop instead of two. Surfaced directly in
+  `RunLibraryPanel`'s Athlete tab next to the existing tau fit ("Estimate
+  tau confidence interval"), reusing that fit's own races/raceDates with no
+  need for a Planning course.
 - Poles/hiking economy adjustment — real but niche.
 
 **One citation flag:** the doc states Riegel's exponent runs "1.1–1.2+ for
