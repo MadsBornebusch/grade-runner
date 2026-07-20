@@ -159,7 +159,7 @@ async function main() {
   withinRacePoints.forEach((p) =>
     console.log(
       `  ${p.label}: late residual ${p.lateResidualTrendPctPerHour >= 0 ? "+" : ""}${p.lateResidualTrendPctPerHour.toFixed(1)}%/h, ` +
-        `${p.earlyDescentPerKm.toFixed(0)} m/km early descent`,
+        `${p.earlyDescentPerKm.toFixed(0)} m/km early descent, ${p.earlyRunningImpactPerKm.toFixed(1)} running-impact/km`,
     ),
   );
   const withinRaceDiagnostic = computeWithinRaceDescentDiagnostic(withinRacePoints);
@@ -167,6 +167,13 @@ async function main() {
   console.log(`  early descent:        ${withinRaceDiagnostic.lateResidualVsEarlyDescentCorrelation?.toFixed(2) ?? "n/a"}`);
   console.log(`  early descent impact: ${withinRaceDiagnostic.lateResidualVsEarlyDescentImpactCorrelation?.toFixed(2) ?? "n/a"}`);
   console.log(`  early descent impact²: ${withinRaceDiagnostic.lateResidualVsEarlyDescentImpactSquaredCorrelation?.toFixed(2) ?? "n/a"}`);
+  // Predicted sign is *positive*, not negative like the descent metrics
+  // above -- see withinRaceDescentDiagnostic.ts's header comment. A genuine
+  // eccentric-damage effect from steep early descent would push this
+  // correlation positive because runningImpact's hill-surcharge term comes
+  // from Minetti *metabolic* cost, where gentle-to-moderate descent scores
+  // lower, not higher.
+  console.log(`  early running impact: ${withinRaceDiagnostic.lateResidualVsEarlyRunningImpactCorrelation?.toFixed(2) ?? "n/a"} (predicted sign: positive)`);
 }
 
 main().catch((err) => {

@@ -785,6 +785,54 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    to the hypothesized direction (raw descent -0.58, descent impact -0.39,
    descent impact² -0.23) — the "real signal" gate stage 5 below was
    waiting on.
+
+   **Follow-up: "running impact" metric built; checked for the same
+   fade signal — unstable, no reliable finding either way.** Separately
+   from the descent-eccentric-loading work above, reverse-engineered an
+   athlete-facing "running impact" score from an external source (ad hoc
+   session: least-squares fit against 9 known (distance, elevation, score)
+   tuples, validated out-of-sample on three independent held-out sets — a
+   training week never seen while fitting, plus two point-to-point long
+   runs/ultras with genuine ascent≠descent asymmetry, the only real
+   leverage available to test whether descent should be weighted more
+   heavily than ascent). The winning, best-generalizing model was the
+   simplest one tried: distance plus a Minetti grade-cost "hill surcharge",
+   2 parameters. Every 3-parameter variant that added an explicit descent
+   term fit the two point-to-point runs almost perfectly but generalized
+   *worse* on the May holdout — overfitting to two high-leverage points,
+   not a real finding. Built as `src/model/runningImpact.ts`
+   (`DEFAULT_RUNNING_IMPACT_COEFFICIENTS`: distance 6.9098/km, hill
+   surcharge 10.6943/km).
+
+   Wired into `withinRaceDescentDiagnostic.ts` as a fourth early-window
+   predictor (`earlyRunningImpactPerKm`), reusing its existing early/late
+   split rather than a fresh regression — the same time-confound control
+   the descent metrics already get. First real finding, before touching any
+   data: this metric's predicted sign is the *opposite* of the descent
+   metrics'. Its hill-surcharge term comes from Minetti *metabolic* cost,
+   where gentle-to-moderate descent is cheaper than flat running — so
+   within the range most real descents fall in, steeper descent scores
+   *lower* on this metric even as a genuine eccentric-damage effect would
+   make the late-window residual more negative. The two move together, so
+   a real muscular-fade effect would show up as a *positive* correlation
+   here, not negative — locked in via a synthetic test using gradients that
+   stay inside the monotonic region of the cost curve (it stops being
+   monotonic in gradient past roughly -20%, where the curve bottoms out).
+
+   Run against real data via `scripts/testRealStravaFit.ts`: the
+   correlation is not just weak but genuinely unstable — three different
+   (overlapping but not identical) real race samples of similar size gave
+   +0.58 (n=6), -0.76 (n=7), and -0.89 (n=8), swinging through a full sign
+   reversal depending on which few races happened to clear the within-race
+   diagnostic's support gate. That instability, not any one of those
+   numbers, is the finding: at the current sample sizes (6-8 races), this
+   metric gives no reliable read in either direction, and the sign
+   ambiguity above means even a stable correlation would need care to
+   interpret (a negative reading wouldn't confirm the hypothesis the way it
+   does for the descent metrics — it would need explaining away). No
+   durability-term change follows from this; treat it as a documented,
+   tested-but-inconclusive check, same disposition as the untaken
+   descent-weighting hypothesis above.
 5. **Descent/eccentric-load-dependent durability term — built**, once the
    within-race diagnostic above cleared its own "real signal" gate (n=7,
    all three descent-exposure forms negatively correlated with late-race
