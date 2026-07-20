@@ -5,13 +5,13 @@ import { analyzeRun } from "../model/analysis";
 import {
   bootstrapTauConfidenceInterval,
   buildEffortTrendPoints,
-  fitFInfAndTauAcrossRaces,
-  fitTauAcrossRaces,
+  fitTauFInfWithSupportGate,
   MIN_INFORMATIVE_RACES,
   suggestFitImprovements,
   type EffortTrendPoint,
   type FInfTauFitResult,
   type MultiRaceTauFitResult,
+  type SafeFitResult,
   type TauConfidenceInterval,
 } from "../model/pacingFit";
 import { suggestRunsForFit } from "../model/suggestRuns";
@@ -66,21 +66,20 @@ function oneYearAgoDateInput(): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Same quality bar this panel already warns about in its own UI (see the
- * informativeRaceCount/hitSearchBoundary notes below) -- reused both to
- * decide whether to auto-apply a fit and to render the same verdict. */
-function isGoodTauFit(fit: MultiRaceTauFitResult | null): fit is MultiRaceTauFitResult {
-  return fit !== null && fit.informativeRaceCount >= MIN_INFORMATIVE_RACES && !fit.hitSearchBoundary;
-}
-
-function isGoodFInfFit(fit: FInfTauFitResult | null): fit is FInfTauFitResult {
-  return (
-    fit !== null &&
-    fit.informativeRaceCount >= MIN_INFORMATIVE_RACES &&
-    !fit.hitSearchBoundary.fInf &&
-    !fit.hitSearchBoundary.tau
-  );
-}
+/** Which values `fitTauFInfWithSupportGate` actually applied, if any -- the
+ * tau-only fit and the joint fInf/tau fit are two independently-run,
+ * methodologically different searches (one holds fInf fixed, the other
+ * floats it), so their tauMin values are not interchangeable. Auto-applying
+ * each fit's own output independently (the original bug here) could land on
+ * a tauMin from one fit paired with an fInf from the other -- a combination
+ * neither fit actually endorses, and one that can badly understate fade
+ * (e.g. a barely-informative tau-only fit landing on a very large tau,
+ * applied alongside a well-supported but much-lower-tau joint fInf value).
+ * `fitTauFInfWithSupportGate` picks ONE coherent pair (joint fit if it's
+ * well-supported, else the tau-only fit alone, else neither) -- this state
+ * records which tier won, purely to drive the "applied automatically" copy
+ * below; the two fit objects themselves are still shown in full for
+ * diagnostics regardless of which one was actually applied. */
 
 /** A run's own calendar date, for recency-weighting the multi-race fit --
  * Strava summaries carry it directly; GPX-derived runs (manual upload, or a
@@ -98,6 +97,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
   const [error, setError] = useState<string | null>(null);
   const [fitResult, setFitResult] = useState<MultiRaceTauFitResult | null>(null);
   const [fInfFitResult, setFInfFitResult] = useState<FInfTauFitResult | null>(null);
+  const [safeFitTier, setSafeFitTier] = useState<SafeFitResult["tier"] | null>(null);
   const [fitRan, setFitRan] = useState(false);
   const [fitting, setFitting] = useState(false);
   // Kept locally (not just forwarded via onRacesFitted) so the tau
@@ -350,17 +350,30 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
         races.push(buildEffortTrendPoints(course.segments, analysis.segments, formInputs.altitudeAdjustment));
         raceDates.push(runDate(run));
       }
-      const tauFit = fitTauAcrossRaces(races, ceilingParams, { raceDates, halfLifeDays });
-      const fInfFit = fitFInfAndTauAcrossRaces(races, ceilingParams, { raceDates, halfLifeDays });
-      setFitResult(tauFit);
-      setFInfFitResult(fInfFit);
-      // Auto-apply once a fit clears the same quality bar its own UI already
-      // warns about -- enough informative races, no search-boundary hit --
-      // so "select a date, click to fit" is one step instead of fit-then-
-      // separately-click-apply. Manual Apply buttons below still work too
-      // (e.g. after tweaking the half-life and re-fitting).
-      if (isGoodTauFit(tauFit)) onApplyTau(tauFit.tauMin);
-      if (isGoodFInfFit(fInfFit)) onApplyFInf(fInfFit.fInf);
+      const safeFit = fitTauFInfWithSupportGate(races, ceilingParams, { raceDates, halfLifeDays });
+      setFitResult(safeFit.tauFit);
+      setFInfFitResult(safeFit.fInfFit);
+      setSafeFitTier(safeFit.tier);
+      // Auto-apply once fitTauFInfWithSupportGate picks a well-supported,
+      // internally-consistent (fInf, tau) pair -- so "select a date, click
+      // to fit" is one step instead of fit-then-separately-click-apply.
+      // Deliberately NOT applying tauFit/fInfFit independently here: they're
+      // two different searches (one holds fInf fixed, the other floats it),
+      // so a tauMin from one paired with an fInf from the other is a
+      // combination neither fit actually produced. Manual Apply buttons
+      // below still apply either fit's own value on its own if you want to
+      // override this choice.
+      // CeilingParams' fields are optional in the type (defaults apply
+      // elsewhere), but resolveCeilingParams always fills tauMin/fInf from
+      // FormInputs' own non-optional fields -- the `?? formInputs...`
+      // fallbacks below are for TypeScript, not because the fit could
+      // actually omit them for a tier that claims to have applied them.
+      if (safeFit.tier === "joint") {
+        onApplyTau(safeFit.ceilingParams.tauMin ?? formInputs.tauMin);
+        onApplyFInf(safeFit.ceilingParams.fInf ?? formInputs.fInf);
+      } else if (safeFit.tier === "tauOnly") {
+        onApplyTau(safeFit.ceilingParams.tauMin ?? formInputs.tauMin);
+      }
       setFitRan(true);
       setLastFittedRaces({ races, raceDates });
       setTauCI(null); // stale relative to the new fit above -- re-estimate on demand
@@ -642,9 +655,11 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
             Apply tau = {fitResult.tauMin} min
           </button>
           <p className="field-group-note">
-            {isGoodTauFit(fitResult)
-              ? "Applied automatically -- this fit had enough informative races and stayed within its search range."
-              : "Not applied automatically -- see the notes above; you can still apply it manually if you trust it."}
+            {safeFitTier === "tauOnly"
+              ? "Applied automatically -- this fit had enough informative races, stayed within its search range, and the joint fInf/tau fit below wasn't well-supported enough to prefer instead."
+              : safeFitTier === "joint"
+                ? "Not applied automatically from here -- the joint fInf/tau fit below was better-supported and was applied instead (as a matched fInf+tau pair, not mixed with this fit's own tau)."
+                : "Not applied automatically -- see the notes above; you can still apply it manually if you trust it."}
           </p>
           {fitResult.hitSearchBoundary && (
             <p className="field-group-note">
@@ -723,9 +738,9 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
             Apply fInf = {fInfFitResult.fInf.toFixed(2)}
           </button>
           <p className="field-group-note">
-            {isGoodFInfFit(fInfFitResult)
-              ? "Applied automatically -- this fit had enough informative races and stayed within its search range."
-              : "Not applied automatically -- see the notes above; you can still apply it manually if you trust it."}
+            {safeFitTier === "joint"
+              ? "Applied automatically, together with tau from this same joint fit -- both applied as a matched pair, not independently."
+              : "Not applied automatically -- see the notes above; you can still apply it manually if you trust it (note: doing so pairs it with whatever tau is currently applied, which this fit did not itself produce)."}
           </p>
           {(fInfFitResult.hitSearchBoundary.fInf || fInfFitResult.hitSearchBoundary.tau) && (
             <p className="field-group-note">
