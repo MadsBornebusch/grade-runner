@@ -7,6 +7,7 @@ import { GpxUpload } from "./ui/GpxUpload";
 import { AthleteFields, CourseProcessingFields } from "./ui/InputsPanel";
 import { PageCarousel } from "./ui/PageCarousel";
 import { ElevationProfileChart } from "./ui/ElevationProfileChart";
+import { FinishTimeRangePanel } from "./ui/FinishTimeRangePanel";
 import { CourseDebugChart } from "./ui/CourseDebugChart";
 import { FuelChart } from "./ui/FuelChart";
 import { SubstrateChart } from "./ui/SubstrateChart";
@@ -15,7 +16,7 @@ import { PacingFitPanel } from "./ui/PacingFitPanel";
 import { PowerHrChart } from "./ui/PowerHrChart";
 import { RunLibraryPanel } from "./ui/RunLibraryPanel";
 import { StravaImport } from "./ui/StravaImport";
-import { buildEffortTrendPoints } from "./model/pacingFit";
+import { buildEffortTrendPoints, type EffortTrendPoint } from "./model/pacingFit";
 import { SplitTable } from "./ui/SplitTable";
 import { ResultsSummary } from "./ui/ResultsSummary";
 import { AnalysisSummary } from "./ui/AnalysisSummary";
@@ -37,6 +38,15 @@ function App() {
   const [resultMode, setResultMode] = useState<ResultMode>("planning");
   const [formInputs, setFormInputs] = useState(() => loadFormInputs());
   const { connected: stravaConnected } = useStravaSession();
+
+  // The races/raceDates behind the Athlete tab's most recent tau/fInf fit --
+  // lifted up here (rather than kept local to RunLibraryPanel) so the
+  // Results tab's finish-time-range feature can reuse the exact same
+  // training data without RunLibraryPanel needing to know about Planning
+  // mode's course or the solver.
+  const [fittedRaces, setFittedRaces] = useState<{ races: EffortTrendPoint[][]; raceDates: (Date | null)[] } | null>(
+    null,
+  );
 
   const [rawPoints, setRawPoints] = useState<GpxPoint[] | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -129,6 +139,15 @@ function App() {
   const solverResult = useMemo(() => {
     if (!solverInputs) return null;
     return findSustainableTheta(solverInputs);
+  }, [solverInputs]);
+
+  // Same shape predictFinishTimeRange needs (everything findSustainableTheta
+  // needs except segments/ceilingParams, both of which vary per bootstrap
+  // candidate/target).
+  const solverBaseInputs = useMemo(() => {
+    if (!solverInputs) return null;
+    const { segments: _segments, ceilingParams: _ceilingParams, ...rest } = solverInputs;
+    return rest;
   }, [solverInputs]);
 
   const chartPoints = useMemo(() => {
@@ -288,6 +307,7 @@ function App() {
                   onAddVo2MaxEntry={(entry: Vo2MaxEntry) =>
                     setFormInputs({ ...formInputs, vo2MaxHistory: [...formInputs.vo2MaxHistory, entry] })
                   }
+                  onRacesFitted={(races, raceDates) => setFittedRaces({ races, raceDates })}
                 />
               </>
             ),
@@ -325,6 +345,14 @@ function App() {
                           result={solverResult.result}
                           totalDistanceM={courseResult.totalDistance3D}
                         />
+                        {solverInputs && solverBaseInputs && (
+                          <FinishTimeRangePanel
+                            fittedRaces={fittedRaces}
+                            ceilingParams={solverInputs.ceilingParams ?? {}}
+                            solverBaseInputs={solverBaseInputs}
+                            targetSegments={courseResult.segments}
+                          />
+                        )}
                         {/* A handful of segments (e.g. an immediate bonk) isn't
                             enough for a meaningful chart axis/scale. */}
                         {chartPoints.length >= 5 && (

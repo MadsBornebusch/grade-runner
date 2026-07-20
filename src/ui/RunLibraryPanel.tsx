@@ -41,6 +41,11 @@ interface RunLibraryPanelProps {
   onApplyTau: (tauMin: number) => void;
   onApplyFInf: (fInf: number) => void;
   onAddVo2MaxEntry: (entry: Vo2MaxEntry) => void;
+  /** Reports the races/raceDates behind the just-completed fit up to the
+   * parent -- lets the Results tab's finish-time-range feature reuse the
+   * exact same training data without this panel needing to know anything
+   * about Planning mode's course or the solver. */
+  onRacesFitted?: (races: EffortTrendPoint[][], raceDates: (Date | null)[]) => void;
 }
 
 const BACKFILL_MAX_PAGES = 50;
@@ -91,7 +96,7 @@ function summarize(run: StoredRun) {
   return { distanceKm: course.totalDistance3D / 1000, durationH, hasTimestamps: course.hasTimestamps };
 }
 
-export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2MaxEntry }: RunLibraryPanelProps) {
+export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2MaxEntry, onRacesFitted }: RunLibraryPanelProps) {
   const { connected: stravaConnected } = useStravaSession();
   const [runs, setRuns] = useState<StoredRun[]>([]);
   // Runs with full GPS data already downloaded (points !== null) are selected
@@ -421,6 +426,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
       setFitResult(fitTauAcrossRaces(races, ceilingParams, { raceDates, halfLifeDays }));
       setFInfFitResult(fitFInfAndTauAcrossRaces(races, ceilingParams, { raceDates, halfLifeDays }));
       setFitRan(true);
+      onRacesFitted?.(races, raceDates);
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fit failed.");
