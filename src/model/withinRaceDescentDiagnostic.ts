@@ -18,6 +18,20 @@
 // within-race quantities across races. This works with any race that has
 // *some* early descent -- it doesn't need a specially-shaped race, since
 // the comparison is internal to each race, not between races.
+//
+// Also carries runningImpact.ts's fitted "running impact" score as a fourth
+// early-window predictor, for a head-to-head comparison against the three
+// descent-specific ones. Worth flagging up front: that score is ~distance
+// dominated (the hill-surcharge term was a small fraction of the total on
+// the runs it was fit against), so cumulative early-window impact is even
+// more collinear with early-window elapsed time/distance than cumulative
+// descent is -- and it lumps ascent+flat+descent into one number, whereas
+// the eccentric-loading hypothesis this diagnostic exists to test is
+// specifically about descent. A correlation here is at real risk of just
+// re-detecting the already-modeled time-based tau decay rather than
+// isolating anything muscular; it clears the same bar as the descent
+// metrics (does the *late-window residual*, not raw fade, correlate) but
+// should be read as a weaker, more confounded probe, not a replacement.
 
 import { analyzeRun } from "./analysis";
 import { descentImpact, descentImpactSquared, descentMeters } from "./descentImpact";
@@ -29,6 +43,7 @@ import {
   MIN_FIT_POINTS,
   trimForPacingFit,
 } from "./pacingFit";
+import { runningImpact } from "./runningImpact";
 import { pearsonCorrelation } from "./tauDiagnostic";
 import type { BuildRaceDiagnosticPointOptions } from "./raceDiagnosticPoint";
 
@@ -61,6 +76,10 @@ export interface WithinRaceDiagnosticPoint {
   earlyDescentPerKm: number;
   earlyDescentImpactPerKm: number;
   earlyDescentImpactSquaredPerKm: number;
+  /** runningImpact.ts's fitted score, restricted to the early window and
+   * normalized per km the same way as the descent metrics above. See this
+   * file's header comment for why it's a weaker, more confounded probe. */
+  earlyRunningImpactPerKm: number;
 }
 
 export interface WithinRaceDiagnosticResult {
@@ -75,6 +94,7 @@ export interface WithinRaceDiagnosticResult {
   lateResidualVsEarlyDescentCorrelation: number | null;
   lateResidualVsEarlyDescentImpactCorrelation: number | null;
   lateResidualVsEarlyDescentImpactSquaredCorrelation: number | null;
+  lateResidualVsEarlyRunningImpactCorrelation: number | null;
 }
 
 /**
@@ -140,6 +160,7 @@ export function buildWithinRaceDiagnosticPoint(
     earlyDescentPerKm: descentMeters(earlySegments) / earlyDistanceKm,
     earlyDescentImpactPerKm: descentImpact(earlySegments) / earlyDistanceKm,
     earlyDescentImpactSquaredPerKm: descentImpactSquared(earlySegments) / earlyDistanceKm,
+    earlyRunningImpactPerKm: runningImpact(earlySegments) / earlyDistanceKm,
   };
 }
 
@@ -158,6 +179,10 @@ export function computeWithinRaceDescentDiagnostic(points: WithinRaceDiagnosticP
     lateResidualVsEarlyDescentImpactSquaredCorrelation: pearsonCorrelation(
       lateResidualValues,
       points.map((p) => p.earlyDescentImpactSquaredPerKm),
+    ),
+    lateResidualVsEarlyRunningImpactCorrelation: pearsonCorrelation(
+      lateResidualValues,
+      points.map((p) => p.earlyRunningImpactPerKm),
     ),
   };
 }

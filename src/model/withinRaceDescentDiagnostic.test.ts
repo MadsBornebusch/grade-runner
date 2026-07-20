@@ -133,6 +133,46 @@ describe("buildWithinRaceDiagnosticPoint / computeWithinRaceDescentDiagnostic", 
     expect(result.lateResidualVsEarlyDescentImpactCorrelation!).toBeLessThan(-0.8);
   });
 
+  it("picks up a *positive* correlation via the running-impact score -- the opposite sign from descentImpact, for a real reason", () => {
+    // Same construction as above (early descent scaled with a proportional
+    // late-window damage factor), but a shallower gradient range than
+    // GRADIENTS: the Minetti cost curve bottoms out around -20%, so
+    // runningImpact's per-km hill surcharge is *not* monotonic across the
+    // full GRADIENTS range (confirmed empirically -- it swings back upward
+    // at -0.25). Staying inside the monotonic region isolates one thing at a
+    // time: whether the correlation wiring itself is correct.
+    //
+    // The sign is the actual finding here, not a quirk to normalize away.
+    // runningImpact's descent term comes from Minetti *metabolic* cost,
+    // where gentle-to-moderate descent is cheaper than flat -- so within
+    // this range, earlyRunningImpactPerKm goes *down* as descent gets
+    // steeper (confirmed by the monotonic-decrease assertion below), while a
+    // genuine eccentric-damage effect makes the late residual go more
+    // negative as descent gets steeper. Two things both moving with
+    // steepness, one up and one down, correlate *positively* -- the reverse
+    // of descentImpact's predicted-negative sign. Concretely: this metric
+    // cannot distinguish "genuine muscular fade from steep descent" from
+    // "no effect at all, but shallower descents were metabolically cheaper
+    // early splits" using its sign alone, because its descent term has the
+    // wrong sign for the eccentric-loading mechanism to begin with.
+    const shallowGradients = [-0.02, -0.05, -0.08, -0.11, -0.14];
+    const points: WithinRaceDiagnosticPoint[] = [];
+    for (const gradient of shallowGradients) {
+      const extraDecayPerHour = 0.6 * (Math.abs(gradient) / 0.14);
+      const course = courseFrom(buildRace(gradient, extraDecayPerHour));
+      const point = buildWithinRaceDiagnosticPoint(`gradient ${gradient}`, course, OPTIONS);
+      expect(point).not.toBeNull();
+      points.push(point!);
+    }
+
+    const impacts = points.map((p) => p.earlyRunningImpactPerKm);
+    for (let i = 1; i < impacts.length; i++) expect(impacts[i]).toBeLessThan(impacts[i - 1]);
+
+    const result = computeWithinRaceDescentDiagnostic(points);
+    expect(result.lateResidualVsEarlyRunningImpactCorrelation).not.toBeNull();
+    expect(result.lateResidualVsEarlyRunningImpactCorrelation!).toBeGreaterThan(0.8);
+  });
+
   it("reads near zero when early descent varies but has no effect on the late window (null control)", () => {
     const points: WithinRaceDiagnosticPoint[] = [];
     for (const gradient of GRADIENTS) {
@@ -152,6 +192,8 @@ describe("buildWithinRaceDiagnosticPoint / computeWithinRaceDescentDiagnostic", 
     const result = computeWithinRaceDescentDiagnostic(points);
     const correlation = result.lateResidualVsEarlyDescentImpactCorrelation;
     expect(correlation === null || Math.abs(correlation) < 0.5).toBe(true);
+    const runningImpactCorrelation = result.lateResidualVsEarlyRunningImpactCorrelation;
+    expect(runningImpactCorrelation === null || Math.abs(runningImpactCorrelation) < 0.5).toBe(true);
   });
 
   it("returns null when the course has no timestamps", () => {
