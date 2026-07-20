@@ -594,6 +594,78 @@ export function fitFInfAndTauAcrossRaces(
   };
 }
 
+/** PLAN.md §11's "~2x+ duration range" precondition for a jointly-fit fInf
+ * to mean anything more than an unconstrained absorbing parameter. */
+export const MIN_DURATION_DIVERSITY_RATIO = 2;
+
+export interface SafeFitResult {
+  /** fInf/tauMin merged in from whichever tier was actually trusted;
+   * unchanged from the input ceilingParams when tier is "defaults". */
+  ceilingParams: CeilingParams;
+  /**
+   * Which of the three tiers below produced ceilingParams -- "joint" means
+   * fitFInfAndTauAcrossRaces was trustworthy on its own terms
+   * (durationDiversityRatio, informativeRaceCount, no boundary hits);
+   * "tauOnly" means it fell back to fitTauAcrossRaces (fInf held at
+   * whatever was already configured); "defaults" means neither fit had
+   * enough informative races to trust at all, so the input ceilingParams
+   * pass through completely untouched.
+   */
+  tier: "joint" | "tauOnly" | "defaults";
+  fInfFit: FInfTauFitResult | null;
+  tauFit: MultiRaceTauFitResult | null;
+}
+
+/**
+ * Three-tier fallback shared by any caller that needs a trustworthy
+ * (fInf, tau) from a set of races without blindly accepting whatever a fit
+ * returns: joint fInf/tau fit -> tau-only fit -> hold the input
+ * ceilingParams untouched. Each tier requires at least
+ * MIN_INFORMATIVE_RACES races that actually constrain the parameter(s)
+ * being fit (see MIN_INFORMATIVE_RACES's own doc) -- a fit "pooled across N
+ * races" where only one of them is actually informative is really just
+ * that one race's idiosyncratic pacing, not a genuine consensus, and
+ * shouldn't be trusted just because it ran without error. Originally
+ * inline in scripts/backtestFinishTime.ts; promoted here once
+ * finishTimeRange.ts needed the identical logic for both a point estimate
+ * and (in a cheaper, tau-only form) many bootstrap resamples.
+ */
+export function fitTauFInfWithSupportGate(
+  races: EffortTrendPoint[][],
+  ceilingParams: CeilingParams,
+  opts: FitTauAcrossRacesOptions & { minDurationDiversityRatio?: number } = {},
+): SafeFitResult {
+  const minDurationDiversityRatio = opts.minDurationDiversityRatio ?? MIN_DURATION_DIVERSITY_RATIO;
+  const fInfFit = fitFInfAndTauAcrossRaces(races, ceilingParams, opts);
+  const tauFit = fitTauAcrossRaces(races, ceilingParams, opts);
+
+  if (
+    fInfFit &&
+    fInfFit.durationDiversityRatio >= minDurationDiversityRatio &&
+    fInfFit.informativeRaceCount >= MIN_INFORMATIVE_RACES &&
+    !fInfFit.hitSearchBoundary.fInf &&
+    !fInfFit.hitSearchBoundary.tau
+  ) {
+    return {
+      ceilingParams: { ...ceilingParams, fInf: fInfFit.fInf, tauMin: fInfFit.tauMin },
+      tier: "joint",
+      fInfFit,
+      tauFit,
+    };
+  }
+
+  if (tauFit && tauFit.informativeRaceCount >= MIN_INFORMATIVE_RACES && !tauFit.hitSearchBoundary) {
+    return {
+      ceilingParams: { ...ceilingParams, tauMin: tauFit.tauMin },
+      tier: "tauOnly",
+      fInfFit,
+      tauFit,
+    };
+  }
+
+  return { ceilingParams, tier: "defaults", fInfFit, tauFit };
+}
+
 export interface DriftFitResult {
   durabilityDriftPerHour: number;
   trendAtFitPctPerHour: number;

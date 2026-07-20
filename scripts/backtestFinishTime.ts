@@ -33,8 +33,7 @@ import type { CeilingParams } from "../src/model/ceiling.ts";
 import {
   buildEffortTrendPoints,
   fitDurabilityDriftPerDescentUnitAcrossRaces,
-  fitFInfAndTauAcrossRaces,
-  fitTauAcrossRaces,
+  fitTauFInfWithSupportGate,
   MIN_INFORMATIVE_RACES,
   type DescentExposureBasis,
   type EffortTrendPoint,
@@ -59,10 +58,6 @@ const EXCLUDE_TERMS = arg("exclude", "")
   .filter(Boolean);
 const SESSION_FILE = fileURLToPath(new URL("../.strava-session.local", import.meta.url));
 const SUGGESTION_COUNT = 10;
-/** PLAN.md §11's "~2x+ duration range" precondition for a jointly-fit fInf
- * to mean anything more than an unconstrained absorbing parameter. Below
- * this, fall back to a tau-only fit and hold fInf at its current default. */
-const MIN_DURATION_DIVERSITY_RATIO = 2;
 const DESCENT_BASES: DescentExposureBasis[] = ["descentMeters", "descentImpact", "descentImpactSquared"];
 
 function formatHms(totalSeconds: number): string {
@@ -184,36 +179,25 @@ async function main() {
   }
   console.log(`\n${races.length} training races with usable timestamps -- fitting...\n`);
 
-  // Three-tier fallback: joint fInf/tau fit -> tau-only fit -> hold the
-  // current defaults untouched. Each tier requires at least
-  // MIN_INFORMATIVE_RACES races that actually constrain the parameter(s)
-  // being fit (see pacingFit.ts's own doc on informativeRaceCount) -- a fit
-  // "pooled across N races" where only one of them is actually informative
-  // is really just that one race's idiosyncratic pacing, not a genuine
-  // consensus, and shouldn't be trusted just because it ran without error.
-  const fInfFit = fitFInfAndTauAcrossRaces(races, ceilingParams, { raceDates });
-  const tauFit = fitTauAcrossRaces(races, ceilingParams, { raceDates });
-  let fittedCeilingParams: CeilingParams = ceilingParams;
-  if (
-    fInfFit &&
-    fInfFit.durationDiversityRatio >= MIN_DURATION_DIVERSITY_RATIO &&
-    fInfFit.informativeRaceCount >= MIN_INFORMATIVE_RACES &&
-    !fInfFit.hitSearchBoundary.fInf &&
-    !fInfFit.hitSearchBoundary.tau
-  ) {
-    fittedCeilingParams = { ...ceilingParams, fInf: fInfFit.fInf, tauMin: fInfFit.tauMin };
+  // Three-tier fallback (joint fInf/tau fit -> tau-only fit -> hold the
+  // current defaults untouched), shared with finishTimeRange.ts -- see
+  // pacingFit.ts's fitTauFInfWithSupportGate for why each tier requires
+  // MIN_INFORMATIVE_RACES.
+  const safeFit = fitTauFInfWithSupportGate(races, ceilingParams, { raceDates });
+  const { fInfFit, tauFit } = safeFit;
+  const fittedCeilingParams: CeilingParams = safeFit.ceilingParams;
+  if (safeFit.tier === "joint") {
     console.log(
-      `Using jointly-fit fInf=${fInfFit.fInf}, tauMin=${fInfFit.tauMin}min ` +
-        `(durationDiversityRatio=${fInfFit.durationDiversityRatio.toFixed(1)}, ` +
-        `informativeRaceCount=${fInfFit.informativeRaceCount}/${fInfFit.perRace.length}).`,
+      `Using jointly-fit fInf=${fInfFit!.fInf}, tauMin=${fInfFit!.tauMin}min ` +
+        `(durationDiversityRatio=${fInfFit!.durationDiversityRatio.toFixed(1)}, ` +
+        `informativeRaceCount=${fInfFit!.informativeRaceCount}/${fInfFit!.perRace.length}).`,
     );
-  } else if (tauFit && tauFit.informativeRaceCount >= MIN_INFORMATIVE_RACES && !tauFit.hitSearchBoundary) {
-    fittedCeilingParams = { ...ceilingParams, tauMin: tauFit.tauMin };
+  } else if (safeFit.tier === "tauOnly") {
     console.log(
       `fInf/tau joint fit unreliable (durationDiversityRatio=${fInfFit?.durationDiversityRatio.toFixed(1) ?? "n/a"}, ` +
         `informativeRaceCount=${fInfFit?.informativeRaceCount ?? 0}/${fInfFit?.perRace.length ?? 0}, ` +
         `hitSearchBoundary=${JSON.stringify(fInfFit?.hitSearchBoundary ?? null)}) -- falling back to a tau-only fit: ` +
-        `tauMin=${tauFit.tauMin}min (informativeRaceCount=${tauFit.informativeRaceCount}/${tauFit.perRace.length}), ` +
+        `tauMin=${tauFit!.tauMin}min (informativeRaceCount=${tauFit!.informativeRaceCount}/${tauFit!.perRace.length}), ` +
         `fInf held at the default ${ceilingParams.fInf}.`,
     );
   } else {
