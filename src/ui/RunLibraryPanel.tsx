@@ -3,6 +3,7 @@ import type { GpxPoint } from "../gpx/pipeline";
 import { parseGpx, runPipeline } from "../gpx/pipeline";
 import { analyzeRun } from "../model/analysis";
 import {
+  bootstrapTauConfidenceInterval,
   buildEffortTrendPoints,
   fitFInfAndTauAcrossRaces,
   fitTauAcrossRaces,
@@ -10,6 +11,7 @@ import {
   type EffortTrendPoint,
   type FInfTauFitResult,
   type MultiRaceTauFitResult,
+  type TauConfidenceInterval,
 } from "../model/pacingFit";
 import { suggestRunsForFit } from "../model/suggestRuns";
 import { dedupeStoredRuns } from "../model/dedupeRuns";
@@ -109,6 +111,14 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
   const [fInfFitResult, setFInfFitResult] = useState<FInfTauFitResult | null>(null);
   const [fitRan, setFitRan] = useState(false);
   const [fitting, setFitting] = useState(false);
+  // Kept locally (not just forwarded via onRacesFitted) so the tau
+  // confidence-interval button below can reuse the exact same training
+  // data without needing a Planning course or the parent's help.
+  const [lastFittedRaces, setLastFittedRaces] = useState<{ races: EffortTrendPoint[][]; raceDates: (Date | null)[] } | null>(
+    null,
+  );
+  const [tauCI, setTauCI] = useState<TauConfidenceInterval | "insufficient" | null>(null);
+  const [computingTauCI, setComputingTauCI] = useState(false);
   const [halfLifeDays, setHalfLifeDays] = useState(DEFAULT_HALF_LIFE_DAYS);
   // Display-only filter for the run list below -- a large backfilled library
   // is mostly summary-only rows; this doesn't affect selection, the fit, or
@@ -426,12 +436,29 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
       setFitResult(fitTauAcrossRaces(races, ceilingParams, { raceDates, halfLifeDays }));
       setFInfFitResult(fitFInfAndTauAcrossRaces(races, ceilingParams, { raceDates, halfLifeDays }));
       setFitRan(true);
+      setLastFittedRaces({ races, raceDates });
+      setTauCI(null); // stale relative to the new fit above -- re-estimate on demand
       onRacesFitted?.(races, raceDates);
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fit failed.");
     } finally {
       setFitting(false);
+    }
+  };
+
+  /** On-demand, not a live recompute -- ~100 sequential tau refits is too
+   * slow to run on every render. Reuses the exact races/raceDates from the
+   * fit above, so this needs no target course or solver at all. */
+  const handleEstimateTauCI = async () => {
+    if (!lastFittedRaces) return;
+    setComputingTauCI(true);
+    setTauCI(null);
+    try {
+      const ci = await bootstrapTauConfidenceInterval(lastFittedRaces.races, lastFittedRaces.raceDates, ceilingParams);
+      setTauCI(ci ?? "insufficient");
+    } finally {
+      setComputingTauCI(false);
     }
   };
 
@@ -727,6 +754,29 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
               This landed at the {fitResult.hitSearchBoundary} edge of the search range -- treat it as a bound, not a
               precise value. The true tau may be even{" "}
               {fitResult.hitSearchBoundary === "upper" ? "larger (a slower fade)" : "smaller (a faster fade)"}.
+            </p>
+          )}
+
+          <button type="button" onClick={handleEstimateTauCI} disabled={computingTauCI}>
+            {computingTauCI ? "Estimating…" : "Estimate tau confidence interval"}
+          </button>
+          <p className="field-group-help">
+            A bootstrap confidence interval on tau itself: how much tau would vary if fit on a slightly different
+            sample of your own runs. Not a real-world guarantee -- it doesn't account for physiological changes over
+            time, just how well this specific set of runs pins tau down.
+          </p>
+          {tauCI === "insufficient" && (
+            <p className="warning">
+              Not enough informative runs to estimate a confidence interval -- the same support bar the tau fit above
+              needed.
+            </p>
+          )}
+          {tauCI && tauCI !== "insufficient" && (
+            <p className="field-group-note">
+              Tau confidence interval: {tauCI.lowTauMin.toFixed(0)}–{tauCI.highTauMin.toFixed(0)} min (median{" "}
+              {tauCI.medianTauMin.toFixed(0)}), point estimate {tauCI.pointEstimateTauMin.toFixed(0)} min. Based on{" "}
+              {tauCI.sampleCount} usable bootstrap resamples ({tauCI.skippedCount} skipped for not clearing the same
+              support bar the fit above needed).
             </p>
           )}
         </>
