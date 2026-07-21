@@ -6,6 +6,8 @@ import type { CourseSegment } from "../gpx/pipeline";
 import {
   bootstrapTauConfidenceInterval,
   buildEffortTrendPoints,
+  computeEffortTrend,
+  computeFadeTrend,
   type EffortTrendPoint,
   fitDurabilityDriftPerDescentUnit,
   fitDurabilityDriftPerDescentUnitAcrossRaces,
@@ -35,6 +37,65 @@ function makeConstantEffortPoints(
   }
   return points;
 }
+
+describe("computeFadeTrend", () => {
+  const flatCeilingParams: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, f0: 0.7, fInf: 0.7, tauMin: 1000 };
+
+  /** Alternating "running" / "walk break" points, holding the walk level and
+   * proportion fixed across both halves so only the running level itself
+   * declines -- mirrors the real Soria Moria pattern (see this session's
+   * investigation): the same amount of walk-break noise diluting the
+   * average in both halves, on top of a real decline in what the runner can
+   * still do. Ceiling is held flat (f0=fInf) so grossPowerWPerKg fractions
+   * translate directly to effort fractions without the fade curve itself
+   * contributing any slope. */
+  function makeWalkDilutedRace(runLevelFirstHalf: number, runLevelSecondHalf: number, walkLevel: number) {
+    const points: EffortTrendPoint[] = [];
+    const totalHours = 8;
+    const stepMinutes = 5;
+    const stepHours = stepMinutes / 60;
+    let i = 0;
+    for (let t = 0; t < totalHours; t += stepHours, i++) {
+      const runLevel = t < totalHours / 2 ? runLevelFirstHalf : runLevelSecondHalf;
+      const level = i % 2 === 0 ? runLevel : walkLevel;
+      points.push({ tHours: t, grossPowerWPerKg: level, altitudeM: 0, dtS: stepMinutes * 60 });
+    }
+    return points;
+  }
+
+  it("detects a decline in peak effort that computeEffortTrend's flat average substantially understates", () => {
+    const points = makeWalkDilutedRace(0.8, 0.6, 0.3);
+    const peak = computeFadeTrend(points, flatCeilingParams);
+    const flat = computeEffortTrend(points, flatCeilingParams);
+    expect(peak).not.toBeNull();
+    expect(flat).not.toBeNull();
+    // Peak effort itself dropped 0.8 -> 0.6 (a 0.2 swing); the alternating
+    // walk breaks (constant at 0.3 throughout) pull the flat average's own
+    // apparent swing down to half that (0.55 -> 0.45). Both are negative,
+    // but peak should detect a clearly larger decline.
+    expect(peak!.slopePerHour).toBeLessThan(0);
+    expect(flat!.slopePerHour).toBeLessThan(0);
+    expect(Math.abs(peak!.slopePerHour)).toBeGreaterThan(Math.abs(flat!.slopePerHour) * 1.5);
+  });
+
+  it("agrees with computeEffortTrend when effort is genuinely constant (no walk breaks to dilute)", () => {
+    const points = makeWalkDilutedRace(0.6, 0.6, 0.6);
+    const peak = computeFadeTrend(points, flatCeilingParams);
+    const flat = computeEffortTrend(points, flatCeilingParams);
+    expect(peak!.slopePerHour).toBeCloseTo(0, 2);
+    expect(flat!.slopePerHour).toBeCloseTo(0, 2);
+  });
+
+  it("falls back to computeEffortTrend on a short race with too few bins to bin meaningfully", () => {
+    // 40 minutes of 5-min points -- nowhere near the 4 usable 30-min bins
+    // computeFadeTrend needs, so it should degrade to the exact same result
+    // as computeEffortTrend rather than returning null or something else.
+    const points = makeWalkDilutedRace(0.8, 0.6, 0.3).filter((p) => p.tHours < 40 / 60);
+    const peak = computeFadeTrend(points, flatCeilingParams);
+    const flat = computeEffortTrend(points, flatCeilingParams);
+    expect(peak).toEqual(flat);
+  });
+});
 
 describe("trimForPacingFit", () => {
   it("drops points within the trim window at both ends", () => {

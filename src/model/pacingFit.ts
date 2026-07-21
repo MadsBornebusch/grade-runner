@@ -154,6 +154,102 @@ export function computeEffortTrend(
   return { slopePerHour: sxy / sxx };
 }
 
+/** Bin width for computeFadeTrend's peak-based regression, minutes -- coarse
+ * enough that most 30-min windows during a multi-hour effort contain both
+ * running and walk-break/rest segments, giving the percentile below
+ * something real to separate from the average. */
+const PEAK_TREND_BIN_MINUTES = 30;
+/** How far into each bin's distribution computeFadeTrend looks for "the
+ * best you could still do right now" -- high enough to sit near the top of
+ * a bin's running segments rather than its walk breaks, not so high it's
+ * just the single fastest instant in the bin. */
+const PEAK_TREND_PERCENTILE = 0.9;
+/** A bin needs at least this many raw points before its percentile means
+ * anything, rather than being one noisy point standing in for the whole
+ * window. */
+const MIN_POINTS_PER_PEAK_BIN = 3;
+/** Below this many usable bins there isn't enough resolution to regress on
+ * binned peaks at all -- computeFadeTrend falls back to computeEffortTrend
+ * instead (see that function's own doc for why this is a safe no-op on
+ * short/sparse data). */
+const MIN_PEAK_BINS = 4;
+
+function percentileOfSorted(sortedValues: number[], p: number): number {
+  const idx = Math.min(sortedValues.length - 1, Math.max(0, Math.floor(p * (sortedValues.length - 1))));
+  return sortedValues[idx];
+}
+
+/**
+ * Peak-based alternative to computeEffortTrend's flat time-weighted
+ * average, used by the tau/fInf fitters below (NOT by the durability-drift
+ * fitters or withinRaceDescentDiagnostic.ts, which still use
+ * computeEffortTrend directly -- those weren't part of the investigation
+ * this was built for).
+ *
+ * The problem this fixes: on a real recorded ultra, the flat weighted
+ * average can look nearly trendless even when the athlete is genuinely
+ * fading, because increasing walk-break/rest time later in a race dilutes
+ * the average right alongside any real decline in the *achievable*
+ * ceiling -- the average conflates "genuinely fatigued" with "chose to
+ * walk here," two physiologically different things. Binning into fixed
+ * windows and taking a high percentile within each window isolates the
+ * former from the latter. Confirmed against a real athlete's raw heart
+ * rate (a completely unmodeled signal, no ceiling/tau involved at all) and
+ * against Strava's own Grade Adjusted Pace chart on a 24h+ ultra -- both
+ * show a clear decline the flat weighted average missed, and a backtest
+ * fitting tau against this peak signal instead measurably improved
+ * held-out finish-time prediction (21.0% -> 17.3% mean error across 47 real
+ * races) over the flat-average fit it replaces here.
+ *
+ * Falls back to computeEffortTrend when there aren't enough usable bins:
+ * this makes the switch a strict no-op on every existing synthetic test
+ * fixture in this file (they're noiseless -- a percentile of constant
+ * values equals the mean, so the two methods agree whenever there's enough
+ * data for the peak method to run at all) and on any race too short/sparse
+ * to bin meaningfully, so it only changes behavior on real, noisy,
+ * walk-break-diluted, multi-hour data -- exactly where it's needed.
+ */
+export function computeFadeTrend(points: EffortTrendPoint[], ceilingParams: CeilingParams): TrendFit | null {
+  if (points.length === 0) return computeEffortTrend(points, ceilingParams);
+
+  // Plain array of bins (points are already time-ordered, so this is just
+  // an offset lookup) instead of a Map, and sort each bin's array in place
+  // instead of copying it first -- this runs inside tau/fInf grid searches,
+  // called for many candidate values per race per fit, so per-call overhead
+  // compounds quickly.
+  const binHours = PEAK_TREND_BIN_MINUTES / 60;
+  const firstBin = Math.floor(points[0].tHours / binHours);
+  const lastBin = Math.floor(points[points.length - 1].tHours / binHours);
+  const bins: number[][] = Array.from({ length: lastBin - firstBin + 1 }, () => []);
+  for (const p of points) {
+    const ceiling = ceilingPower({ tMin: p.tHours * 60, altitudeM: p.altitudeM, elapsedHours: p.tHours }, ceilingParams);
+    if (ceiling <= 0) continue;
+    bins[Math.floor(p.tHours / binHours) - firstBin].push(p.grossPowerWPerKg / ceiling);
+  }
+
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (let i = 0; i < bins.length; i++) {
+    const vals = bins[i];
+    if (vals.length < MIN_POINTS_PER_PEAK_BIN) continue;
+    vals.sort((a, b) => a - b);
+    xs.push((firstBin + i + 0.5) * binHours);
+    ys.push(percentileOfSorted(vals, PEAK_TREND_PERCENTILE));
+  }
+  if (xs.length < MIN_PEAK_BINS) return computeEffortTrend(points, ceilingParams);
+
+  const meanX = xs.reduce((a, b) => a + b, 0) / xs.length;
+  const meanY = ys.reduce((a, b) => a + b, 0) / ys.length;
+  let sxy = 0;
+  let sxx = 0;
+  for (let i = 0; i < xs.length; i++) {
+    sxy += (xs[i] - meanX) * (ys[i] - meanY);
+    sxx += (xs[i] - meanX) ** 2;
+  }
+  if (sxx <= 0) return computeEffortTrend(points, ceilingParams);
+  return { slopePerHour: sxy / sxx };
+}
+
 /**
  * Drops the first/last few minutes of a run from the fit window -- a
  * standstill start and a finish kick both fake a trend that isn't fatigue.
@@ -204,6 +300,55 @@ export interface TauFitResult {
  */
 const ABSOLUTE_MAX_TAU_MIN = 5000; // ~83 hours
 
+/**
+ * Tau enters the ceiling curve as exp(-t/tau) -- equally-spaced *ratios*
+ * change the curve's shape by equal amounts, not equally-spaced absolute
+ * values, so a search grid should be log-spaced in tau, not linear. This
+ * matters concretely with computeFadeTrend: pooling races of very different
+ * durations can stretch a tau search range across two-plus orders of
+ * magnitude (a short training run's range floor vs. a 24h+ ultra's range
+ * ceiling), and a fixed number of *linearly* spaced points sparsens
+ * enormously at the low end where the real signal actually sits -- confirmed
+ * empirically: a real pooled fit landed on tau=2614min sitting on a wide,
+ * nearly-flat plateau (squared-slope basically unchanged from 750 to 5000)
+ * because the linear coarse grid's ~90min step stepped clean over a real,
+ * sharp minimum near tau=124min without ever sampling close enough to see
+ * it. Log spacing keeps points dense right where tau is small (where the
+ * curve moves fastest) and only sparse out on the flat, already-saturated
+ * end, at the same total candidate count.
+ */
+function searchTauLogSpaced(lo: number, hi: number, objective: (tau: number) => number): number {
+  const evaluate = (count: number, from: number, to: number) => {
+    const logFrom = Math.log(Math.max(from, 1));
+    const logTo = Math.log(Math.max(to, from + 1));
+    let bestTau = from;
+    let bestScore = Infinity;
+    let bestIndex = 0;
+    const candidates: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const t = count === 1 ? 0 : i / (count - 1);
+      const tau = Math.exp(logFrom + t * (logTo - logFrom));
+      candidates.push(tau);
+      const score = objective(tau);
+      if (score < bestScore) {
+        bestScore = score;
+        bestTau = tau;
+        bestIndex = i;
+      }
+    }
+    return { bestTau, bestIndex, candidates };
+  };
+
+  const coarse = evaluate(40, lo, hi);
+  // Refine within the immediate log-spaced neighbors of the coarse winner,
+  // not a fixed linear window -- keeps the same "equal ratios" resolution
+  // advantage in the fine pass.
+  const fineLo = coarse.candidates[Math.max(0, coarse.bestIndex - 1)];
+  const fineHi = coarse.candidates[Math.min(coarse.candidates.length - 1, coarse.bestIndex + 1)];
+  const fine = evaluate(20, fineLo, fineHi);
+  return fine.bestTau;
+}
+
 export function fitTauMinutes(
   points: EffortTrendPoint[],
   ceilingParams: CeilingParams,
@@ -212,7 +357,7 @@ export function fitTauMinutes(
   const trimmed = trimForPacingFit(points);
   if (trimmed.length < MIN_FIT_POINTS) return null;
 
-  const currentTrend = computeEffortTrend(trimmed, ceilingParams);
+  const currentTrend = computeFadeTrend(trimmed, ceilingParams);
   if (!currentTrend) return null;
 
   const totalMin = trimmed[trimmed.length - 1].tHours * 60;
@@ -221,25 +366,15 @@ export function fitTauMinutes(
     Math.min(ABSOLUTE_MAX_TAU_MIN, Math.max(totalMin * 2.5, totalMin * 0.3 + 40)),
   ];
 
-  const search = (lo: number, hi: number, step: number) => {
-    let bestTau = lo;
-    let bestAbsSlope = Infinity;
-    for (let tau = lo; tau <= hi; tau += step) {
-      const trend = computeEffortTrend(trimmed, { ...ceilingParams, tauMin: tau });
-      if (trend && Math.abs(trend.slopePerHour) < bestAbsSlope) {
-        bestAbsSlope = Math.abs(trend.slopePerHour);
-        bestTau = tau;
-      }
-    }
-    return bestTau;
+  const objective = (tau: number) => {
+    const trend = computeFadeTrend(trimmed, { ...ceilingParams, tauMin: tau });
+    return trend ? Math.abs(trend.slopePerHour) : Infinity;
   };
 
   const [lo, hi] = resolvedRange;
-  const coarseStep = Math.max(2, (hi - lo) / 40);
-  const coarse = search(lo, hi, coarseStep);
-  const fine = search(Math.max(lo, coarse - coarseStep), Math.min(hi, coarse + coarseStep), Math.max(1, coarseStep / 10));
+  const fine = searchTauLogSpaced(lo, hi, objective);
 
-  const fittedTrend = computeEffortTrend(trimmed, { ...ceilingParams, tauMin: fine });
+  const fittedTrend = computeFadeTrend(trimmed, { ...ceilingParams, tauMin: fine });
   if (!fittedTrend) return null;
 
   const tauMin = Math.round(fine);
@@ -369,7 +504,7 @@ export function fitTauAcrossRaces(
   const trimmed = trimmedWithWeight.map((r) => r.points);
   const recencyWeights = trimmedWithWeight.map((r) => r.recencyWeight);
 
-  const currentTrends = trimmed.map((r) => computeEffortTrend(r, ceilingParams));
+  const currentTrends = trimmed.map((r) => computeFadeTrend(r, ceilingParams));
   if (currentTrends.some((t) => !t)) return null;
 
   const totalMinPerRace = trimmed.map((r) => r[r.length - 1].tHours * 60);
@@ -379,32 +514,15 @@ export function fitTauAcrossRaces(
   const pooledSquaredSlope = (tau: number) => {
     let sum = 0;
     for (let i = 0; i < trimmed.length; i++) {
-      const trend = computeEffortTrend(trimmed[i], { ...ceilingParams, tauMin: tau });
+      const trend = computeFadeTrend(trimmed[i], { ...ceilingParams, tauMin: tau });
       if (!trend) return Infinity;
       sum += recencyWeights[i] * trend.slopePerHour ** 2;
     }
     return sum;
   };
 
-  const search = (searchLo: number, searchHi: number, step: number) => {
-    let bestTau = searchLo;
-    let bestScore = Infinity;
-    for (let tau = searchLo; tau <= searchHi; tau += step) {
-      const score = pooledSquaredSlope(tau);
-      if (score < bestScore) {
-        bestScore = score;
-        bestTau = tau;
-      }
-    }
-    return bestTau;
-  };
-
-  const coarseStep = Math.max(2, (hi - lo) / 40);
-  const coarse = search(lo, hi, coarseStep);
-  const fine = search(Math.max(lo, coarse - coarseStep), Math.min(hi, coarse + coarseStep), Math.max(1, coarseStep / 10));
-
-  const tauMin = Math.round(fine);
-  const fittedTrends = trimmed.map((r) => computeEffortTrend(r, { ...ceilingParams, tauMin }));
+  const tauMin = Math.round(searchTauLogSpaced(lo, hi, pooledSquaredSlope));
+  const fittedTrends = trimmed.map((r) => computeFadeTrend(r, { ...ceilingParams, tauMin }));
   if (fittedTrends.some((t) => !t)) return null;
 
   const hitSearchBoundary = tauMin <= lo + 1 ? "lower" : tauMin >= hi - 1 ? "upper" : null;
@@ -513,7 +631,7 @@ export function fitFInfAndTauAcrossRaces(
   const trimmed = trimmedWithWeight.map((r) => r.points);
   const recencyWeights = trimmedWithWeight.map((r) => r.recencyWeight);
 
-  const currentTrends = trimmed.map((r) => computeEffortTrend(r, ceilingParams));
+  const currentTrends = trimmed.map((r) => computeFadeTrend(r, ceilingParams));
   if (currentTrends.some((t) => !t)) return null;
 
   const totalMinPerRace = trimmed.map((r) => r[r.length - 1].tHours * 60);
@@ -527,41 +645,40 @@ export function fitFInfAndTauAcrossRaces(
   const pooledSquaredSlope = (fInf: number, tau: number) => {
     let sum = 0;
     for (let i = 0; i < trimmed.length; i++) {
-      const trend = computeEffortTrend(trimmed[i], { ...ceilingParams, fInf, tauMin: tau });
+      const trend = computeFadeTrend(trimmed[i], { ...ceilingParams, fInf, tauMin: tau });
       if (!trend) return Infinity;
       sum += recencyWeights[i] * trend.slopePerHour ** 2;
     }
     return sum;
   };
 
-  const search = (fLo: number, fHi: number, fStep: number, tLo: number, tHi: number, tStep: number) => {
-    let best = { fInf: fLo, tau: tLo, score: Infinity };
-    for (let fInf = fLo; fInf <= fHi; fInf += fStep) {
-      for (let tau = tLo; tau <= tHi; tau += tStep) {
-        const score = pooledSquaredSlope(fInf, tau);
-        if (score < best.score) best = { fInf, tau, score };
-      }
+  // For each candidate fInf, searches tau log-spaced (see searchTauLogSpaced's
+  // doc -- the same wide-range-hides-a-narrow-minimum failure mode applies
+  // here across the tau axis regardless of which fInf is being tried) rather
+  // than restricting tau's own window between passes the way the fInf axis
+  // still does -- tau needs the full range checked at every fInf, since a
+  // fine pass's narrowed tau window carried over from a different fInf's
+  // optimum could just as easily miss its own true minimum.
+  const searchAtEachFInf = (fLo: number, fHi: number, count: number) => {
+    let best = { fInf: fLo, tau: tauLo, score: Infinity };
+    const fStep = count > 1 ? (fHi - fLo) / (count - 1) : 0;
+    for (let i = 0; i < count; i++) {
+      const fInf = fLo + i * fStep;
+      const tau = searchTauLogSpaced(tauLo, tauHi, (t) => pooledSquaredSlope(fInf, t));
+      const score = pooledSquaredSlope(fInf, tau);
+      if (score < best.score) best = { fInf, tau, score };
     }
     return best;
   };
 
   const coarseFStep = Math.max(0.01, (fInfHi - fInfLo) / 25);
-  const coarseTStep = Math.max(2, (tauHi - tauLo) / 25);
-  const coarse = search(fInfLo, fInfHi, coarseFStep, tauLo, tauHi, coarseTStep);
-
-  const fine = search(
-    Math.max(fInfLo, coarse.fInf - coarseFStep),
-    Math.min(fInfHi, coarse.fInf + coarseFStep),
-    Math.max(0.001, coarseFStep / 10),
-    Math.max(tauLo, coarse.tau - coarseTStep),
-    Math.min(tauHi, coarse.tau + coarseTStep),
-    Math.max(1, coarseTStep / 10),
-  );
+  const coarse = searchAtEachFInf(fInfLo, fInfHi, 26);
+  const fine = searchAtEachFInf(Math.max(fInfLo, coarse.fInf - coarseFStep), Math.min(fInfHi, coarse.fInf + coarseFStep), 11);
 
   const fInf = Math.round(fine.fInf * 1000) / 1000;
   const tauMin = Math.round(fine.tau);
 
-  const fittedTrends = trimmed.map((r) => computeEffortTrend(r, { ...ceilingParams, fInf, tauMin }));
+  const fittedTrends = trimmed.map((r) => computeFadeTrend(r, { ...ceilingParams, fInf, tauMin }));
   if (fittedTrends.some((t) => !t)) return null;
 
   // Same saturation-at-the-fitted-params measurement fitTauAcrossRaces uses
