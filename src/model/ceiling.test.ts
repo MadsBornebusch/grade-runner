@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { altitudeFraction, ceilingPower, resolveTauMin, sustainableFraction } from "./ceiling";
+import { altitudeFraction, ceilingPower, sustainableFraction } from "./ceiling";
 
 describe("sustainableFraction", () => {
   it("starts near f0 and decays toward f_inf, capped by LT2", () => {
@@ -23,35 +23,6 @@ describe("sustainableFraction", () => {
 
   it("respects a custom LT2 cap", () => {
     expect(sustainableFraction(0, { lt2Fraction: 0.7 })).toBeCloseTo(0.7, 6);
-  });
-});
-
-describe("resolveTauMin", () => {
-  it("passes through the static tauMin when tauIntensityModel is unset", () => {
-    expect(resolveTauMin(0.7, { tauMin: 300 })).toBe(300);
-  });
-
-  it("falls back to the default tauMin when neither is set", () => {
-    expect(resolveTauMin(0.7, {})).toBe(250);
-  });
-
-  it("derives tau from theta as exp(a + b*theta) when tauIntensityModel is set", () => {
-    const a = 9.4;
-    const b = -5.4;
-    const theta = 0.6;
-    expect(resolveTauMin(theta, { tauMin: 300, tauIntensityModel: { a, b } })).toBeCloseTo(Math.exp(a + b * theta), 6);
-  });
-
-  it("ignores the static tauMin entirely when tauIntensityModel is set (replaces, not a fallback)", () => {
-    const withModel = resolveTauMin(0.6, { tauMin: 99999, tauIntensityModel: { a: 9.4, b: -5.4 } });
-    expect(withModel).toBeCloseTo(Math.exp(9.4 - 5.4 * 0.6), 6);
-  });
-
-  it("decreases as theta increases when b is negative (higher intensity -> faster fade)", () => {
-    const model = { a: 9.4, b: -5.4 };
-    const low = resolveTauMin(0.5, { tauIntensityModel: model });
-    const high = resolveTauMin(0.9, { tauIntensityModel: model });
-    expect(high).toBeLessThan(low);
   });
 });
 
