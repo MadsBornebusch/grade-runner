@@ -13,6 +13,7 @@ import {
   fitFInfAndTauAcrossRaces,
   fitTauAcrossRaces,
   fitTauFInfWithSupportGate,
+  fitTauIntensityModelAcrossRaces,
   fitTauMinutes,
   suggestFitImprovements,
   trimForPacingFit,
@@ -302,6 +303,69 @@ describe("fitFInfAndTauAcrossRaces", () => {
     expect(result!.perRace[0].unresponsive).toBe(true); // the 1h race can't leave the cap at tau~300
     expect(result!.informativeRaceCount).toBe(result!.perRace.filter((r) => !r.unresponsive).length);
     expect(result!.informativeRaceCount).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("fitTauIntensityModelAcrossRaces", () => {
+  const baseParams: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, f0: 0.94, fInf: 0.64 };
+  const trueA = 9.4;
+  const trueB = -5.4;
+
+  /** Builds one synthetic race per intensity: true tau follows
+   * exp(trueA + trueB*x), duration in minutes set equal to that race's own
+   * true tau (matching the identifiability lesson from this session's real-
+   * data investigation -- duration comparable to tau is what makes a solo
+   * tau fit well-constrained; duration wildly larger or smaller than tau
+   * isn't), and actual power held at exactly x*ceiling so avgIntensity
+   * recovers x self-consistently once tau is correctly fit. */
+  function makeIntensityRaces(intensities: number[]) {
+    return intensities.map((x) => {
+      const trueTauMin = Math.exp(trueA + trueB * x);
+      const totalHours = trueTauMin / 60;
+      return makeConstantEffortPoints({ ...baseParams, tauMin: trueTauMin }, totalHours, 5, x);
+    });
+  }
+
+  it("recovers approximately the true (a, b) from races at genuinely different intensities", () => {
+    const races = makeIntensityRaces([0.55, 0.62, 0.68, 0.74, 0.8, 0.86, 0.92]);
+    const result = fitTauIntensityModelAcrossRaces(races, baseParams);
+    expect(result).not.toBeNull();
+    expect(result!.a).toBeGreaterThan(trueA - 1);
+    expect(result!.a).toBeLessThan(trueA + 1);
+    expect(result!.b).toBeGreaterThan(trueB - 1.5);
+    expect(result!.b).toBeLessThan(trueB + 1.5);
+    expect(result!.r2).toBeGreaterThan(0.9); // clean synthetic data, should fit tightly
+    expect(result!.informativeRaceCount).toBe(races.length);
+  });
+
+  it("the fitted model predicts a smaller tau at higher intensity (b < 0)", () => {
+    const races = makeIntensityRaces([0.55, 0.65, 0.75, 0.85]);
+    const result = fitTauIntensityModelAcrossRaces(races, baseParams);
+    expect(result).not.toBeNull();
+    expect(result!.b).toBeLessThan(0);
+  });
+
+  it("returns null when fewer than minRaces have a usable solo tau fit", () => {
+    const tooShort = makeConstantEffortPoints(baseParams, 0.1, 1, 0.7);
+    const result = fitTauIntensityModelAcrossRaces([tooShort], baseParams);
+    expect(result).toBeNull();
+  });
+
+  it("skips a race whose solo tau fit hits a search boundary, and still fits from the rest", () => {
+    const races = makeIntensityRaces([0.55, 0.65, 0.75]);
+    // A race whose duration is wildly mismatched to any true tau in this
+    // model's range -- its solo fit should hit the search boundary and get
+    // excluded, same reasoning as raceDiagnosticPoint.ts's own gate.
+    const boundaryHitRace = makeConstantEffortPoints({ ...baseParams, tauMin: 5000 }, 2, 5, 0.6);
+    const result = fitTauIntensityModelAcrossRaces([...races, boundaryHitRace], baseParams);
+    expect(result).not.toBeNull();
+    expect(result!.informativeRaceCount).toBe(races.length);
+  });
+
+  it("respects a custom minRaces option", () => {
+    const races = makeIntensityRaces([0.6, 0.7]);
+    expect(fitTauIntensityModelAcrossRaces(races, baseParams, { minRaces: 3 })).toBeNull();
+    expect(fitTauIntensityModelAcrossRaces(races, baseParams, { minRaces: 2 })).not.toBeNull();
   });
 });
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CourseSegment } from "../gpx/pipeline";
+import { ceilingPower, resolveTauMin } from "./ceiling";
 import { findSustainableTheta, simulate, type SolverInputs } from "./solver";
 
 function makeSegments(n: number, segLenM: number, gradient: number): CourseSegment[] {
@@ -186,6 +187,125 @@ describe("findSustainableTheta", () => {
     // At a theta well clear of the near-zero stall region, confirm the
     // failure is specifically an immediate bonk, not a stall.
     expect(simulate(0.3, impossible).bonkIndex).toBe(0);
+  });
+
+  describe("tauIntensityModel (PLAN.md §12 Q2 follow-up)", () => {
+    // Rolling +-8% grade, generous fueling so the aerobic ceiling (not fuel)
+    // is what's actually being searched.
+    function undulatingCourse(totalKm: number, segmentM = 100): CourseSegment[] {
+      const segments: CourseSegment[] = [];
+      let cumulative = 0;
+      let elevation = 500;
+      const totalM = totalKm * 1000;
+      let index = 0;
+      for (let d = 0; d < totalM; d += segmentM) {
+        const gradient = 0.08 * Math.sin((2 * Math.PI * d) / 2000) + 0.005;
+        const distance3D = segmentM * Math.sqrt(1 + gradient * gradient);
+        elevation += gradient * segmentM;
+        cumulative += distance3D;
+        segments.push({
+          index,
+          cumulativeDistance3D: cumulative,
+          distanceHorizontal: segmentM,
+          distance3D,
+          elevation,
+          gradient,
+          time: null,
+          dtS: null,
+          paused: false,
+          heartRateBpm: null,
+          powerWatts: null,
+        });
+        index++;
+      }
+      return segments;
+    }
+
+    // This athlete's real fit coefficients, calibrated at fInf=0.64 (NOT
+    // ceiling.ts's default 0.38) -- MUST be paired with that same fInf, or
+    // this reproduces the exact mismatched-pair bug the tau/fInf auto-apply
+    // fix (RunLibraryPanel.tsx) already had to fix once: tau and intensity
+    // are both computed relative to the ceiling shape, so applying
+    // coefficients fit at one fInf against a different fInf changes how much
+    // decay headroom the curve actually has. Empirically (checked directly
+    // across 10-300km), THIS pair keeps finish time monotonic in theta at
+    // every distance tried -- the smaller f0-fInf gap at fInf=0.64 (0.30,
+    // vs 0.56 at the default 0.38) limits how much a shrinking tau can hurt
+    // late-race pace. That's a real, useful fact about this athlete's
+    // current fit, not a general guarantee -- a future re-fit with a
+    // steeper b or a lower fInf could still produce an interior minimum,
+    // which is exactly why findSustainableTheta searches for one instead of
+    // assuming the boundary is always optimal.
+    const REAL_TAU_INTENSITY_MODEL = { a: 9.393, b: -5.425 };
+    const REAL_FINF = 0.64;
+
+    // Deliberately steeper/lower-fInf than the real fit above -- constructed
+    // specifically to produce a genuine interior finish-time minimum (not a
+    // claim about this athlete), so the golden-section mechanism itself has
+    // something to actually find in these tests.
+    const STEEP_TAU_INTENSITY_MODEL = { a: 10.9288, b: -6.487 };
+    const STEEP_FINF = 0.38;
+
+    function longCourseInputs(tauIntensityModel: { a: number; b: number }, fInf: number): SolverInputs {
+      return baseInputs({
+        segments: undulatingCourse(100),
+        fueling: { intakeGPerH: 90 },
+        glycogenStoreG: 3000, // generous -- isolates the aerobic-ceiling effect
+        ceilingParams: { fInf, tauIntensityModel },
+      });
+    }
+
+    it("with this athlete's real (fInf=0.64) fit, stays near the max-feasible boundary (empirically monotonic here)", () => {
+      const inputs = longCourseInputs(REAL_TAU_INTENSITY_MODEL, REAL_FINF);
+      const { theta, result } = findSustainableTheta(inputs);
+      expect(result.feasible).toBe(true);
+      expect(theta).toBeGreaterThan(0.95);
+    });
+
+    it("with a steeper hypothetical fit, picks an interior theta below the max-feasible boundary", () => {
+      const inputs = longCourseInputs(STEEP_TAU_INTENSITY_MODEL, STEEP_FINF);
+      const { theta, result } = findSustainableTheta(inputs);
+      expect(result.feasible).toBe(true);
+      // theta=1 (or anything close to it) is still "feasible" here (fueling
+      // is generous) -- with this steeper coupling, finish time gets WORSE
+      // well before infeasibility, so the answer should sit meaningfully
+      // below the ceiling of what's merely feasible.
+      expect(theta).toBeLessThan(0.85);
+      expect(theta).toBeGreaterThan(0.4);
+    });
+
+    it("with a steeper hypothetical fit, the chosen theta actually beats both a much higher and a much lower theta on finish time", () => {
+      const inputs = longCourseInputs(STEEP_TAU_INTENSITY_MODEL, STEEP_FINF);
+      const { theta, result } = findSustainableTheta(inputs);
+      const higher = simulate(Math.min(theta + 0.15, 0.99), inputs);
+      const lower = simulate(Math.max(theta - 0.15, 0.06), inputs);
+      expect(result.finishTimeS).toBeLessThan(higher.finishTimeS);
+      expect(result.finishTimeS).toBeLessThan(lower.finishTimeS);
+    });
+
+    it("without tauIntensityModel, behavior is unchanged (still bisects to max-feasible)", () => {
+      const inputs = baseInputs(); // flat 10km, generous fueling, static tau
+      const { theta } = findSustainableTheta(inputs);
+      expect(theta).toBe(1);
+    });
+
+    it("with a steeper hypothetical fit, resolves a smaller tau (faster fade) at a higher theta, and the late-race ceiling collapses further as a result", () => {
+      // Direct check on the coupling itself (not observed speed, which can
+      // be capped by the walk-speed ceiling for unrelated reasons): a higher
+      // theta resolves to a smaller tau, so several hours in, the gross
+      // aerobic ceiling should have decayed further at the higher theta --
+      // this is the mechanism that makes the finish-time curve non-monotonic
+      // in this scenario.
+      const ceilingParams = { fInf: STEEP_FINF, tauIntensityModel: STEEP_TAU_INTENSITY_MODEL };
+      const lowTau = resolveTauMin(0.5, ceilingParams);
+      const highTau = resolveTauMin(0.85, ceilingParams);
+      expect(highTau).toBeLessThan(lowTau);
+
+      const lateElapsedMin = 300; // several hours in
+      const lowThetaLateCeiling = ceilingPower({ tMin: lateElapsedMin }, { ...ceilingParams, tauMin: lowTau });
+      const highThetaLateCeiling = ceilingPower({ tMin: lateElapsedMin }, { ...ceilingParams, tauMin: highTau });
+      expect(highThetaLateCeiling).toBeLessThan(lowThetaLateCeiling);
+    });
   });
 });
 

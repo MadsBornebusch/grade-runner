@@ -6,7 +6,7 @@
 import type { CourseSegment } from "../gpx/pipeline";
 import { costOfRunning, costOfWalking, maxDescentSpeedMs } from "./minetti";
 import { grossToNet, netToGross } from "./energetics";
-import { type CeilingParams, ceilingPower, maxAerobicPower } from "./ceiling";
+import { type CeilingParams, ceilingPower, maxAerobicPower, resolveTauMin } from "./ceiling";
 import type { DescentExposureBasis } from "./pacingFit";
 import {
   type FuelingParams,
@@ -84,6 +84,12 @@ export function simulate(theta: number, inputs: SolverInputs): SimulationResult 
   const reserveG = inputs.reserveG ?? DEFAULT_RESERVE_G;
   const walkMaxMs = inputs.walkMaxMs ?? DEFAULT_WALK_MAX_MS;
   const useAltitude = inputs.altitudeAdjustment ?? true;
+  // Resolved once per simulation, not per segment: with a static tauMin this
+  // is a no-op passthrough; with tauIntensityModel set, theta IS this
+  // simulation's race-average intensity by construction (it's the single
+  // effort fraction the whole course is paced at), so tau is derived from it
+  // here rather than depending on a per-segment quantity.
+  const ceilingParams: CeilingParams = { ...inputs.ceilingParams, tauMin: resolveTauMin(theta, inputs.ceilingParams) };
 
   let glycogen = { glycogenG: inputs.glycogenStoreG };
   let cumulativeTimeS = 0;
@@ -122,7 +128,7 @@ export function simulate(theta: number, inputs: SolverInputs): SimulationResult 
 
     const ceilingGross = ceilingPower(
       { tMin: elapsedMin, altitudeM, elapsedHours, ...(descentExposure !== undefined ? { descentExposure } : {}) },
-      inputs.ceilingParams,
+      ceilingParams,
     );
     const targetNet = Math.max(0, grossToNet(theta * ceilingGross));
 
@@ -232,6 +238,7 @@ export function findSustainableTheta(
   const lo0 = opts.lo ?? 0.05;
   const iterations = opts.iterations ?? 30;
   const scanSteps = opts.scanSteps ?? 20;
+  const hasIntensityModel = inputs.ceilingParams?.tauIntensityModel !== undefined;
 
   const distanceReached = (result: SimulationResult): number =>
     result.segments.length > 0
@@ -239,7 +246,12 @@ export function findSustainableTheta(
       : 0;
 
   const hiResult = simulate(hi0, inputs);
-  if (hiResult.feasible) return { theta: hi0, result: hiResult };
+  // With a static tau, max-feasible-theta is always the fastest feasible
+  // plan (see doc comment above), so theta=1 feasible means nothing can beat
+  // it -- return immediately. That shortcut does NOT hold with
+  // tauIntensityModel (a lower theta can finish faster there -- see
+  // resolveTauMin's doc in ceiling.ts), so it's gated to the static case.
+  if (hiResult.feasible && !hasIntensityModel) return { theta: hi0, result: hiResult };
 
   // If no theta is feasible anywhere (checked below), report whichever
   // attempt got furthest before failing -- a real bonk point -- rather than
@@ -248,6 +260,10 @@ export function findSustainableTheta(
   let furthestTheta = hi0;
   let furthestResult = hiResult;
 
+  // Tracks the FIRST feasible sample seen (as opposed to bestFeasibleTheta
+  // below, which tracks the latest/highest) -- only used by the
+  // tauIntensityModel path, as the low end of the golden-section bracket.
+  let firstFeasibleTheta: number | null = null;
   let bestFeasibleTheta: number | null = null;
   let bestFeasibleResult: SimulationResult | null = null;
   let hi = hi0;
@@ -259,6 +275,7 @@ export function findSustainableTheta(
       furthestResult = result;
     }
     if (result.feasible) {
+      if (firstFeasibleTheta === null) firstFeasibleTheta = theta;
       bestFeasibleTheta = theta;
       bestFeasibleResult = result;
     } else if (bestFeasibleTheta !== null) {
@@ -284,5 +301,59 @@ export function findSustainableTheta(
       hi = mid;
     }
   }
+
+  // lo/best now hold the largest feasible theta and its result -- the
+  // answer, with a static tau (feasibility monotonic, finish time
+  // monotonically decreasing across the feasible range, so its upper edge
+  // is fastest). With tauIntensityModel, finish time is unimodal instead: a
+  // higher theta raises the target power AND shrinks tau, and past some
+  // point the resulting late-race fade costs more time than the higher
+  // target gains (confirmed empirically across multiple course lengths --
+  // see PLAN.md's tau-intensity design notes). Search the now-established
+  // feasible bracket for the theta that actually minimizes finish time,
+  // rather than returning its upper edge.
+  if (hasIntensityModel) {
+    return goldenSectionMinimizeFinishTime(inputs, firstFeasibleTheta ?? lo0, lo);
+  }
   return { theta: lo, result: best };
+}
+
+const GOLDEN_SECTION_RATIO = (Math.sqrt(5) - 1) / 2;
+const GOLDEN_SECTION_ITERATIONS = 40;
+
+/**
+ * Golden-section search for the theta minimizing finish time over a bracket
+ * whose endpoints are already known feasible -- assumes the finish-time-vs-
+ * theta curve is unimodal there (single interior minimum, or monotonic to
+ * one edge), which is what tauIntensityModel's coupling produces (verified
+ * directly, not just assumed -- see findSustainableTheta's doc comment).
+ * Not valid for an arbitrary multi-modal objective; only used on this one
+ * bracket because that assumption already held up against direct testing.
+ */
+function goldenSectionMinimizeFinishTime(inputs: SolverInputs, lo0: number, hi0: number): SolverResult {
+  const finishOrInf = (result: SimulationResult): number => (result.feasible ? result.finishTimeS : Infinity);
+
+  let a = lo0;
+  let b = hi0;
+  let c = b - GOLDEN_SECTION_RATIO * (b - a);
+  let d = a + GOLDEN_SECTION_RATIO * (b - a);
+  let resultC = simulate(c, inputs);
+  let resultD = simulate(d, inputs);
+
+  for (let i = 0; i < GOLDEN_SECTION_ITERATIONS; i++) {
+    if (finishOrInf(resultC) < finishOrInf(resultD)) {
+      b = d;
+      d = c;
+      resultD = resultC;
+      c = b - GOLDEN_SECTION_RATIO * (b - a);
+      resultC = simulate(c, inputs);
+    } else {
+      a = c;
+      c = d;
+      resultC = resultD;
+      d = a + GOLDEN_SECTION_RATIO * (b - a);
+      resultD = simulate(d, inputs);
+    }
+  }
+  return finishOrInf(resultC) <= finishOrInf(resultD) ? { theta: c, result: resultC } : { theta: d, result: resultD };
 }

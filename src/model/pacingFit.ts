@@ -252,6 +252,106 @@ export function fitTauMinutes(
   };
 }
 
+export interface TauIntensityRacePoint {
+  tauMin: number;
+  /** Duration-weighted average of grossPower/ceiling across the WHOLE race
+   * (not just the trimmed fitting window), evaluated self-consistently at
+   * this race's own fitted tauMin -- same convention raceDiagnosticPoint.ts
+   * already uses for its avgIntensity field. */
+  avgIntensity: number;
+}
+
+export interface TauIntensityFitResult {
+  /** ln(tau) = a + b*intensity -- log-linear, not linear, because tau spans
+   * orders of magnitude across this athlete's races while intensity spans a
+   * modest linear range (0-1); confirmed empirically that log-linear fits
+   * this athlete's own data clearly better than a raw linear tau~intensity
+   * regression (R2 ~0.64 vs a much weaker raw fit). */
+  a: number;
+  b: number;
+  r2: number;
+  informativeRaceCount: number;
+  perRace: TauIntensityRacePoint[];
+}
+
+/** Duration-weighted average of grossPower/ceiling across every point in a
+ * race, at a given (already resolved) tauMin -- the "how hard did this race
+ * actually feel relative to what the model says was sustainable" figure,
+ * mirroring raceDiagnosticPoint.ts's avgIntensity but computed directly from
+ * EffortTrendPoint[] so this fit can share pacingFit.ts's existing
+ * `races: EffortTrendPoint[][]` calling convention instead of requiring a
+ * full course/analysis pipeline. */
+function avgIntensityFromTrendPoints(points: EffortTrendPoint[], ceilingParams: CeilingParams): number {
+  let sumW = 0;
+  let sumWX = 0;
+  for (const p of points) {
+    const ceiling = ceilingPower({ tMin: p.tHours * 60, altitudeM: p.altitudeM, elapsedHours: p.tHours }, ceilingParams);
+    if (ceiling <= 0) continue;
+    sumW += p.dtS;
+    sumWX += p.dtS * (p.grossPowerWPerKg / ceiling);
+  }
+  return sumW > 0 ? sumWX / sumW : 0;
+}
+
+/**
+ * PLAN.md §12 Q2 follow-up: fits tau as a log-linear function of each
+ * race's own average intensity, across races -- rather than one pooled
+ * scalar tau. For each race: fit its own solo tau (skipped if that fit hits
+ * a search boundary -- an unreliable tau makes its intensity reading
+ * unreliable too, same reasoning as raceDiagnosticPoint.ts), then compute
+ * that race's avgIntensity self-consistently against its own fitted tau
+ * (not a pooled/global one -- see raceDiagnosticPoint.ts's own doc on why
+ * that confound matters). Regresses ln(tauMin) on avgIntensity via
+ * unweighted OLS (small N here -- no strong basis yet for weighting races
+ * differently). Returns null below minRaces, mirroring the same
+ * MIN_INFORMATIVE_RACES bar the tau-only and joint fInf/tau fits use.
+ *
+ * IMPORTANT: must be called with the SAME fInf (and f0/lt2Fraction) the
+ * model will actually run with -- both tauMin and avgIntensity are computed
+ * relative to the ceiling shape in ceilingParams, so fitting this at one
+ * fInf and applying it at another reproduces the exact mismatched-pair
+ * problem the tau/fInf auto-apply fix (RunLibraryPanel.tsx) already had to
+ * fix once (confirmed empirically: refitting this at fInf=0.64 instead of
+ * the 0.38 default changed which races were even usable, 10 -> 15, and
+ * moved the fit coefficients).
+ */
+export function fitTauIntensityModelAcrossRaces(
+  races: EffortTrendPoint[][],
+  ceilingParams: CeilingParams,
+  opts: { minRaces?: number } = {},
+): TauIntensityFitResult | null {
+  const points: TauIntensityRacePoint[] = [];
+  for (const race of races) {
+    const soloFit = fitTauMinutes(race, ceilingParams);
+    if (!soloFit || soloFit.hitSearchBoundary) continue;
+    const avgIntensity = avgIntensityFromTrendPoints(race, { ...ceilingParams, tauMin: soloFit.tauMin });
+    points.push({ tauMin: soloFit.tauMin, avgIntensity });
+  }
+
+  const minRaces = opts.minRaces ?? MIN_INFORMATIVE_RACES;
+  if (points.length < minRaces) return null;
+
+  const xs = points.map((p) => p.avgIntensity);
+  const ys = points.map((p) => Math.log(p.tauMin));
+  const n = xs.length;
+  const mx = xs.reduce((s, x) => s + x, 0) / n;
+  const my = ys.reduce((s, y) => s + y, 0) / n;
+  let sxy = 0;
+  let sxx = 0;
+  let syy = 0;
+  for (let i = 0; i < n; i++) {
+    sxy += (xs[i] - mx) * (ys[i] - my);
+    sxx += (xs[i] - mx) ** 2;
+    syy += (ys[i] - my) ** 2;
+  }
+  if (sxx <= 0) return null;
+  const b = sxy / sxx;
+  const a = my - b * mx;
+  const r2 = syy > 0 ? (sxy * sxy) / (sxx * syy) : 0;
+
+  return { a, b, r2, informativeRaceCount: points.length, perRace: points };
+}
+
 /** Below this fractional drop in the modeled ceiling across a race's own
  * trimmed window (at the fitted tau), the race is treated as having had no
  * say in the result -- see MultiRaceTauFitResult.perRace's doc. Chosen from

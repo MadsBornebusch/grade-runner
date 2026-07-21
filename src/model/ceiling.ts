@@ -26,9 +26,24 @@ export interface CeilingParams {
    * together, or either can be used alone.
    */
   durabilityDriftPerDescentUnit?: number;
+  /**
+   * PLAN.md §12 Q2 follow-up: tau as a function of race intensity rather
+   * than one fixed scalar, fit as `ln(tau) = a + b*theta` across races of
+   * varying average effort (harder relative efforts fade faster in this
+   * athlete's own data -- log-linear because tau spans orders of magnitude
+   * while intensity spans a modest linear range). When set, this REPLACES
+   * tauMin above: solver.ts resolves the actual tauMin to use from theta
+   * (Planning mode, where theta IS the race's intensity by construction) or
+   * from a self-consistent estimated intensity (Analysis mode). Undefined
+   * (the default) means tau stays a fixed scalar, exactly as before this
+   * existed. See resolveTauMin below.
+   */
+  tauIntensityModel?: { a: number; b: number };
 }
 
-const DEFAULTS: Required<CeilingParams> = {
+// tauIntensityModel has no sensible scalar default (undefined/absent IS its
+// default, opt-in state) -- excluded here rather than given a placeholder.
+const DEFAULTS: Required<Omit<CeilingParams, "tauIntensityModel">> = {
   vo2MaxMlPerKgPerMin: 50,
   lt2Fraction: 0.85,
   f0: 0.94,
@@ -95,6 +110,23 @@ export function maxAerobicPower(
   const merged = { ...DEFAULTS, ...params };
   const availableVo2 = altitudeFraction(altitudeM) * merged.vo2MaxMlPerKgPerMin;
   return vo2ToPower(availableVo2, O2_ENERGY_EQUIVALENT_CARB_KJ_PER_L);
+}
+
+/**
+ * Resolves the tauMin to actually use at a given intensity (theta, 0-1
+ * fraction of ceiling): `exp(a + b*theta)` when tauIntensityModel is set,
+ * else the fixed tauMin/default -- callers (solver.ts, analysis.ts) call
+ * this once per simulation/analysis at the intensity relevant to that run,
+ * then use the resolved value for every ceilingPower call within it. Kept
+ * separate from ceilingPower itself so that function's per-segment hot path
+ * doesn't need to know theta at all -- callers resolve once, not per segment.
+ */
+export function resolveTauMin(theta: number, params: CeilingParams = {}): number {
+  if (params.tauIntensityModel) {
+    const { a, b } = params.tauIntensityModel;
+    return Math.exp(a + b * theta);
+  }
+  return params.tauMin ?? DEFAULTS.tauMin;
 }
 
 /**
