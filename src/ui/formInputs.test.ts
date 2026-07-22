@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   equivalentLT1LT2,
+  resolveHrZones,
   resolveSubstrateAnchors,
   resolveVo2Max,
   speedFromMs,
@@ -166,5 +167,54 @@ describe("speedFromMs / speedToMs", () => {
   it("is identity for m/s", () => {
     expect(speedFromMs(2.0, "ms")).toBe(2.0);
     expect(speedToMs(2.0, "ms")).toBe(2.0);
+  });
+});
+
+describe("resolveHrZones", () => {
+  it("returns null when no model is configured", () => {
+    expect(resolveHrZones({ hrZoneModel: null, maxHrBpm: null, restHrBpm: null, thresholdHrBpm: null, customHrZones: null })).toBeNull();
+  });
+
+  it("computes %HRmax zones as straight fractions of max", () => {
+    const zones = resolveHrZones({ hrZoneModel: "hrmax", maxHrBpm: 190, restHrBpm: null, thresholdHrBpm: null, customHrZones: null });
+    expect(zones).not.toBeNull();
+    expect(zones).toHaveLength(5);
+    expect(zones![0]).toEqual({ label: "Zone 1", loBpm: 95, hiBpm: 114 });
+    expect(zones![4]).toEqual({ label: "Zone 5", loBpm: 171, hiBpm: 190 });
+  });
+
+  it("returns null for %HRmax when maxHrBpm isn't set", () => {
+    expect(resolveHrZones({ hrZoneModel: "hrmax", maxHrBpm: null, restHrBpm: null, thresholdHrBpm: null, customHrZones: null })).toBeNull();
+  });
+
+  it("computes %HRR (Karvonen) zones relative to rest, not zero", () => {
+    const zones = resolveHrZones({ hrZoneModel: "hrr", maxHrBpm: 190, restHrBpm: 50, thresholdHrBpm: null, customHrZones: null });
+    expect(zones).not.toBeNull();
+    // Zone 1: 50 + 0.5*(190-50) = 120, hi: 50 + 0.6*140 = 134
+    expect(zones![0].loBpm).toBeCloseTo(120, 6);
+    expect(zones![0].hiBpm).toBeCloseTo(134, 6);
+  });
+
+  it("returns null for %HRR when either maxHrBpm or restHrBpm is missing", () => {
+    expect(resolveHrZones({ hrZoneModel: "hrr", maxHrBpm: 190, restHrBpm: null, thresholdHrBpm: null, customHrZones: null })).toBeNull();
+    expect(resolveHrZones({ hrZoneModel: "hrr", maxHrBpm: null, restHrBpm: 50, thresholdHrBpm: null, customHrZones: null })).toBeNull();
+  });
+
+  it("computes %LTHR zones relative to threshold, with 6 zones spanning below and above it", () => {
+    const zones = resolveHrZones({ hrZoneModel: "lthr", maxHrBpm: null, restHrBpm: null, thresholdHrBpm: 170, customHrZones: null });
+    expect(zones).not.toBeNull();
+    expect(zones).toHaveLength(6);
+    // Zone 3 (90-94% of threshold) should straddle the threshold-adjacent middle.
+    expect(zones![2].loBpm).toBeCloseTo(170 * 0.89, 6);
+    expect(zones![2].hiBpm).toBeCloseTo(170 * 0.94, 6);
+  });
+
+  it("returns customHrZones as-is for the custom model", () => {
+    const custom = [{ label: "Easy", loBpm: 100, hiBpm: 140 }];
+    expect(resolveHrZones({ hrZoneModel: "custom", maxHrBpm: null, restHrBpm: null, thresholdHrBpm: null, customHrZones: custom })).toBe(custom);
+  });
+
+  it("returns null for custom when no zones have been entered yet", () => {
+    expect(resolveHrZones({ hrZoneModel: "custom", maxHrBpm: null, restHrBpm: null, thresholdHrBpm: null, customHrZones: null })).toBeNull();
   });
 });

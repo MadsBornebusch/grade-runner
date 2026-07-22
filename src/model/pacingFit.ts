@@ -47,6 +47,12 @@ export interface EffortTrendPoint {
    * only needs to know whether *this* segment itself was unpaved.
    */
   surfaceUnpaved?: boolean;
+  /** Recorded heart rate at this segment, if the source GPX had it (see
+   * gpx/pipeline.ts's CourseSegment.heartRateBpm) -- undefined if this run
+   * has no HR data at all. See hrCalibration.ts's own doc for why this is
+   * reference data for most fits in this file but the one thing
+   * fitHrToEffortCalibrationAcrossRaces actually regresses against. */
+  heartRateBpm?: number;
 }
 
 /**
@@ -102,6 +108,7 @@ export function buildEffortTrendPoints(
       cumulativeDescentImpact: cumulativeDescent[s.index]?.impact ?? 0,
       cumulativeDescentImpactSquared: cumulativeDescent[s.index]?.impactSquared ?? 0,
       surfaceUnpaved: courseSegments[s.index]?.surfaceUnpaved,
+      heartRateBpm: courseSegments[s.index]?.heartRateBpm ?? undefined,
     }));
 }
 

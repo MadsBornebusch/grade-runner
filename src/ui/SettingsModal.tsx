@@ -13,6 +13,7 @@ interface SettingsModalProps {
   onApplyTau: (tauMin: number) => void;
   onApplyFInf: (fInf: number) => void;
   onApplyUnpavedCostMultiplier: (unpavedCostMultiplier: number) => void;
+  onApplyHrCalibration: (slope: number, intercept: number) => void;
   onAddVo2MaxEntry: (entry: Vo2MaxEntry) => void;
   onRacesFitted: (races: EffortTrendPoint[][], raceDates: (Date | null)[]) => void;
 }
@@ -34,6 +35,7 @@ export function SettingsModal({
   onApplyTau,
   onApplyFInf,
   onApplyUnpavedCostMultiplier,
+  onApplyHrCalibration,
   onAddVo2MaxEntry,
   onRacesFitted,
 }: SettingsModalProps) {
@@ -74,6 +76,7 @@ export function SettingsModal({
             onApplyTau={onApplyTau}
             onApplyFInf={onApplyFInf}
             onApplyUnpavedCostMultiplier={onApplyUnpavedCostMultiplier}
+            onApplyHrCalibration={onApplyHrCalibration}
             onAddVo2MaxEntry={onAddVo2MaxEntry}
             onRacesFitted={onRacesFitted}
           />

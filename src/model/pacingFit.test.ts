@@ -984,3 +984,47 @@ describe("buildEffortTrendPoints -- surfaceUnpaved field", () => {
     expect(points.every((p) => p.surfaceUnpaved === undefined)).toBe(true);
   });
 });
+
+describe("buildEffortTrendPoints -- heartRateBpm field", () => {
+  const params: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, f0: 0.94, fInf: 0.38, tauMin: 250 };
+  const analysisInputs = {
+    bodyMassKg: 70,
+    ceilingParams: params,
+    fueling: { intakeGPerH: 60 },
+    glycogenStoreG: 500,
+  };
+
+  function hrTestSegments(hr: (number | null)[]): CourseSegment[] {
+    let cumulativeDistance3D = 0;
+    return hr.map((heartRateBpm, index) => {
+      cumulativeDistance3D += 100;
+      return {
+        index,
+        cumulativeDistance3D,
+        distanceHorizontal: 100,
+        distance3D: 100,
+        elevation: 0,
+        gradient: 0,
+        time: null,
+        dtS: 60,
+        paused: false,
+        heartRateBpm,
+        powerWatts: null,
+      };
+    });
+  }
+
+  it("carries each segment's own recorded heart rate through directly", () => {
+    const segments = hrTestSegments([140, 145, 150]);
+    const analysis = analyzeRun(segments, analysisInputs);
+    const points = buildEffortTrendPoints(segments, analysis.segments, false);
+    expect(points.map((p) => p.heartRateBpm)).toEqual([140, 145, 150]);
+  });
+
+  it("leaves heartRateBpm undefined (not null) when the course has no HR data at all", () => {
+    const segments = hrTestSegments([null, null, null]);
+    const analysis = analyzeRun(segments, analysisInputs);
+    const points = buildEffortTrendPoints(segments, analysis.segments, false);
+    expect(points.every((p) => p.heartRateBpm === undefined)).toBe(true);
+  });
+});

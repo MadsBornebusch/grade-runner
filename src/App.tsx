@@ -3,6 +3,8 @@ import type { GpxPoint } from "./gpx/pipeline";
 import { rawCourseStats, runPipeline } from "./gpx/pipeline";
 import { findSustainableTheta, type SolverInputs } from "./model/solver";
 import { analyzeRun, type AnalysisInputs } from "./model/analysis";
+import { ceilingPower } from "./model/ceiling";
+import { predictEffortFractionFromHr } from "./model/hrCalibration";
 import { attachSurfaceData, type ValhallaSurfaceEdge } from "./model/surfaceExposure";
 import { fetchSurfaceEdges } from "./ui/surfaceLookup";
 import { GpxUpload } from "./ui/GpxUpload";
@@ -250,14 +252,35 @@ function App() {
     () =>
       analysisResult?.segments.map((s, i) => {
         const seg = courseResult?.segments[s.index];
+        const heartRateBpm = seg?.heartRateBpm ?? null;
+        let calibratedPowerW: number | null = null;
+        if (
+          heartRateBpm !== null &&
+          formInputs.hrEffortCalibrationSlope !== null &&
+          formInputs.hrEffortCalibrationIntercept !== null &&
+          analysisInputs?.ceilingParams
+        ) {
+          const tHours = (s.cumulativeElapsedTimeS - s.timeS) / 3600;
+          const altitudeM = formInputs.altitudeAdjustment ? (seg?.elevation ?? 0) : 0;
+          const ceiling = ceilingPower({ tMin: tHours * 60, altitudeM, elapsedHours: tHours }, analysisInputs.ceilingParams);
+          const effortFraction = predictEffortFractionFromHr(heartRateBpm, {
+            slope: formInputs.hrEffortCalibrationSlope,
+            intercept: formInputs.hrEffortCalibrationIntercept,
+            rSquared: 0,
+            pointCount: 0,
+            raceCount: 0,
+          });
+          if (ceiling > 0) calibratedPowerW = effortFraction * ceiling * formInputs.bodyMassKg;
+        }
         return {
           distanceKm: analysisChartPoints[i]?.distanceKm ?? 0,
           measuredPowerW: seg?.powerWatts ?? null,
           modeledPowerW: s.grossPowerWPerKg * formInputs.bodyMassKg,
-          heartRateBpm: seg?.heartRateBpm ?? null,
+          heartRateBpm,
+          calibratedPowerW,
         };
       }) ?? [],
-    [analysisResult, courseResult, analysisChartPoints, formInputs.bodyMassKg],
+    [analysisResult, courseResult, analysisInputs, analysisChartPoints, formInputs],
   );
 
   const pacingFitPoints = useMemo(() => {
@@ -399,6 +422,11 @@ function App() {
                                 points={powerHrPoints}
                                 hasPower={courseResult.hasPower}
                                 hasHeartRate={courseResult.hasHeartRate}
+                                hasCalibratedPower={
+                                  courseResult.hasHeartRate &&
+                                  formInputs.hrEffortCalibrationSlope !== null &&
+                                  formInputs.hrEffortCalibrationIntercept !== null
+                                }
                               />
                             )}
                             {analysisInputs && (
@@ -434,6 +462,9 @@ function App() {
         onApplyTau={(tauMin) => setFormInputs({ ...formInputs, tauMin })}
         onApplyFInf={(fInf) => setFormInputs({ ...formInputs, fInf })}
         onApplyUnpavedCostMultiplier={(unpavedCostMultiplier) => setFormInputs({ ...formInputs, unpavedCostMultiplier })}
+        onApplyHrCalibration={(hrEffortCalibrationSlope, hrEffortCalibrationIntercept) =>
+          setFormInputs({ ...formInputs, hrEffortCalibrationSlope, hrEffortCalibrationIntercept })
+        }
         onAddVo2MaxEntry={(entry: Vo2MaxEntry) =>
           setFormInputs({ ...formInputs, vo2MaxHistory: [...formInputs.vo2MaxHistory, entry] })
         }

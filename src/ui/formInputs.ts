@@ -62,6 +62,27 @@ export interface FormInputs {
    * CeilingParams field -- threaded directly into SolverInputs/AnalysisInputs,
    * since it's a cost-of-locomotion effect, not an aerobic-ceiling one. */
   unpavedCostMultiplier: number;
+  /** Heart rate zone display config (PLAN.md §11 stage 4) -- reference/
+   * display only, like lt1/lt2HeartRateBpm above: this app's ceiling model
+   * is power/pace-based, not HR-based, and these zones aren't fed into any
+   * calculation. null model = not configured, so Settings shows no zone
+   * table yet. */
+  hrZoneModel: "hrmax" | "hrr" | "lthr" | "custom" | null;
+  maxHrBpm: number | null;
+  /** Resting HR, only used by the %HRR (Karvonen) model. */
+  restHrBpm: number | null;
+  /** Threshold HR, only used by the %LTHR model. */
+  thresholdHrBpm: number | null;
+  /** User-defined zone boundaries, only used by the "custom" model. */
+  customHrZones: { label: string; loBpm: number; hiBpm: number }[] | null;
+  /** Fitted HR-to-effort-fraction linear mapping (PLAN.md §11 stage 3) --
+   * both null together means not yet fit/applied. Unlike the zones above,
+   * this DOES feed a calculation (predictEffortFractionFromHr in
+   * hrCalibration.ts) -- but only where a caller explicitly asks for an
+   * HR-derived effort estimate; it never overrides the pace-derived
+   * grossPowerWPerKg every other calculation already uses. */
+  hrEffortCalibrationSlope: number | null;
+  hrEffortCalibrationIntercept: number | null;
   segmentLengthM: number;
   smoothingWindowM: number;
   /** Measured (pace, fat-oxidation) points. Non-empty overrides LT1/LT2 for the fuel/substrate split. */
@@ -103,6 +124,13 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   altitudeAdjustment: true,
   durabilityDriftPerHour: 0,
   unpavedCostMultiplier: 1,
+  hrZoneModel: null,
+  maxHrBpm: null,
+  restHrBpm: null,
+  thresholdHrBpm: null,
+  customHrZones: null,
+  hrEffortCalibrationSlope: null,
+  hrEffortCalibrationIntercept: null,
   segmentLengthM: 50,
   smoothingWindowM: 150,
   fatOxPoints: [],
@@ -150,6 +178,75 @@ export function saveFormInputs(inputs: FormInputs): void {
 /** Total glycogen store in grams, from the per-kg figure the UI collects. */
 export function resolveGlycogenStoreG(inputs: Pick<FormInputs, "glycogenGPerKg" | "bodyMassKg">): number {
   return inputs.glycogenGPerKg * inputs.bodyMassKg;
+}
+
+export interface HrZone {
+  label: string;
+  loBpm: number;
+  hiBpm: number;
+}
+
+/** Standard 5-zone %HRmax/%HRR breakpoints (a common, widely-used scheme --
+ * see PLAN.md §11's own sources). %HRR (Karvonen) applies the same
+ * percentages via `restHrBpm + pct*(maxHrBpm - restHrBpm)` instead of a
+ * plain fraction of max. */
+const HRMAX_HRR_ZONE_BREAKPOINTS: { label: string; loPct: number; hiPct: number }[] = [
+  { label: "Zone 1", loPct: 0.5, hiPct: 0.6 },
+  { label: "Zone 2", loPct: 0.6, hiPct: 0.7 },
+  { label: "Zone 3", loPct: 0.7, hiPct: 0.8 },
+  { label: "Zone 4", loPct: 0.8, hiPct: 0.9 },
+  { label: "Zone 5", loPct: 0.9, hiPct: 1.0 },
+];
+
+/** Garmin's own %LTHR zone scheme (PLAN.md §11 cites this directly). The
+ * two open-ended zones (below Z1, above Z6) are given a floor/ceiling here
+ * (70% / 115% of threshold) purely so every zone has a concrete bpm range
+ * to display -- not a claim those exact numbers are physiologically
+ * significant the way the threshold-relative breakpoints are. */
+const LTHR_ZONE_BREAKPOINTS: { label: string; loPct: number; hiPct: number }[] = [
+  { label: "Zone 1", loPct: 0.7, hiPct: 0.85 },
+  { label: "Zone 2", loPct: 0.85, hiPct: 0.89 },
+  { label: "Zone 3", loPct: 0.89, hiPct: 0.94 },
+  { label: "Zone 4", loPct: 0.94, hiPct: 0.99 },
+  { label: "Zone 5", loPct: 0.99, hiPct: 1.02 },
+  { label: "Zone 6", loPct: 1.02, hiPct: 1.15 },
+];
+
+/**
+ * Resolves the current HR zone boundaries for display (PLAN.md §11 stage
+ * 4) -- reference only, like the rest of this app's HR handling; nothing
+ * here feeds ceiling or substrate calculations. Returns null when the
+ * selected model's required inputs aren't set yet, so the UI can show
+ * "not configured" rather than a table of zeros.
+ */
+export function resolveHrZones(
+  inputs: Pick<FormInputs, "hrZoneModel" | "maxHrBpm" | "restHrBpm" | "thresholdHrBpm" | "customHrZones">,
+): HrZone[] | null {
+  switch (inputs.hrZoneModel) {
+    case "hrmax": {
+      if (inputs.maxHrBpm === null) return null;
+      const max = inputs.maxHrBpm;
+      return HRMAX_HRR_ZONE_BREAKPOINTS.map((z) => ({ label: z.label, loBpm: z.loPct * max, hiBpm: z.hiPct * max }));
+    }
+    case "hrr": {
+      if (inputs.maxHrBpm === null || inputs.restHrBpm === null) return null;
+      const { maxHrBpm: max, restHrBpm: rest } = inputs;
+      return HRMAX_HRR_ZONE_BREAKPOINTS.map((z) => ({
+        label: z.label,
+        loBpm: rest + z.loPct * (max - rest),
+        hiBpm: rest + z.hiPct * (max - rest),
+      }));
+    }
+    case "lthr": {
+      if (inputs.thresholdHrBpm === null) return null;
+      const threshold = inputs.thresholdHrBpm;
+      return LTHR_ZONE_BREAKPOINTS.map((z) => ({ label: z.label, loBpm: z.loPct * threshold, hiBpm: z.hiPct * threshold }));
+    }
+    case "custom":
+      return inputs.customHrZones;
+    case null:
+      return null;
+  }
 }
 
 /** Derives the substrate logistic anchors (x0, k) from LT1/LT2, per PLAN.md §5. */

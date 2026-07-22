@@ -8,12 +8,22 @@ export interface PowerHrPoint {
   measuredPowerW: number | null;
   modeledPowerW: number;
   heartRateBpm: number | null;
+  /** HR-derived power estimate via the athlete's own fitted HR-effort
+   * calibration (PLAN.md §11 stage 3), or null if no calibration is applied
+   * yet or this point has no HR reading. Same units/scale as modeledPowerW
+   * (both are gross power derived from an effort fraction × ceiling), so
+   * comparing the two directly is meaningful -- unlike measuredPowerW. */
+  calibratedPowerW: number | null;
 }
 
 interface PowerHrChartProps {
   points: PowerHrPoint[];
   hasPower: boolean;
   hasHeartRate: boolean;
+  /** True when an HR-effort calibration is applied AND this course has HR
+   * data -- both conditions `calibratedPowerW` on individual points already
+   * depends on, precomputed by the caller like hasPower/hasHeartRate. */
+  hasCalibratedPower: boolean;
 }
 
 const HEIGHT = 280;
@@ -30,7 +40,7 @@ const HEIGHT = 280;
  * axis so what's actually comparable is whether they RISE AND FALL together
  * (same shape), not whether they land on the same numbers.
  */
-export function PowerHrChart({ points, hasPower, hasHeartRate }: PowerHrChartProps) {
+export function PowerHrChart({ points, hasPower, hasHeartRate, hasCalibratedPower }: PowerHrChartProps) {
   const [containerRef, width] = useContainerWidth<HTMLDivElement>();
   const data = downsample(points, 800);
   const { startIndex, endIndex, isZoomed, domain, onBrushChange, reset } = useDomainZoom(data);
@@ -50,6 +60,8 @@ export function PowerHrChart({ points, hasPower, hasHeartRate }: PowerHrChartPro
           ? "Modeled power (dashed) comes purely from speed + gradient via the Minetti cost curve. If your device measured power (solid), note it's on its own axis: a footpod's \"power\" (e.g. Stryd) correlates with metabolic power but isn't the same quantity or scale -- a multi-fold gap is normal. What's worth looking at is whether the two rise and fall together, not whether they match numerically."
           : "This device didn't record power, so only the model's own speed/gradient-based estimate is shown."}
         {hasHeartRate && " Heart rate drifting upward while power/pace doesn't is a classic sign of accumulating fatigue."}
+        {hasCalibratedPower &&
+          " The dotted line is an independent, HR-derived effort estimate from your own fitted HR-effort calibration -- if it tracks modeled power early in the race and diverges later, that's cardiac drift showing up exactly where expected, not a sign the calibration is wrong."}
       </p>
       <div className="chart__canvas" ref={containerRef}>
         {width > 0 && (
@@ -106,6 +118,20 @@ export function PowerHrChart({ points, hasPower, hasHeartRate }: PowerHrChartPro
               strokeWidth={1.5}
               isAnimationActive={false}
             />
+            {hasCalibratedPower && (
+              <Line
+                yAxisId="modeledPower"
+                type="monotone"
+                dataKey="calibratedPowerW"
+                name="HR-calibrated power"
+                stroke="#3b82f6"
+                strokeDasharray="2 2"
+                dot={false}
+                strokeWidth={1.5}
+                isAnimationActive={false}
+                connectNulls
+              />
+            )}
             {hasHeartRate && (
               <Line
                 yAxisId="hr"

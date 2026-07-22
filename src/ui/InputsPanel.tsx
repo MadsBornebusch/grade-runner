@@ -7,6 +7,7 @@ import {
   rateFromGPerMin,
   rateToGPerMin,
   resolveGlycogenStoreG,
+  resolveHrZones,
   resolveVo2Max,
   speedFromMs,
   speedToMs,
@@ -14,6 +15,7 @@ import {
   type FatOxPoint,
   type FatOxRateUnit,
   type FormInputs,
+  type HrZone,
   type Vo2MaxEntry,
   type Vo2MaxSource,
   type WalkSpeedUnit,
@@ -381,6 +383,56 @@ function LtThresholdField({
   );
 }
 
+interface CustomHrZoneRowProps {
+  zone: HrZone;
+  onChange: (patch: Partial<HrZone>) => void;
+  onRemove: () => void;
+}
+
+function CustomHrZoneRow({ zone, onChange, onRemove }: CustomHrZoneRowProps) {
+  const loField = useNumberField(zone.loBpm, (v) => onChange({ loBpm: v }));
+  const hiField = useNumberField(zone.hiBpm, (v) => onChange({ hiBpm: v }));
+  return (
+    <div className="vo2max-row">
+      <input
+        type="text"
+        value={zone.label}
+        onChange={(e) => onChange({ label: e.target.value })}
+        aria-label="Zone label"
+      />
+      <input type="number" step={1} min={0} {...loField} aria-label="Low bpm" />
+      <span className="fatox-row__unit">–</span>
+      <input type="number" step={1} min={0} {...hiField} aria-label="High bpm" />
+      <span className="fatox-row__unit">bpm</span>
+      <button type="button" className="fatox-row__remove" onClick={onRemove} aria-label="Remove zone">
+        &times;
+      </button>
+    </div>
+  );
+}
+
+interface CustomHrZoneRowsProps {
+  zones: HrZone[];
+  onChange: (zones: HrZone[]) => void;
+}
+
+function CustomHrZoneRows({ zones, onChange }: CustomHrZoneRowsProps) {
+  const update = (i: number, patch: Partial<HrZone>) => onChange(zones.map((z, idx) => (idx === i ? { ...z, ...patch } : z)));
+  const remove = (i: number) => onChange(zones.filter((_, idx) => idx !== i));
+  const add = () => onChange([...zones, { label: `Zone ${zones.length + 1}`, loBpm: 100, hiBpm: 140 }]);
+
+  return (
+    <div className="fatox-rows">
+      {zones.map((zone, i) => (
+        <CustomHrZoneRow key={i} zone={zone} onChange={(patch) => update(i, patch)} onRemove={() => remove(i)} />
+      ))}
+      <button type="button" className="fatox-add" onClick={add}>
+        + Add zone
+      </button>
+    </div>
+  );
+}
+
 /** Athlete physiology, fueling, pacing fade, and walk/run settings (Page 2). */
 export function AthleteFields({ values, onChange }: FieldsProps) {
   const set = <K extends keyof FormInputs>(key: K, value: FormInputs[K]) =>
@@ -388,6 +440,7 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
 
   const usingFatOxCurve = values.fatOxPoints.length > 0;
   const equivalentThresholds = useMemo(() => equivalentLT1LT2(values), [values]);
+  const hrZones = useMemo(() => resolveHrZones(values), [values]);
 
   return (
     <div className="inputs-panel">
@@ -597,6 +650,70 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
             onChange={(v) => set("unpavedCostMultiplier", v)}
           />
         </details>
+      </fieldset>
+
+      <fieldset>
+        <legend>Heart rate zones</legend>
+        <p className="field-group-help">
+          Reference/display only -- this app's ceiling model is power/pace-based, not HR-based, so these zone
+          boundaries aren't fed into any calculation (the HR-effort calibration below is the one place HR actually
+          drives a number, and it's kept separate from these zones).
+        </p>
+        <label className="field">
+          <span className="field__label">Zone model</span>
+          <select
+            value={values.hrZoneModel ?? ""}
+            onChange={(e) => set("hrZoneModel", (e.target.value || null) as FormInputs["hrZoneModel"])}
+          >
+            <option value="">Not configured</option>
+            <option value="hrmax">% of max HR</option>
+            <option value="hrr">% heart rate reserve (Karvonen)</option>
+            <option value="lthr">% of threshold HR</option>
+            <option value="custom">Custom boundaries</option>
+          </select>
+        </label>
+        {(values.hrZoneModel === "hrmax" || values.hrZoneModel === "hrr") && (
+          <NumberField
+            label="Max HR"
+            hint="bpm"
+            value={values.maxHrBpm ?? 0}
+            step={1}
+            min={0}
+            onChange={(v) => set("maxHrBpm", v > 0 ? v : null)}
+          />
+        )}
+        {values.hrZoneModel === "hrr" && (
+          <NumberField
+            label="Resting HR"
+            hint="bpm"
+            value={values.restHrBpm ?? 0}
+            step={1}
+            min={0}
+            onChange={(v) => set("restHrBpm", v > 0 ? v : null)}
+          />
+        )}
+        {values.hrZoneModel === "lthr" && (
+          <NumberField
+            label="Threshold HR"
+            hint="bpm"
+            value={values.thresholdHrBpm ?? 0}
+            step={1}
+            min={0}
+            onChange={(v) => set("thresholdHrBpm", v > 0 ? v : null)}
+          />
+        )}
+        {values.hrZoneModel === "custom" && (
+          <CustomHrZoneRows zones={values.customHrZones ?? []} onChange={(customHrZones) => set("customHrZones", customHrZones)} />
+        )}
+        {hrZones && (
+          <ul className="run-library__fit-notes">
+            {hrZones.map((z, i) => (
+              <li key={i} className="field-group-note">
+                {z.label}: {z.loBpm.toFixed(0)}–{z.hiBpm.toFixed(0)} bpm
+              </li>
+            ))}
+          </ul>
+        )}
       </fieldset>
 
       <fieldset>

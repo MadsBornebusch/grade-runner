@@ -21,6 +21,7 @@ import { suggestRunsForFit } from "../model/suggestRuns";
 import { dedupeStoredRuns } from "../model/dedupeRuns";
 import { attachSurfaceData } from "../model/surfaceExposure";
 import { splitAtTransitGaps } from "../gpx/transitGap";
+import { fitHrToEffortCalibrationAcrossRaces, type HrEffortCalibration } from "../model/hrCalibration";
 import { filterRunsSinceDate, shouldFetchNextBackfillPage, toStoredRunSummaryInput, type BackfillPage } from "../model/stravaBackfill";
 import { computeTauDiagnostic, type RaceDiagnosticPoint } from "../model/tauDiagnostic";
 import { buildRaceDiagnosticPoint } from "../model/raceDiagnosticPoint";
@@ -51,6 +52,7 @@ interface RunLibraryPanelProps {
   onApplyTau: (tauMin: number) => void;
   onApplyFInf: (fInf: number) => void;
   onApplyUnpavedCostMultiplier: (unpavedCostMultiplier: number) => void;
+  onApplyHrCalibration: (slope: number, intercept: number) => void;
   onAddVo2MaxEntry: (entry: Vo2MaxEntry) => void;
   /** Reports the races/raceDates behind the just-completed fit up to the
    * parent -- lets the Results tab's finish-time-range feature reuse the
@@ -67,6 +69,12 @@ const DEFAULT_HALF_LIFE_DAYS = 75;
 /** Only the strongest few estimates are shown -- see vo2MaxEstimates below
  * for why sorting by estimate descending is itself the intensity filter. */
 const MAX_VO2MAX_ESTIMATES_SHOWN = 3;
+
+/** A starting heuristic, not a tuned optimum -- at least half the variance
+ * in this athlete's effort explained by HR alone before auto-applying the
+ * HR-effort calibration. Below this, HR just isn't a reliable enough proxy
+ * to trust automatically (still shown, and still manually applicable). */
+const MIN_HR_CALIBRATION_R_SQUARED = 0.5;
 
 function oneYearAgoDateInput(): string {
   const d = new Date();
@@ -127,6 +135,7 @@ export function RunLibraryPanel({
   onApplyTau,
   onApplyFInf,
   onApplyUnpavedCostMultiplier,
+  onApplyHrCalibration,
   onAddVo2MaxEntry,
   onRacesFitted,
 }: RunLibraryPanelProps) {
@@ -138,6 +147,7 @@ export function RunLibraryPanel({
   const [unpavedCostMultiplierFitResult, setUnpavedCostMultiplierFitResult] = useState<MultiRaceUnpavedCostMultiplierResult | null>(
     null,
   );
+  const [hrCalibrationFitResult, setHrCalibrationFitResult] = useState<HrEffortCalibration | null>(null);
   const [safeFitTier, setSafeFitTier] = useState<SafeFitResult["tier"] | null>(null);
   const [fitRan, setFitRan] = useState(false);
   const [fitting, setFitting] = useState(false);
@@ -224,6 +234,7 @@ export function RunLibraryPanel({
       setFitResult(null);
       setFInfFitResult(null);
       setUnpavedCostMultiplierFitResult(null);
+      setHrCalibrationFitResult(null);
       setTransitGapCount(0);
       setFitRan(false);
       setDeselectedSuggestionIds(new Set());
@@ -467,6 +478,21 @@ export function RunLibraryPanel({
       setUnpavedCostMultiplierFitResult(multiplierFit);
       if (multiplierFit && multiplierFit.informativeRaceCount >= MIN_INFORMATIVE_RACES && !multiplierFit.hitSearchBoundary) {
         onApplyUnpavedCostMultiplier(multiplierFit.unpavedCostMultiplier);
+      }
+
+      // HR-to-effort calibration (PLAN.md §11 stage 3): pools (HR, effort)
+      // points across the same races, restricted internally to each race's
+      // own early/low-drift window. Cheap (no solver simulation needed,
+      // unlike the multiplier fit above) -- operates on the same trend
+      // points already built for tau/fInf. Auto-apply is gated on rSquared,
+      // not just point count (already enforced inside the fit itself) --
+      // a low rSquared is a legitimate result (HR may just not track this
+      // athlete's effort well), not a reason to lower the bar until it
+      // passes.
+      const hrCalibrationFit = fitHrToEffortCalibrationAcrossRaces(races, safeFit.ceilingParams, { raceDates, halfLifeDays });
+      setHrCalibrationFitResult(hrCalibrationFit);
+      if (hrCalibrationFit && hrCalibrationFit.rSquared >= MIN_HR_CALIBRATION_R_SQUARED) {
+        onApplyHrCalibration(hrCalibrationFit.slope, hrCalibrationFit.intercept);
       }
       // Auto-apply once fitTauFInfWithSupportGate picks a well-supported,
       // internally-consistent (fInf, tau) pair -- so "select a date, click
@@ -930,6 +956,44 @@ export function RunLibraryPanel({
               it as a bound, not a precise value.
             </p>
           )}
+        </div>
+      )}
+
+      {hrCalibrationFitResult && (
+        <div className="run-library__experimental-fit">
+          <p className="field-group-note">HR-effort calibration (PLAN.md §11)</p>
+          <p className="field-group-help">
+            A per-athlete mapping from heart rate to effort fraction, fit from the early (roughly first 65%) portion
+            of each race where cardiac drift is smallest -- HR climbing at constant true output from rising core
+            temperature/dehydration, not increased intensity, typically 10-15bpm over a long aerobic effort and worse
+            in heat. Doesn't feed pace/power-based predictions at all; it exists so a heart-rate reading can be
+            converted to an effort estimate wherever that's useful (e.g. the Power &amp; HR chart in Analysis mode).
+          </p>
+          <p className="field-group-note">
+            Best fit: effort fraction ≈ {hrCalibrationFitResult.intercept.toFixed(3)} +{" "}
+            {hrCalibrationFitResult.slope.toFixed(4)} × heart rate, R² = {hrCalibrationFitResult.rSquared.toFixed(2)},
+            from {hrCalibrationFitResult.pointCount} points across {hrCalibrationFitResult.raceCount} run
+            {hrCalibrationFitResult.raceCount === 1 ? "" : "s"}.
+          </p>
+          {hrCalibrationFitResult.rSquared < MIN_HR_CALIBRATION_R_SQUARED && (
+            <p className="warning">
+              R² is below {MIN_HR_CALIBRATION_R_SQUARED.toFixed(1)} -- heart rate doesn't track this athlete's effort
+              very reliably yet (or this is too little/noisy data). Not a bug: some athletes' HR just isn't a strong
+              effort proxy. Treat this calibration with real caution, or gather more runs with HR data.
+            </p>
+          )}
+          <button
+            type="button"
+            className="fatox-add"
+            onClick={() => onApplyHrCalibration(hrCalibrationFitResult.slope, hrCalibrationFitResult.intercept)}
+          >
+            Apply calibration
+          </button>
+          <p className="field-group-note">
+            {hrCalibrationFitResult.rSquared >= MIN_HR_CALIBRATION_R_SQUARED
+              ? "Applied automatically -- R² cleared the bar for trusting HR as an effort proxy for this athlete."
+              : "Not applied automatically -- see the note above; you can still apply it manually if you trust it."}
+          </p>
         </div>
       )}
 
