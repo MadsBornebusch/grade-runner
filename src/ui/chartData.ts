@@ -10,6 +10,11 @@ export interface ChartPoint {
   mode: "run" | "walk";
   glycogenG: number;
   cumulativeTimeS: number;
+  /** Undefined when no surface classification is available for this point
+   * at all (see CourseSegment.surfaceUnpaved's own doc) -- distinct from
+   * false ("known paved"), so a course with no surface data doesn't render
+   * as if it were entirely paved. */
+  surfaceUnpaved?: boolean;
 }
 
 /** Merges solver output back with the original course segments (for
@@ -28,6 +33,7 @@ export function buildChartPoints(
       mode: r.mode,
       glycogenG: r.glycogenG,
       cumulativeTimeS: r.cumulativeTimeS,
+      surfaceUnpaved: seg?.surfaceUnpaved,
     };
   });
 }
@@ -51,6 +57,7 @@ export function buildAnalysisChartPoints(
       mode: r.speedMs <= walkMaxMs ? "walk" : "run",
       glycogenG: r.glycogenG,
       cumulativeTimeS: r.cumulativeElapsedTimeS,
+      surfaceUnpaved: seg?.surfaceUnpaved,
     };
   });
 }

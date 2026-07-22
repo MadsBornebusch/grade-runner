@@ -475,6 +475,16 @@
   cursor: pointer;
 }
 
+.elevation-chart__legend-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  background: var(--terrain-bg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
 .chart__canvas {
   width: 100%;
   /* Recharts re-renders (and can replace) the Brush's internal SVG nodes on

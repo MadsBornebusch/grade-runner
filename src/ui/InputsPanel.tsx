@@ -570,6 +570,36 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
       </fieldset>
 
       <fieldset>
+        <legend>Terrain surface cost</legend>
+        <p className="field-group-help">
+          Unpaved/technical trail costs more to move across than pavement at the same gradient -- this multiplies
+          the running/walking cost curve while actually on unpaved terrain, with no carryover once you're back on
+          pavement. Found from fitting your own past runs with surface data below (see the Strava/fit section)
+          whenever that fit clears its own quality bar, or left at 1 (no effect) otherwise.
+        </p>
+        <p className="field-group-note">
+          Current: {values.unpavedCostMultiplier.toFixed(2)}x (
+          {((values.unpavedCostMultiplier - 1) * 100).toFixed(0)}% slower on unpaved terrain).
+        </p>
+        <details>
+          <summary>Advanced: override manually</summary>
+          <p className="field-group-help">
+            Only change this if you know how much slower you personally move on technical terrain and don't want to
+            rely on the fit below.
+          </p>
+          <NumberField
+            label="Cost multiplier"
+            hint="e.g. 1.5 = 50% slower on unpaved"
+            value={values.unpavedCostMultiplier}
+            step={0.05}
+            min={1}
+            max={4}
+            onChange={(v) => set("unpavedCostMultiplier", v)}
+          />
+        </details>
+      </fieldset>
+
+      <fieldset>
         <legend>Walk / run</legend>
         <p className="field-group-help">
           There's no fixed grade where everyone switches to walking — it falls out of the model naturally: running

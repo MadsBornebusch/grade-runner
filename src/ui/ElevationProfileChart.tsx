@@ -1,4 +1,4 @@
-import { Area, Brush, CartesianGrid, ComposedChart, Line, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, Brush, CartesianGrid, ComposedChart, Line, ReferenceArea, Tooltip, XAxis, YAxis } from "recharts";
 import type { ChartPoint } from "./chartData";
 import { downsample } from "./downsample";
 import { formatPace } from "./format";
@@ -11,6 +11,29 @@ interface ElevationProfileChartProps {
 
 const HEIGHT = 280;
 
+/** Merges consecutive unpaved points into contiguous [startKm, endKm] bands
+ * -- one ReferenceArea per real stretch of unpaved terrain, not one per
+ * point (which would be hundreds of overlapping shaded slivers). Returns
+ * `null` (not an empty array) when no point in this course carries a
+ * surface classification at all, distinct from "classified and entirely
+ * paved" -- callers should skip the whole overlay+legend for a course with
+ * no surface data, not render it as if it were 0% unpaved. */
+function computeUnpavedBands(data: ChartPoint[]): { startKm: number; endKm: number }[] | null {
+  if (!data.some((p) => p.surfaceUnpaved !== undefined)) return null;
+  const bands: { startKm: number; endKm: number }[] = [];
+  let bandStartKm: number | null = null;
+  for (const p of data) {
+    if (p.surfaceUnpaved) {
+      if (bandStartKm === null) bandStartKm = p.distanceKm;
+    } else if (bandStartKm !== null) {
+      bands.push({ startKm: bandStartKm, endKm: p.distanceKm });
+      bandStartKm = null;
+    }
+  }
+  if (bandStartKm !== null) bands.push({ startKm: bandStartKm, endKm: data[data.length - 1].distanceKm });
+  return bands;
+}
+
 export function ElevationProfileChart({ points }: ElevationProfileChartProps) {
   const [containerRef, width] = useContainerWidth<HTMLDivElement>();
   const data = downsample(points, 800).map((p) => ({
@@ -18,6 +41,8 @@ export function ElevationProfileChart({ points }: ElevationProfileChartProps) {
     paceMinPerKm: p.speedMs > 0 ? 1000 / p.speedMs / 60 : null,
   }));
   const { startIndex, endIndex, isZoomed, domain, onBrushChange, reset } = useDomainZoom(data);
+  const unpavedBands = computeUnpavedBands(data);
+  const unpavedFraction = unpavedBands ? data.filter((p) => p.surfaceUnpaved).length / data.length : null;
 
   return (
     <div className="chart">
@@ -29,6 +54,12 @@ export function ElevationProfileChart({ points }: ElevationProfileChartProps) {
           </button>
         )}
       </div>
+      {unpavedFraction !== null && (
+        <p className="field-group-note">
+          <span className="elevation-chart__legend-swatch" /> unpaved/technical terrain --{" "}
+          {(unpavedFraction * 100).toFixed(0)}% of this course.
+        </p>
+      )}
       {/* isAnimationActive=false: Recharts otherwise sweeps the series in via
           an animated clip-path, which reads as a truncated chart if you
           glance at it (or screenshot it) before the ~1.5s animation finishes. */}
@@ -49,6 +80,17 @@ export function ElevationProfileChart({ points }: ElevationProfileChartProps) {
               tickFormatter={(v: number) => v.toFixed(0)}
               label={{ value: "km", position: "insideBottomRight", offset: -4 }}
             />
+            {unpavedBands?.map((band) => (
+              <ReferenceArea
+                key={band.startKm}
+                yAxisId="elevation"
+                x1={band.startKm}
+                x2={band.endKm}
+                fill="var(--terrain-bg)"
+                stroke="none"
+                ifOverflow="hidden"
+              />
+            ))}
             <YAxis yAxisId="elevation" label={{ value: "m", angle: -90, position: "insideLeft" }} />
             <YAxis
               yAxisId="pace"
