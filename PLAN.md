@@ -786,6 +786,34 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    hundreds of rows or risking Strava's rate limit. See
    `src/model/stravaBackfill.ts`, `src/model/suggestRuns.ts`,
    `RunLibraryPanel.tsx`.
+
+   **Bug found and fixed (2026-07-22): the durability bar above only
+   gated which summary-only runs were worth fetching, not which
+   already-fetched runs actually fed the pooled fits.** Once a run had
+   full GPS points -- whether fetched via a suggestion, backfilled
+   directly, or uploaded manually -- it unconditionally joined every
+   pooled fit (tau, fInf, the terrain multiplier, the HR calibration), no
+   matter how short. Reported by the user: with 24 stored runs (mostly
+   short daily training runs alongside a handful of genuine long races),
+   the joint fit landed on an implausible fInf 0.74/tau 85min, and the
+   terrain-multiplier backtest showed wildly inconsistent per-run errors
+   (several runs' fitted-multiplier error *worse* than baseline by 20-30
+   points). The existing "unresponsive" flag catches this only after the
+   fact, as a diagnostic -- it doesn't stop short, noisy runs from
+   distorting the search itself; enough near-flat short runs pooled
+   alongside a few long races can pull tau toward a spuriously small
+   value that trivially "fits" the short runs' near-zero slope without
+   reflecting real fatigue-decay behavior. Fixed by exporting
+   `DURABILITY_MIN_DURATION_S` from `suggestRuns.ts` and applying the
+   same 1-hour bar inside `RunLibraryPanel.tsx`'s `runFit()`, filtering
+   the shared per-run loop that feeds every pooled fit -- not just the
+   fetch-suggestion step. Verified on a real mixed pool (4 real long
+   races + 15 real 30-60min training runs): before the fix this is
+   exactly the scenario that produced spurious results; after, "Left out
+   15 runs under 60 minutes" is reported and the joint fit lands back on
+   fInf 0.68/tau 297min, matching the same 4-race-only result validated
+   earlier in stage 6 and PLAN.md §11. A new UI note reports how many
+   runs were excluded this way, mirroring the existing transit-gap note.
 2. **Time-decay weighting in the tau fit — built.** `fitTauAcrossRaces` takes
    an optional `{raceDates, halfLifeDays, now}`; each race's contribution to
    the pooled objective decays by `exp(-ln2*daysAgo/halfLifeDays)`, default
