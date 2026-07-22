@@ -32,6 +32,36 @@ function makeHrRace(
   return points;
 }
 
+/** Builds a race where HR follows a slow-varying underlying effort signal
+ * (as physiology predicts -- HR responds to sustained effort, not brief
+ * blips), but recorded power has large, independent, zero-mean, high-
+ * frequency (alternating segment-to-segment) noise layered on top of that
+ * same slow signal -- representing short terrain-driven fluctuations HR
+ * doesn't track. Used to check that smoothing power before regressing
+ * against HR recovers the true relationship despite that noise -- a raw
+ * point-by-point comparison would be swamped by it. */
+function makeHrRaceWithPowerNoise(
+  totalHours: number,
+  trueSlope: number,
+  trueIntercept: number,
+  powerNoiseAmplitude: number,
+  stepMinutes = 1,
+): EffortTrendPoint[] {
+  const stepHours = stepMinutes / 60;
+  const points: EffortTrendPoint[] = [];
+  let i = 0;
+  for (let t = 0.1; t < totalHours; t += stepHours, i++) {
+    // Slow-varying (few-cycles-per-race) underlying effort -- this is what HR tracks.
+    const slowEffortFraction = 0.6 + 0.1 * Math.sin((2 * Math.PI * t) / (totalHours / 3));
+    const ceiling = ceilingPower({ tMin: t * 60, altitudeM: 0, elapsedHours: t }, baseParams);
+    const noisyEffortFraction = slowEffortFraction + (i % 2 === 0 ? powerNoiseAmplitude : -powerNoiseAmplitude);
+    const grossPowerWPerKg = noisyEffortFraction * ceiling;
+    const heartRateBpm = (slowEffortFraction - trueIntercept) / trueSlope;
+    points.push({ tHours: t, grossPowerWPerKg, altitudeM: 0, dtS: stepMinutes * 60, heartRateBpm });
+  }
+  return points;
+}
+
 describe("fitHrToEffortCalibrationAcrossRaces", () => {
   it("recovers a known slope/intercept from synthetic noiseless data", () => {
     // effortFraction = 0.002*hr - 0.2, e.g. hr=140 -> 0.08... use a
@@ -97,6 +127,23 @@ describe("fitHrToEffortCalibrationAcrossRaces", () => {
 
   it("returns null for an empty race list", () => {
     expect(fitHrToEffortCalibrationAcrossRaces([], baseParams)).toBeNull();
+  });
+
+  it("recovers the true slope through large high-frequency power noise HR doesn't track -- the smoothing this fit relies on", () => {
+    // Real-data check (see this file's header doc) found smoothing power
+    // over a trailing ~60-90s window before regressing against HR
+    // substantially improves R² -- this is the synthetic proof that
+    // smoothing is actually doing that job, not just a real-data artifact.
+    // Noise amplitude (±0.5) is huge relative to the ±0.1 true signal --
+    // a raw point-by-point regression would be dominated by it.
+    const trueSlope = 0.01;
+    const trueIntercept = -1.0;
+    const race = makeHrRaceWithPowerNoise(4, trueSlope, trueIntercept, 0.5, 0.25);
+    const result = fitHrToEffortCalibrationAcrossRaces([race], baseParams);
+    expect(result).not.toBeNull();
+    expect(result!.slope).toBeGreaterThan(0); // recovers the right sign/rough scale despite the noise
+    expect(result!.slope).toBeLessThan(trueSlope * 3);
+    expect(result!.rSquared).toBeGreaterThan(0.3); // would be near 0 without smoothing at this noise level
   });
 });
 
