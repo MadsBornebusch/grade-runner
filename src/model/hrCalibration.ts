@@ -188,3 +188,14 @@ export function fitHrToEffortCalibrationAcrossRaces(
 export function predictEffortFractionFromHr(heartRateBpm: number, calibration: HrEffortCalibration): number {
   return calibration.intercept + calibration.slope * heartRateBpm;
 }
+
+/** Inverse of predictEffortFractionFromHr -- estimates the heart rate this
+ * athlete would likely show at a given effort fraction, for a Planning-mode
+ * course where there's no recorded HR yet to work from (see
+ * chartData.ts's ChartPoint.estimatedHeartRateBpm). Same caveats as the
+ * calibration itself: a rough, athlete-specific estimate, not a guarantee --
+ * cardiac drift means it should read low for effort sustained deep into a
+ * long race, and this doesn't attempt to model that. */
+export function predictHeartRateFromEffortFraction(effortFraction: number, calibration: HrEffortCalibration): number {
+  return (effortFraction - calibration.intercept) / calibration.slope;
+}

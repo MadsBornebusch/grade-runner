@@ -9,6 +9,7 @@ interface SplitTableProps {
 
 export function SplitTable({ points, splitLengthKm = 5 }: SplitTableProps) {
   const splits = computeSplits(points, splitLengthKm);
+  const hasHrEstimate = splits.some((s) => s.avgEstimatedHeartRateBpm !== null);
 
   return (
     <div className="split-table">
@@ -20,6 +21,7 @@ export function SplitTable({ points, splitLengthKm = 5 }: SplitTableProps) {
             <th>Mode</th>
             <th>+/- (m)</th>
             <th>Pace</th>
+            {hasHrEstimate && <th>Est. HR</th>}
             <th>Split time</th>
             <th>Cumulative</th>
           </tr>
@@ -35,6 +37,7 @@ export function SplitTable({ points, splitLengthKm = 5 }: SplitTableProps) {
                 +{s.elevationGainM.toFixed(0)} / -{s.elevationLossM.toFixed(0)}
               </td>
               <td>{formatPace(s.avgSpeedMs)}</td>
+              {hasHrEstimate && <td>{s.avgEstimatedHeartRateBpm !== null ? `${s.avgEstimatedHeartRateBpm.toFixed(0)} bpm` : "—"}</td>}
               <td>{formatDuration(s.timeS)}</td>
               <td>{formatDuration(s.cumulativeTimeS)}</td>
             </tr>

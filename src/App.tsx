@@ -24,7 +24,7 @@ import { buildEffortTrendPoints, type EffortTrendPoint } from "./model/pacingFit
 import { SplitTable } from "./ui/SplitTable";
 import { ResultsSummary } from "./ui/ResultsSummary";
 import { AnalysisSummary } from "./ui/AnalysisSummary";
-import { buildAnalysisChartPoints, buildChartPoints } from "./ui/chartData";
+import { buildAnalysisChartPoints, buildChartPoints, type HrEstimateInputs } from "./ui/chartData";
 import {
   loadFormInputs,
   resolveCeilingParams,
@@ -172,10 +172,28 @@ function App() {
     return rest;
   }, [solverInputs]);
 
+  // Shared by both chart-point builders below -- undefined (not applied)
+  // whenever no HR-effort calibration has been fit yet, so estimated HR
+  // simply doesn't appear rather than showing a meaningless number.
+  const hrEstimateInputs = useMemo<HrEstimateInputs | undefined>(() => {
+    if (formInputs.hrEffortCalibrationSlope === null || formInputs.hrEffortCalibrationIntercept === null) return undefined;
+    return {
+      ceilingParams: resolveCeilingParams(formInputs),
+      altitudeAdjustment: formInputs.altitudeAdjustment,
+      calibration: {
+        slope: formInputs.hrEffortCalibrationSlope,
+        intercept: formInputs.hrEffortCalibrationIntercept,
+        rSquared: 0,
+        pointCount: 0,
+        raceCount: 0,
+      },
+    };
+  }, [formInputs]);
+
   const chartPoints = useMemo(() => {
     if (!courseResult || !solverResult) return [];
-    return buildChartPoints(courseResult.segments, solverResult.result.segments);
-  }, [courseResult, solverResult]);
+    return buildChartPoints(courseResult.segments, solverResult.result.segments, hrEstimateInputs);
+  }, [courseResult, solverResult, hrEstimateInputs]);
 
   const analysisInputs = useMemo<AnalysisInputs | null>(() => {
     if (
@@ -216,8 +234,8 @@ function App() {
 
   const analysisChartPoints = useMemo(() => {
     if (!courseResult || !analysisResult) return [];
-    return buildAnalysisChartPoints(courseResult.segments, analysisResult.segments, formInputs.walkMaxMs);
-  }, [courseResult, analysisResult, formInputs.walkMaxMs]);
+    return buildAnalysisChartPoints(courseResult.segments, analysisResult.segments, formInputs.walkMaxMs, hrEstimateInputs);
+  }, [courseResult, analysisResult, formInputs.walkMaxMs, hrEstimateInputs]);
 
   const substratePoints = useMemo(
     () =>

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ceilingPower, type CeilingParams } from "./ceiling";
 import type { EffortTrendPoint } from "./pacingFit";
 import { splitPower } from "./substrate";
-import { fitHrToEffortCalibrationAcrossRaces, predictEffortFractionFromHr } from "./hrCalibration";
+import { fitHrToEffortCalibrationAcrossRaces, predictEffortFractionFromHr, predictHeartRateFromEffortFraction } from "./hrCalibration";
 
 const baseParams: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, f0: 0.94, fInf: 0.38, tauMin: 250 };
 
@@ -151,6 +151,17 @@ describe("predictEffortFractionFromHr", () => {
   it("applies the linear mapping", () => {
     const calibration = { slope: 0.01, intercept: -1.0, rSquared: 0.9, pointCount: 20, raceCount: 1 };
     expect(predictEffortFractionFromHr(150, calibration)).toBeCloseTo(0.5, 6);
+  });
+});
+
+describe("predictHeartRateFromEffortFraction", () => {
+  it("is the exact inverse of predictEffortFractionFromHr", () => {
+    const calibration = { slope: 0.01, intercept: -1.0, rSquared: 0.9, pointCount: 20, raceCount: 1 };
+    expect(predictHeartRateFromEffortFraction(0.5, calibration)).toBeCloseTo(150, 6);
+    for (const hr of [120, 140, 160, 180]) {
+      const effort = predictEffortFractionFromHr(hr, calibration);
+      expect(predictHeartRateFromEffortFraction(effort, calibration)).toBeCloseTo(hr, 6);
+    }
   });
 });
 

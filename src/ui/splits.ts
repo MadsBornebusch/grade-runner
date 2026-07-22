@@ -10,6 +10,11 @@ export interface Split {
   cumulativeTimeS: number;
   avgSpeedMs: number;
   mode: "run" | "walk" | "mixed";
+  /** Time-weighted average of estimatedHeartRateBpm across this split's
+   * points -- null if no calibration is applied (every point in the split
+   * is null), same "no data, not zero" convention as ChartPoint's own
+   * field. */
+  avgEstimatedHeartRateBpm: number | null;
 }
 
 /** Aggregates per-segment chart points into fixed-distance splits for the split table. */
@@ -26,10 +31,19 @@ export function computeSplits(points: ChartPoint[], splitLengthKm = 1): Split[] 
   const flush = (endIdx: number) => {
     let gain = 0;
     let loss = 0;
+    let hrWeightedSum = 0;
+    let hrWeightSum = 0;
+    let prevPointTimeS = prevCumulativeTimeS;
     for (let i = bucketStartIdx; i <= endIdx; i++) {
       const d = deltas[i];
       if (d > 0) gain += d;
       else loss += -d;
+      const pointDtS = points[i].cumulativeTimeS - prevPointTimeS;
+      if (points[i].estimatedHeartRateBpm !== null) {
+        hrWeightedSum += points[i].estimatedHeartRateBpm! * pointDtS;
+        hrWeightSum += pointDtS;
+      }
+      prevPointTimeS = points[i].cumulativeTimeS;
     }
     const last = points[endIdx];
     const timeS = last.cumulativeTimeS - prevCumulativeTimeS;
@@ -46,6 +60,7 @@ export function computeSplits(points: ChartPoint[], splitLengthKm = 1): Split[] 
       cumulativeTimeS: last.cumulativeTimeS,
       avgSpeedMs: distanceKm > 0 ? (distanceKm * 1000) / timeS : 0,
       mode: modes.size === 1 ? [...modes][0] : "mixed",
+      avgEstimatedHeartRateBpm: hrWeightSum > 0 ? hrWeightedSum / hrWeightSum : null,
     });
 
     prevCumulativeTimeS = last.cumulativeTimeS;

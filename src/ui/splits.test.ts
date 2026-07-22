@@ -11,6 +11,7 @@ function makePoint(overrides: Partial<ChartPoint>): ChartPoint {
     mode: "run",
     glycogenG: 400,
     cumulativeTimeS: 0,
+    estimatedHeartRateBpm: null,
     ...overrides,
   };
 }
@@ -56,5 +57,24 @@ describe("computeSplits", () => {
     ];
     const splits = computeSplits(points, 1);
     expect(splits[0].mode).toBe("walk");
+  });
+
+  it("time-weights avgEstimatedHeartRateBpm across a split's points", () => {
+    const points: ChartPoint[] = [
+      // 60s at 150bpm, then 120s at 160bpm -- weighted mean should favor 160.
+      makePoint({ distanceKm: 0.3, cumulativeTimeS: 60, estimatedHeartRateBpm: 150 }),
+      makePoint({ distanceKm: 0.6, cumulativeTimeS: 180, estimatedHeartRateBpm: 160 }),
+    ];
+    const splits = computeSplits(points, 1);
+    expect(splits[0].avgEstimatedHeartRateBpm).toBeCloseTo((150 * 60 + 160 * 120) / 180, 6);
+  });
+
+  it("is null when no point in the split has an HR estimate", () => {
+    const points: ChartPoint[] = [
+      makePoint({ distanceKm: 0.3, cumulativeTimeS: 60 }),
+      makePoint({ distanceKm: 0.6, cumulativeTimeS: 180 }),
+    ];
+    const splits = computeSplits(points, 1);
+    expect(splits[0].avgEstimatedHeartRateBpm).toBeNull();
   });
 });
