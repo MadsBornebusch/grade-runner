@@ -875,6 +875,28 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    feeding stage 5's durability term. No durability-term change follows;
    logged as a real but not-yet-actionable lead, worth another look once
    more within-race-diagnostic-eligible races accumulate.
+
+   **Re-checked with more data (2026-07-22): the signal got weaker, not
+   stronger.** The run library has grown substantially since the reads
+   above (n=16 runs/legs now qualify for the within-race diagnostic, up
+   from 6-8). Re-running the same diagnostic against all of it: raw
+   descent -0.21, descent impact -0.21, descent impact² -0.22 (down from
+   -0.58/-0.39/-0.23 at n=7), and running impact +0.19 (vs. the earlier
+   ~-0.8 read across three small overlapping samples, one of them driven
+   by a single-point outlier). None of these clear the ~-0.5 bar this
+   project treats as "worth building" elsewhere. The direction of travel
+   is the more informative part: a real, robust effect should firm up
+   with more independent data, not fade toward zero — this pattern (strong
+   in a small, overlapping sample; weak once the sample roughly doubles)
+   is the signature of small-sample noise, not a signal getting clearer.
+   Read together with the caveats already logged above (few races,
+   overlapping samples, multiple comparisons, a metric that can't actually
+   distinguish "generically hilly" from "descent-specific"), the honest
+   conclusion is now firmer: this lead does not clear the bar for a model
+   change, and more data alone doesn't seem to be the missing ingredient —
+   a differently-designed diagnostic (or the steep-grade-only/cumulative
+   variants floated above, still unbuilt) would be needed to actually
+   settle it, not just a bigger sample of the same one.
 5. **Descent/eccentric-load-dependent durability term — built**, once the
    within-race diagnostic above cleared its own "real signal" gate (n=7,
    all three descent-exposure forms negatively correlated with late-race
