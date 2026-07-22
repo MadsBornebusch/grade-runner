@@ -1017,7 +1017,108 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    speed-weighted basis outperforming `descentMeters` despite the handicap
    — not worth building speculatively before that signal exists.
 
-Stages 1-5 are now built. Stages 1-4 (plus the avgIntensity/within-race
+6. **Terrain surface cost — built, then substantially revised.**
+   Investigated whether unpaved/technical terrain (not just gradient)
+   predicts additional slowdown beyond what the Minetti cost curve already
+   captures.
+
+   **Surface classification — built.** `src/model/surfaceExposure.ts`'s
+   `attachSurfaceData` classifies each course segment as paved/unpaved via
+   a public OpenStreetMap map-matching lookup (Valhalla's
+   `trace_attributes`, see `src/ui/surfaceLookup.ts`/`api/surface.ts`),
+   fetched once per run and cached (`StoredRun.surfaceEdges`). Maps
+   Valhalla's sequential edges (surface + length, in route order) onto
+   this app's own resampled segments by cumulative-distance fraction,
+   scaling for the two pipelines' slightly different total distances.
+   Fails silently (leaves a run's segments with `surfaceUnpaved:
+   undefined`, distinct from `false`) rather than surfacing an error —
+   callers already have to handle "no data" for a fresh course anyway.
+
+   **First mechanism: cumulative durability drift — built, then
+   reverted.** Modeled surface the same way as stage 5's descent term: a
+   fraction-of-ceiling-lost per unpaved meter covered so far, composing
+   with the existing `durabilityDriftPerHour`/`durabilityDriftPerDescentUnit`
+   terms in `ceiling.ts`. A leave-one-out backtest across real races
+   (holding tau/fInf fixed per fold) showed this fit far worse than a
+   flat, instantaneous alternative (~25% mean error vs ~9%, see below) —
+   technical terrain appears to cost more to move across right there, not
+   to accumulate fatigue that lingers once back on pavement. Fully
+   reverted rather than left as dead/disabled code: `CeilingInput`'s
+   exposure field, the ceiling composition term, and the cumulative-
+   exposure tracking in `pacingFit.ts`/`solver.ts` were all removed.
+
+   **Second mechanism: flat cost multiplier — built and shipped.**
+   `unpavedCostMultiplier` in `solver.ts`/`analysis.ts` multiplies
+   `costOfRunning`/`costOfWalking` on segments classified unpaved, with
+   zero carryover to subsequent paved segments — an instantaneous, not
+   cumulative, penalty. A third alternative, a hard speed cap on unpaved
+   terrain (mirroring `maxDescentSpeedMs`, motivated by the effort-
+   fraction finding below), was also built and compared honestly; it fit
+   worse (~13% vs ~9%) and was removed — a cost multiplier apparently
+   captures the gradient-dependence of technical terrain (steep+technical
+   costs more than flat+technical) that a flat speed cap can't.
+
+   **Fitting method: effort-fraction gap — built, then found flawed.**
+   The first production fit (`fitUnpavedCostMultiplierAcrossRaces`)
+   searched for the multiplier that equalized recorded effort fraction
+   between unpaved and paved segments, mirroring stage 5's "pool per-race
+   squared slope" pattern. A real-data check found this athlete's own
+   recorded effort fraction is actually flat or slightly *negative* on
+   unpaved terrain — they aren't producing more power there, if anything
+   less; they simply move slower, likely a technical-terrain speed
+   constraint (footing, navigation) rather than a metabolic one. This
+   meant the objective structurally could not recover anywhere near the
+   multiplier a direct finish-time backtest showed the mechanism actually
+   needs (~1.1x vs ~1.5x): it was searching for a signal (elevated
+   effort) that doesn't exist in this data, even though the underlying
+   cost-multiplier mechanism itself is sound.
+
+   **Rewritten to fit directly against finish time — built and
+   validated.** `fitUnpavedCostMultiplierAcrossRaces` now takes each
+   training race's full segments plus actual recorded finish time (not
+   just lightweight trend points) and searches for the multiplier that
+   best predicts finish time via the real solver (`findSustainableTheta`),
+   holding tau/fInf fixed — the same "one axis at a time" approach as
+   every other fit in this file, but the first one here needing a real
+   forward-simulation per candidate rather than free arithmetic over
+   precomputed points. Meaningfully more expensive (a "Fit" click now runs
+   dozens of real solver simulations); kept tractable with a coarser
+   search grid and reduced solver precision during the search only
+   (`FIT_SEARCH_SOLVER_OPTIONS`), never for the real predictions the
+   fitted multiplier later drives.
+
+   **Leave-one-out backtest, real data (2026-07-22):** across 7 long real
+   races (≥40km), holding tau/fInf fixed per fold and fitting the
+   multiplier from only each fold's own training races: baseline (no
+   terrain effect) 25.4% mean error → **8.1%** with the fitted cost
+   multiplier (shipped production code, not a scratch reimplementation).
+   Fitted multipliers were tightly clustered (1.5-1.7x — this athlete
+   moves roughly 50-70% slower per unit metabolic cost on unpaved
+   terrain) across all folds, not noise. For comparison, the disproven
+   alternatives backtested at: cumulative drift ~25% (no better than
+   baseline), speed cap ~13%, effort-fraction-gap-fit multiplier ~25%
+   (same fit-method problem as above — the fitted multiplier collapsed
+   toward ~1.1x, near-zero net effect).
+
+   **A second, unrelated data-quality issue found and fixed along the
+   way: transit gaps.** One of the original marquee "long race" backtest
+   targets (`Morning Run`, 2025-10-19, nominally 55.9km/3.35h) turned out
+   to include two GPS gaps at ~40-50km/h with zero recorded running power
+   — a train ride embedded in the middle of a real run, not a mislabeled
+   activity as first suspected. Contaminated every backtest run before it
+   was found (baseline error alone dropped from 27.9% to 25.4% once
+   excluded). `src/gpx/transitGap.ts`'s `splitAtTransitGaps` now detects
+   this automatically (a raw, pre-resample point-to-point step implying
+   >7 m/s over >300m — has to run on raw points, since the pipeline's
+   fixed-distance resample linearly interpolates straight across a gap
+   like this, smearing one huge jump into many innocuous-looking segments
+   rather than one obvious spike) and splits the run into its genuine
+   contiguous legs, wired into `RunLibraryPanel.tsx`'s training-data build
+   and diagnostics — the real running on either side of a transit gap is
+   still used, just as separate legs, instead of discarding the whole
+   recording.
+
+Stages 1-6 are now built. Stages 1-4 (plus the avgIntensity/within-race
 fixes folded into stage 4 above) are well-supported by existing literature
 and directly extend code that already existed; stage 5 is explicitly
 exploratory — its mechanism, fitting, and prediction wiring are built,
@@ -1028,7 +1129,15 @@ looks unreliable). That's early evidence, not a settled result — flag any
 of its predictions as exploratory in the UI, the same way the single-race
 tau fit already flags negative-split ambiguity, until more held-out cases
 back it up. Stage 5's target was sharpened by an independent design
-review — see §13.
+review — see §13. Stage 6 is the most rigorously backtested mechanism in
+this project so far (a direct, zero-leakage, held-out finish-time
+comparison across 7 real races, not just an in-sample trend fit), and its
+final form is genuinely surprising relative to the initial hypothesis: the
+data ruled out both the mechanism the project started with (cumulative
+drift) and the fitting method built for its replacement (effort-fraction
+matching), and only converged on the shipped version after the actual
+prediction objective was used to arbitrate between candidates rather than
+a proxy.
 
 ## 13. Second-opinion design review — comparison against a mechanistic 5-layer model
 
