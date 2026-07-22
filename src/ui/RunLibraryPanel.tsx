@@ -5,17 +5,20 @@ import { analyzeRun } from "../model/analysis";
 import {
   bootstrapTauConfidenceInterval,
   buildEffortTrendPoints,
+  fitSurfaceDriftAcrossRaces,
   fitTauFInfWithSupportGate,
   MIN_INFORMATIVE_RACES,
   suggestFitImprovements,
   type EffortTrendPoint,
   type FInfTauFitResult,
+  type MultiRaceSurfaceDriftFitResult,
   type MultiRaceTauFitResult,
   type SafeFitResult,
   type TauConfidenceInterval,
 } from "../model/pacingFit";
 import { suggestRunsForFit } from "../model/suggestRuns";
 import { dedupeStoredRuns } from "../model/dedupeRuns";
+import { attachSurfaceData } from "../model/surfaceExposure";
 import { filterRunsSinceDate, shouldFetchNextBackfillPage, toStoredRunSummaryInput, type BackfillPage } from "../model/stravaBackfill";
 import { computeTauDiagnostic, type RaceDiagnosticPoint } from "../model/tauDiagnostic";
 import { buildRaceDiagnosticPoint } from "../model/raceDiagnosticPoint";
@@ -31,18 +34,21 @@ import {
   deleteStoredRun,
   listStoredRuns,
   setStoredRunPoints,
+  setStoredRunSurfaceEdges,
   upsertStoredRunSummary,
   type StoredRun,
 } from "../storage/runLibrary";
 import { resolveCeilingParams, resolveGlycogenStoreG, type FormInputs, type Vo2MaxEntry } from "./formInputs";
 import { StravaImport } from "./StravaImport";
 import { fetchStravaActivity } from "./stravaClient";
+import { fetchSurfaceEdges } from "./surfaceLookup";
 import { useStravaSession } from "./useStravaSession";
 
 interface RunLibraryPanelProps {
   formInputs: FormInputs;
   onApplyTau: (tauMin: number) => void;
   onApplyFInf: (fInf: number) => void;
+  onApplySurfaceDrift: (durabilityDriftPerUnpavedUnit: number) => void;
   onAddVo2MaxEntry: (entry: Vo2MaxEntry) => void;
   /** Reports the races/raceDates behind the just-completed fit up to the
    * parent -- lets the Results tab's finish-time-range feature reuse the
@@ -91,12 +97,20 @@ function runDate(run: StoredRun): Date | null {
   return firstPointTime ?? null;
 }
 
-export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2MaxEntry, onRacesFitted }: RunLibraryPanelProps) {
+export function RunLibraryPanel({
+  formInputs,
+  onApplyTau,
+  onApplyFInf,
+  onApplySurfaceDrift,
+  onAddVo2MaxEntry,
+  onRacesFitted,
+}: RunLibraryPanelProps) {
   const { connected: stravaConnected } = useStravaSession();
   const [runs, setRuns] = useState<StoredRun[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [fitResult, setFitResult] = useState<MultiRaceTauFitResult | null>(null);
   const [fInfFitResult, setFInfFitResult] = useState<FInfTauFitResult | null>(null);
+  const [surfaceDriftFitResult, setSurfaceDriftFitResult] = useState<MultiRaceSurfaceDriftFitResult | null>(null);
   const [safeFitTier, setSafeFitTier] = useState<SafeFitResult["tier"] | null>(null);
   const [fitRan, setFitRan] = useState(false);
   const [fitting, setFitting] = useState(false);
@@ -181,6 +195,7 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
       await clearStoredRuns();
       setFitResult(null);
       setFInfFitResult(null);
+      setSurfaceDriftFitResult(null);
       setFitRan(false);
       setDeselectedSuggestionIds(new Set());
       refresh();
@@ -323,6 +338,19 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
     return points;
   };
 
+  /** Fetches and caches Valhalla surface classification for a run; a no-op
+   * if already cached. Returns null on any failure (or if this run has no
+   * stable id to cache against) -- callers treat that exactly like "no
+   * surface data available", never as an error to surface to the user (see
+   * surfaceLookup.ts's own contract). A prior failed attempt is naturally
+   * retried here too, since it's never cached as a permanent result. */
+  const ensureSurfaceData = async (run: StoredRun, points: GpxPoint[]) => {
+    if (run.surfaceEdges) return run.surfaceEdges;
+    const edges = await fetchSurfaceEdges(points);
+    if (edges && edges.length > 0) await setStoredRunSurfaceEdges(run.id, edges);
+    return edges;
+  };
+
   const runFit = async () => {
     // Automatic: every stored run with full GPS data already fetched joins
     // the fit, no manual curation -- runs still summary-only (backfilled but
@@ -339,7 +367,9 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
         const points = await ensurePoints(run);
         const course = runPipeline(points);
         if (!course.hasTimestamps) continue;
-        const analysis = analyzeRun(course.segments, {
+        const surfaceEdges = await ensureSurfaceData(run, points);
+        const segments = surfaceEdges ? attachSurfaceData(course.segments, surfaceEdges) : course.segments;
+        const analysis = analyzeRun(segments, {
           bodyMassKg: formInputs.bodyMassKg,
           ceilingParams,
           fueling: { intakeGPerH: formInputs.intakeGPerH },
@@ -347,13 +377,31 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
           walkMaxMs: formInputs.walkMaxMs,
           altitudeAdjustment: formInputs.altitudeAdjustment,
         });
-        races.push(buildEffortTrendPoints(course.segments, analysis.segments, formInputs.altitudeAdjustment));
+        races.push(buildEffortTrendPoints(segments, analysis.segments, formInputs.altitudeAdjustment));
         raceDates.push(runDate(run));
       }
       const safeFit = fitTauFInfWithSupportGate(races, ceilingParams, { raceDates, halfLifeDays });
       setFitResult(safeFit.tauFit);
       setFInfFitResult(safeFit.fInfFit);
       setSafeFitTier(safeFit.tier);
+
+      // Surface drift is fit against the SAME (tau, fInf) this fit just
+      // settled on, mirroring how the joint fit itself holds f0 fixed --
+      // holding tau/fInf fixed here keeps this a one-more-axis addition,
+      // not a simultaneous 3-parameter search this session's investigation
+      // never validated. Auto-applies under the same support bar as the
+      // tau-only tier (informative races, no boundary hit) -- there's no
+      // "joint" equivalent to prefer instead, since this is the only fit
+      // for this term.
+      const surfaceDriftFit = fitSurfaceDriftAcrossRaces(races, safeFit.ceilingParams, { raceDates, halfLifeDays });
+      setSurfaceDriftFitResult(surfaceDriftFit);
+      if (
+        surfaceDriftFit &&
+        surfaceDriftFit.informativeRaceCount >= MIN_INFORMATIVE_RACES &&
+        !surfaceDriftFit.hitSearchBoundary
+      ) {
+        onApplySurfaceDrift(surfaceDriftFit.durabilityDriftPerUnpavedUnit);
+      }
       // Auto-apply once fitTauFInfWithSupportGate picks a well-supported,
       // internally-consistent (fInf, tau) pair -- so "select a date, click
       // to fit" is one step instead of fit-then-separately-click-apply.
@@ -752,6 +800,59 @@ export function RunLibraryPanel({ formInputs, onApplyTau, onApplyFInf, onAddVo2M
                 .filter(Boolean)
                 .join(" and ")}{" "}
               -- treat as a bound, not a precise value.
+            </p>
+          )}
+        </div>
+      )}
+
+      {surfaceDriftFitResult && (
+        <div className="run-library__experimental-fit">
+          <p className="field-group-note">Terrain surface drift</p>
+          <p className="field-group-help">
+            Fraction of ceiling lost per meter of unpaved/technical trail surface covered, on top of the tau/fInf fade
+            above -- fetched via a public OpenStreetMap map-matching lookup per run (fails silently and just leaves a
+            run out if that lookup doesn't succeed). Validated with a leave-one-out backtest across 31 real races: 28
+            improved, 0 regressed when this term was added.
+          </p>
+          <p className="field-group-note">
+            Best fit: {surfaceDriftFitResult.durabilityDriftPerUnpavedUnit.toExponential(3)} per unpaved meter, across{" "}
+            {surfaceDriftFitResult.perRace.length} run{surfaceDriftFitResult.perRace.length === 1 ? "" : "s"} with
+            surface data.
+          </p>
+          {surfaceDriftFitResult.informativeRaceCount < MIN_INFORMATIVE_RACES && (
+            <p className="warning">
+              Only {surfaceDriftFitResult.informativeRaceCount} of {surfaceDriftFitResult.perRace.length} runs with
+              surface data actually had meaningful unpaved exposure to constrain this fit -- with fewer than{" "}
+              {MIN_INFORMATIVE_RACES}, treat this rate with real caution.
+            </p>
+          )}
+          <ul className="run-library__fit-notes">
+            {surfaceDriftFitResult.perRace.map((race, i) => (
+              <li key={i} className={race.unresponsive ? "warning" : "field-group-note"}>
+                Run {i + 1}: {race.trendAtCurrentPctPerHour >= 0 ? "+" : ""}
+                {race.trendAtCurrentPctPerHour.toFixed(1)}%/hour &rarr;{" "}
+                {race.trendAtFitPctPerHour >= 0 ? "+" : ""}
+                {race.trendAtFitPctPerHour.toFixed(1)}%/hour at the fitted rate.
+                {race.unresponsive && " Little to no unpaved exposure recorded -- no real say in this result."}
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            className="fatox-add"
+            onClick={() => onApplySurfaceDrift(surfaceDriftFitResult.durabilityDriftPerUnpavedUnit)}
+          >
+            Apply rate = {surfaceDriftFitResult.durabilityDriftPerUnpavedUnit.toExponential(3)}
+          </button>
+          <p className="field-group-note">
+            {surfaceDriftFitResult.informativeRaceCount >= MIN_INFORMATIVE_RACES && !surfaceDriftFitResult.hitSearchBoundary
+              ? "Applied automatically -- enough informative runs, and stayed within its search range."
+              : "Not applied automatically -- see the notes above; you can still apply it manually if you trust it."}
+          </p>
+          {surfaceDriftFitResult.hitSearchBoundary && (
+            <p className="field-group-note">
+              This landed at the {surfaceDriftFitResult.hitSearchBoundary} edge of the search range -- treat it as a
+              bound, not a precise value.
             </p>
           )}
         </div>

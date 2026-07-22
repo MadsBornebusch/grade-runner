@@ -8,6 +8,7 @@ import { costOfRunning, costOfWalking, maxDescentSpeedMs } from "./minetti";
 import { grossToNet, netToGross } from "./energetics";
 import { type CeilingParams, ceilingPower, maxAerobicPower } from "./ceiling";
 import type { DescentExposureBasis } from "./pacingFit";
+import { hasSurfaceData as courseHasSurfaceData, surfaceStepForSegment } from "./surfaceExposure";
 import {
   type FuelingParams,
   type SubstrateParams,
@@ -106,6 +107,15 @@ export function simulate(theta: number, inputs: SolverInputs): SimulationResult 
   let cumulativeDescentImpactSquared = 0;
   let previousElevation: number | null = null;
 
+  // Unlike descent, surface classification is a static per-segment property
+  // (attached upfront by surfaceExposure.ts's attachSurfaceData, not derived
+  // from this simulation's own speed), so whether it applies at all is
+  // decided once before the loop rather than inferred incrementally --
+  // avoids a partial-coverage course (map-matching gaps) silently looking
+  // "fully covered" for segments it never actually classified.
+  const courseHasSurface = courseHasSurfaceData(inputs.segments);
+  let cumulativeUnpavedM = 0;
+
   for (const seg of inputs.segments) {
     const elapsedMin = cumulativeTimeS / 60;
     const elapsedHours = cumulativeTimeS / 3600;
@@ -121,7 +131,13 @@ export function simulate(theta: number, inputs: SolverInputs): SimulationResult 
             : undefined;
 
     const ceilingGross = ceilingPower(
-      { tMin: elapsedMin, altitudeM, elapsedHours, ...(descentExposure !== undefined ? { descentExposure } : {}) },
+      {
+        tMin: elapsedMin,
+        altitudeM,
+        elapsedHours,
+        ...(descentExposure !== undefined ? { descentExposure } : {}),
+        ...(courseHasSurface ? { unpavedExposureM: cumulativeUnpavedM } : {}),
+      },
       inputs.ceilingParams,
     );
     const targetNet = Math.max(0, grossToNet(theta * ceilingGross));
@@ -151,6 +167,7 @@ export function simulate(theta: number, inputs: SolverInputs): SimulationResult 
       cumulativeDescentImpact += descentM * speed;
       cumulativeDescentImpactSquared += descentM * speed * speed;
     }
+    cumulativeUnpavedM += surfaceStepForSegment(seg).unpavedM;
 
     const cost = mode === "run" ? costRun : costWalk;
     const grossPower = netToGross(cost * speed);

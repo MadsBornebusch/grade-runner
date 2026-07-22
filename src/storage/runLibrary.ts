@@ -8,6 +8,7 @@
 // the same activity upserts one row instead of duplicating it.
 
 import type { GpxPoint } from "../gpx/pipeline";
+import type { ValhallaSurfaceEdge } from "../model/surfaceExposure";
 
 export interface StoredRun {
   id: string;
@@ -24,6 +25,16 @@ export interface StoredRun {
   elevationGainM?: number;
   avgHeartRate?: number | null;
   avgWatts?: number | null;
+  /**
+   * Cached Valhalla surface-classification response, fetched lazily (like
+   * points) once this run is selected for a fit -- avoids re-hitting
+   * Valhalla on every fit. Undefined means either never attempted, or a
+   * past attempt failed (Valhalla down, rate-limited) -- a failure is
+   * deliberately NOT cached as a permanent "no data" result, so the next
+   * fit naturally retries instead of being stuck without surface data
+   * forever over what might have been a transient outage.
+   */
+  surfaceEdges?: ValhallaSurfaceEdge[];
 }
 
 export interface StravaRunSummaryInput {
@@ -118,6 +129,24 @@ export async function setStoredRunPoints(id: string, points: GpxPoint[]): Promis
     getReq.onsuccess = () => {
       const existing = getReq.result as StoredRun | undefined;
       if (existing) store.put({ ...existing, points });
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/** Caches a successful surface lookup in place -- mirrors setStoredRunPoints.
+ * Callers should simply not call this on a failed/empty lookup, rather than
+ * caching a "no data" sentinel (see StoredRun.surfaceEdges's own doc). */
+export async function setStoredRunSurfaceEdges(id: string, surfaceEdges: ValhallaSurfaceEdge[]): Promise<void> {
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const getReq = store.get(id);
+    getReq.onsuccess = () => {
+      const existing = getReq.result as StoredRun | undefined;
+      if (existing) store.put({ ...existing, surfaceEdges });
     };
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);

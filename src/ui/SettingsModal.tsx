@@ -12,6 +12,7 @@ interface SettingsModalProps {
   onChange: (values: FormInputs) => void;
   onApplyTau: (tauMin: number) => void;
   onApplyFInf: (fInf: number) => void;
+  onApplySurfaceDrift: (durabilityDriftPerUnpavedUnit: number) => void;
   onAddVo2MaxEntry: (entry: Vo2MaxEntry) => void;
   onRacesFitted: (races: EffortTrendPoint[][], raceDates: (Date | null)[]) => void;
 }
@@ -32,6 +33,7 @@ export function SettingsModal({
   onChange,
   onApplyTau,
   onApplyFInf,
+  onApplySurfaceDrift,
   onAddVo2MaxEntry,
   onRacesFitted,
 }: SettingsModalProps) {
@@ -71,6 +73,7 @@ export function SettingsModal({
             formInputs={formInputs}
             onApplyTau={onApplyTau}
             onApplyFInf={onApplyFInf}
+            onApplySurfaceDrift={onApplySurfaceDrift}
             onAddVo2MaxEntry={onAddVo2MaxEntry}
             onRacesFitted={onRacesFitted}
           />

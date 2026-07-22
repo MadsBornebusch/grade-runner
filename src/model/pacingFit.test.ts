@@ -13,12 +13,15 @@ import {
   fitDurabilityDriftPerDescentUnitAcrossRaces,
   fitDurabilityDriftPerHour,
   fitFInfAndTauAcrossRaces,
+  fitSurfaceDriftAcrossRaces,
+  fitSurfaceDriftPerUnpavedUnit,
   fitTauAcrossRaces,
   fitTauFInfWithSupportGate,
   fitTauMinutes,
   suggestFitImprovements,
   trimForPacingFit,
 } from "./pacingFit";
+import { cumulativeUnpavedMForSegments } from "./surfaceExposure";
 
 /** Builds points where actual power is a constant fraction of the ceiling
  * computed under `trueParams` -- i.e. a run that held perfectly even effort
@@ -759,6 +762,109 @@ describe("fitDurabilityDriftPerDescentUnitAcrossRaces", () => {
   });
 });
 
+describe("fitSurfaceDriftPerUnpavedUnit", () => {
+  const baseParams: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, f0: 0.94, fInf: 0.38, tauMin: 250 };
+
+  it("recovers a known drift rate keyed to cumulative unpaved meters", () => {
+    const trueDrift = 0.0000012;
+    const points: EffortTrendPoint[] = [];
+    for (let t = 0.2; t < 5; t += 0.1) {
+      const cumulativeUnpavedM = t * 12000; // steady unpaved terrain, ~60000m accumulated by the end
+      const ceiling = ceilingPower(
+        { tMin: t * 60, altitudeM: 0, elapsedHours: t, unpavedExposureM: cumulativeUnpavedM },
+        { ...baseParams, durabilityDriftPerUnpavedUnit: trueDrift },
+      );
+      points.push({ tHours: t, grossPowerWPerKg: ceiling, altitudeM: 0, dtS: 360, cumulativeUnpavedM });
+    }
+    const result = fitSurfaceDriftPerUnpavedUnit(points, baseParams);
+    expect(result).not.toBeNull();
+    expect(result!.durabilityDriftPerUnpavedUnit).toBeGreaterThan(trueDrift * 0.5);
+    expect(result!.durabilityDriftPerUnpavedUnit).toBeLessThan(trueDrift * 1.5);
+    expect(Math.abs(result!.trendAtFitPctPerHour)).toBeLessThan(1);
+  });
+
+  it("returns null when the points carry no surface data at all", () => {
+    const points = makeConstantEffortPoints(baseParams, 5);
+    expect(points[0]).not.toHaveProperty("cumulativeUnpavedM");
+    expect(fitSurfaceDriftPerUnpavedUnit(points, baseParams)).toBeNull();
+  });
+
+  it("returns null when surface data is present but genuinely 0% unpaved throughout", () => {
+    const points = makeConstantEffortPoints(baseParams, 5).map((p) => ({ ...p, cumulativeUnpavedM: 0 }));
+    expect(fitSurfaceDriftPerUnpavedUnit(points, baseParams)).toBeNull();
+  });
+});
+
+describe("fitSurfaceDriftAcrossRaces", () => {
+  const baseParams: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, f0: 0.94, fInf: 0.38, tauMin: 250 };
+
+  function makeSurfaceDriftRace(totalHours: number, unpavedPerHour: number, trueDrift: number, stepMinutes = 6): EffortTrendPoint[] {
+    const points: EffortTrendPoint[] = [];
+    const stepHours = stepMinutes / 60;
+    for (let t = 0.2; t < totalHours; t += stepHours) {
+      const cumulativeUnpavedM = t * unpavedPerHour;
+      const ceiling = ceilingPower(
+        { tMin: t * 60, altitudeM: 0, elapsedHours: t, unpavedExposureM: cumulativeUnpavedM },
+        { ...baseParams, durabilityDriftPerUnpavedUnit: trueDrift },
+      );
+      points.push({ tHours: t, grossPowerWPerKg: ceiling, altitudeM: 0, dtS: stepMinutes * 60, cumulativeUnpavedM });
+    }
+    return points;
+  }
+
+  it("recovers a shared drift rate pooled across two races with very different exposure scales/durations", () => {
+    const trueDrift = 0.000001;
+    const raceA = makeSurfaceDriftRace(5, 10000, trueDrift);
+    const raceB = makeSurfaceDriftRace(8, 5000, trueDrift);
+    const result = fitSurfaceDriftAcrossRaces([raceA, raceB], baseParams);
+    expect(result).not.toBeNull();
+    expect(result!.durabilityDriftPerUnpavedUnit).toBeGreaterThan(trueDrift * 0.5);
+    expect(result!.durabilityDriftPerUnpavedUnit).toBeLessThan(trueDrift * 1.5);
+    expect(result!.perRace).toHaveLength(2);
+    for (const race of result!.perRace) {
+      expect(Math.abs(race.trendAtFitPctPerHour)).toBeLessThan(Math.abs(race.trendAtCurrentPctPerHour));
+      expect(race.unresponsive).toBe(false);
+    }
+  });
+
+  it("flags a race with negligible unpaved exposure as unresponsive when pooled with one that has real exposure", () => {
+    const trueDrift = 0.000001;
+    const responsive = makeSurfaceDriftRace(5, 10000, trueDrift);
+    const flat: EffortTrendPoint[] = makeConstantEffortPoints(baseParams, 5).map((p) => ({ ...p, cumulativeUnpavedM: 0 }));
+    const result = fitSurfaceDriftAcrossRaces([responsive, flat], baseParams);
+    expect(result).not.toBeNull();
+    expect(result!.perRace[0].unresponsive).toBe(false);
+    expect(result!.perRace[1].unresponsive).toBe(true);
+    expect(result!.informativeRaceCount).toBe(1);
+  });
+
+  it("excludes a race with no surface data at all from the pool, and still fits from the rest", () => {
+    const goodRace = makeSurfaceDriftRace(6, 10000, 0.000001);
+    const noSurfaceData = makeConstantEffortPoints(baseParams, 6); // no cumulativeUnpavedM field at all
+    const result = fitSurfaceDriftAcrossRaces([goodRace, noSurfaceData], baseParams);
+    expect(result).not.toBeNull();
+    expect(result!.perRace).toHaveLength(1);
+  });
+
+  it("ignores a race with too few points and still fits from the rest", () => {
+    const goodRace = makeSurfaceDriftRace(6, 10000, 0.000001);
+    const tooShort = makeConstantEffortPoints(baseParams, 0.1, 1).map((p) => ({ ...p, cumulativeUnpavedM: 100 }));
+    const result = fitSurfaceDriftAcrossRaces([goodRace, tooShort], baseParams);
+    expect(result).not.toBeNull();
+    expect(result!.perRace).toHaveLength(1);
+  });
+
+  it("returns null when no race has any surface data at all", () => {
+    const noSurfaceData = makeConstantEffortPoints(baseParams, 5);
+    expect(fitSurfaceDriftAcrossRaces([noSurfaceData], baseParams)).toBeNull();
+  });
+
+  it("returns null when every race with surface data is genuinely 0% unpaved", () => {
+    const flatOnly: EffortTrendPoint[] = makeConstantEffortPoints(baseParams, 5).map((p) => ({ ...p, cumulativeUnpavedM: 0 }));
+    expect(fitSurfaceDriftAcrossRaces([flatOnly], baseParams)).toBeNull();
+  });
+});
+
 describe("buildEffortTrendPoints -- cumulative descent fields", () => {
   const params: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, f0: 0.94, fInf: 0.38, tauMin: 250 };
   const analysisInputs = {
@@ -837,5 +943,58 @@ describe("buildEffortTrendPoints -- cumulative descent fields", () => {
     // as before for them.
     const points = makeConstantEffortPoints(params, 3);
     expect(points[0]).not.toHaveProperty("cumulativeDescentM");
+  });
+});
+
+describe("buildEffortTrendPoints -- cumulative unpaved field", () => {
+  const params: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, f0: 0.94, fInf: 0.38, tauMin: 250 };
+  const analysisInputs = {
+    bodyMassKg: 70,
+    ceilingParams: params,
+    fueling: { intakeGPerH: 60 },
+    glycogenStoreG: 500,
+  };
+
+  function surfaceTestSegments(unpaved: (boolean | undefined)[]): CourseSegment[] {
+    let cumulativeDistance3D = 0;
+    return unpaved.map((surfaceUnpaved, index) => {
+      cumulativeDistance3D += 100;
+      return {
+        index,
+        cumulativeDistance3D,
+        distanceHorizontal: 100,
+        distance3D: 100,
+        elevation: 0,
+        gradient: 0,
+        time: null,
+        dtS: 60,
+        paused: false,
+        heartRateBpm: null,
+        powerWatts: null,
+        surfaceUnpaved,
+      };
+    });
+  }
+
+  it("tracks cumulative unpaved exposure *before* each segment, matching cumulativeUnpavedMForSegments's whole-array sum by the last point", () => {
+    const segments = surfaceTestSegments([true, true, false, true, false]);
+    const analysis = analyzeRun(segments, analysisInputs);
+    const points = buildEffortTrendPoints(segments, analysis.segments, false);
+
+    expect(points).toHaveLength(5);
+    expect(points[0].cumulativeUnpavedM).toBe(0); // nothing accumulated before the first segment
+
+    const last = points[points.length - 1];
+    // Exposure "before" the last (paved) segment equals the whole race's
+    // total, since that segment contributes nothing further of its own.
+    expect(last.cumulativeUnpavedM).toBeCloseTo(cumulativeUnpavedMForSegments(segments), 6);
+    expect(cumulativeUnpavedMForSegments(segments)).toBeCloseTo(300, 6); // 3 unpaved segments @ 100m
+  });
+
+  it("leaves cumulativeUnpavedM undefined for every point when the course has no surface data at all", () => {
+    const segments = surfaceTestSegments([undefined, undefined, undefined]);
+    const analysis = analyzeRun(segments, analysisInputs);
+    const points = buildEffortTrendPoints(segments, analysis.segments, false);
+    expect(points.every((p) => p.cumulativeUnpavedM === undefined)).toBe(true);
   });
 });

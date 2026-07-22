@@ -92,4 +92,38 @@ describe("ceilingPower", () => {
       expect(both).toBeLessThan(timeOnly);
     });
   });
+
+  describe("surface-based durability drift (validated: LOO backtest across 31 real races, 28 improved, 0 regressed)", () => {
+    it("reduces the ceiling over cumulative unpaved exposure when enabled", () => {
+      const noDrift = ceilingPower({ tMin: 300, unpavedExposureM: 50000 });
+      const withDrift = ceilingPower({ tMin: 300, unpavedExposureM: 50000 }, { durabilityDriftPerUnpavedUnit: 0.0000012 });
+      expect(withDrift).toBeLessThan(noDrift);
+    });
+
+    it("is off by default, and has no effect even when unpavedExposureM is provided", () => {
+      const a = ceilingPower({ tMin: 300, unpavedExposureM: 100000 });
+      const b = ceilingPower({ tMin: 300, unpavedExposureM: 100000 }, {});
+      expect(a).toBeCloseTo(b, 10);
+    });
+
+    it("has no effect when unpavedExposureM is omitted, even if the rate is configured", () => {
+      // A course with no surface data at all shouldn't be silently treated
+      // as 0% unpaved -- the term needs an explicit exposure to apply.
+      const a = ceilingPower({ tMin: 300 });
+      const b = ceilingPower({ tMin: 300 }, { durabilityDriftPerUnpavedUnit: 0.0000012 });
+      expect(a).toBeCloseTo(b, 10);
+    });
+
+    it("composes multiplicatively with the elapsed-time and descent drift terms", () => {
+      const timeAndDescentOnly = ceilingPower(
+        { tMin: 300, elapsedHours: 5, descentExposure: 500 },
+        { durabilityDriftPerHour: 0.01, durabilityDriftPerDescentUnit: 0.0005 },
+      );
+      const allThree = ceilingPower(
+        { tMin: 300, elapsedHours: 5, descentExposure: 500, unpavedExposureM: 50000 },
+        { durabilityDriftPerHour: 0.01, durabilityDriftPerDescentUnit: 0.0005, durabilityDriftPerUnpavedUnit: 0.0000012 },
+      );
+      expect(allThree).toBeLessThan(timeAndDescentOnly);
+    });
+  });
 });

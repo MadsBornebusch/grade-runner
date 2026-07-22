@@ -18,7 +18,18 @@ export function getQuery(req: IncomingMessage): URLSearchParams {
   return new URL(req.url ?? "", "http://internal").searchParams;
 }
 
+/**
+ * `vercel dev`'s local runtime pre-parses a JSON request body and attaches
+ * it as `req.body`, draining the underlying stream in the process -- a
+ * manual `for await (const chunk of req)` read (which is what real
+ * production Vercel's raw IncomingMessage needs) sees nothing left and
+ * silently returns undefined. Prefer `req.body` when present (covers local
+ * dev), falling back to the raw stream read otherwise (covers production).
+ */
 export async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const preParsed = (req as IncomingMessage & { body?: unknown }).body;
+  if (preParsed !== undefined) return preParsed;
+
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
     chunks.push(chunk as Buffer);

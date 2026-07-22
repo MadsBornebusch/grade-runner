@@ -327,3 +327,46 @@ describe("descent-based durability drift (PLAN.md §12/§13 stage 5)", () => {
     }
   });
 });
+
+describe("surface-based durability drift", () => {
+  const SURFACE_TEST_THETA = 0.8;
+
+  function segmentsWithSurface(n: number, segLenM: number, unpaved: boolean | undefined): CourseSegment[] {
+    return makeSegments(n, segLenM, 0).map((s) => ({ ...s, surfaceUnpaved: unpaved }));
+  }
+
+  it("finishes slower on an unpaved course than an otherwise-identical paved one, when a rate is configured", () => {
+    const unpavedCourse = baseInputs({ segments: segmentsWithSurface(200, 50, true) });
+    const pavedCourse = baseInputs({ segments: segmentsWithSurface(200, 50, false) });
+    const rate = 0.00002;
+
+    const unpaved = simulate(SURFACE_TEST_THETA, { ...unpavedCourse, ceilingParams: { durabilityDriftPerUnpavedUnit: rate } });
+    const paved = simulate(SURFACE_TEST_THETA, { ...pavedCourse, ceilingParams: { durabilityDriftPerUnpavedUnit: rate } });
+
+    expect(unpaved.feasible).toBe(true);
+    expect(unpaved.finishTimeS).toBeGreaterThan(paved.finishTimeS);
+    // Paved course, all surfaceUnpaved:false, should be unaffected by the
+    // rate entirely (0 exposure throughout).
+    const pavedNoRate = simulate(SURFACE_TEST_THETA, pavedCourse);
+    expect(paved.finishTimeS).toBeCloseTo(pavedNoRate.finishTimeS, 6);
+  });
+
+  it("is byte-for-byte unchanged when no segment has surface data, even with a rate configured", () => {
+    const inputs = baseInputs({ segments: segmentsWithSurface(200, 50, undefined) });
+    const withRateNoData = simulate(SURFACE_TEST_THETA, { ...inputs, ceilingParams: { durabilityDriftPerUnpavedUnit: 0.00002 } });
+    const plain = simulate(SURFACE_TEST_THETA, inputs);
+    expect(withRateNoData).toEqual(plain);
+  });
+
+  it("composes multiplicatively with descent-based drift when both are configured", () => {
+    const segments = segmentsWithSurface(200, 50, true);
+    const inputs = baseInputs({ segments });
+    const descentOnly = simulate(SURFACE_TEST_THETA, { ...inputs, ceilingParams: { durabilityDriftPerDescentUnit: 0.0001 } });
+    const both = simulate(SURFACE_TEST_THETA, {
+      ...inputs,
+      ceilingParams: { durabilityDriftPerDescentUnit: 0.0001, durabilityDriftPerUnpavedUnit: 0.00002 },
+    });
+    expect(both.feasible).toBe(true);
+    expect(both.finishTimeS).toBeGreaterThan(descentOnly.finishTimeS);
+  });
+});

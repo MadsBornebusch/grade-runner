@@ -55,6 +55,17 @@ export interface CourseSegment {
   heartRateBpm: number | null;
   /** Measured running power (W) at the end of this segment, if the source GPX had it. */
   powerWatts: number | null;
+  /**
+   * True if this segment's terrain is classified as unpaved (gravel, dirt,
+   * compacted, path) via an external map-matching lookup (see
+   * src/model/surfaceExposure.ts's attachSurfaceData) -- not set by the
+   * base pipeline itself, which has no network access and no opinion on
+   * surface. Undefined means "no surface data available for this segment",
+   * distinct from `false` ("known paved") -- a caller with a fitted
+   * surface-drift rate but no surface data for a course should skip the
+   * term entirely, not silently assume 0% unpaved.
+   */
+  surfaceUnpaved?: boolean;
 }
 
 export interface PipelineResult {

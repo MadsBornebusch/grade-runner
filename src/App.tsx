@@ -3,6 +3,8 @@ import type { GpxPoint } from "./gpx/pipeline";
 import { rawCourseStats, runPipeline } from "./gpx/pipeline";
 import { findSustainableTheta, type SolverInputs } from "./model/solver";
 import { analyzeRun, type AnalysisInputs } from "./model/analysis";
+import { attachSurfaceData, type ValhallaSurfaceEdge } from "./model/surfaceExposure";
+import { fetchSurfaceEdges } from "./ui/surfaceLookup";
 import { GpxUpload } from "./ui/GpxUpload";
 import { CourseProcessingFields, FuelingFields } from "./ui/InputsPanel";
 import { PageCarousel } from "./ui/PageCarousel";
@@ -92,12 +94,33 @@ function App() {
     [formInputs.segmentLengthM, formInputs.smoothingWindowM],
   );
 
+  // Fetched once per upload (not per pipelineOptions change -- segment
+  // length/smoothing don't change the underlying GPS points a surface
+  // lookup needs), applied to courseResult's segments below. A failed/slow
+  // lookup just means predictions proceed without a surface term, exactly
+  // like durabilityDriftPerUnpavedUnit's own "no effect without exposure
+  // data" contract -- never blocks or errors the rest of planning.
+  const [surfaceEdges, setSurfaceEdges] = useState<ValhallaSurfaceEdge[] | null>(null);
+  useEffect(() => {
+    setSurfaceEdges(null);
+    if (!rawPoints) return;
+    let cancelled = false;
+    fetchSurfaceEdges(rawPoints).then((edges) => {
+      if (!cancelled) setSurfaceEdges(edges);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [rawPoints]);
+
   // One upload, one pipeline run -- both Planning and Analysis results derive
   // from this, so switching between them doesn't need a fresh upload.
   const courseResult = useMemo(() => {
     if (!rawPoints) return null;
-    return runPipeline(rawPoints, pipelineOptions);
-  }, [rawPoints, pipelineOptions]);
+    const result = runPipeline(rawPoints, pipelineOptions);
+    if (!surfaceEdges) return result;
+    return { ...result, segments: attachSurfaceData(result.segments, surfaceEdges) };
+  }, [rawPoints, pipelineOptions, surfaceEdges]);
 
   const rawStats = useMemo(() => (rawPoints ? rawCourseStats(rawPoints) : null), [rawPoints]);
 
@@ -404,6 +427,7 @@ function App() {
         onChange={setFormInputs}
         onApplyTau={(tauMin) => setFormInputs({ ...formInputs, tauMin })}
         onApplyFInf={(fInf) => setFormInputs({ ...formInputs, fInf })}
+        onApplySurfaceDrift={(durabilityDriftPerUnpavedUnit) => setFormInputs({ ...formInputs, durabilityDriftPerUnpavedUnit })}
         onAddVo2MaxEntry={(entry: Vo2MaxEntry) =>
           setFormInputs({ ...formInputs, vo2MaxHistory: [...formInputs.vo2MaxHistory, entry] })
         }
