@@ -20,8 +20,11 @@ const VO2MAX_MAX_DURATION_S = MAX_ESTIMABLE_DURATION_MIN * 60;
 /** Below this, a run can't span a meaningful fraction of any realistic
  * ultra-scale tau -- suggesting it for the durability/tau fit would just
  * waste a fetch on a run with ~no say in the result (see PLAN.md §12/§13,
- * and the "unresponsive" flag this app's own fit reports for such runs). */
-const DURABILITY_MIN_DURATION_S = 60 * 60;
+ * and the "unresponsive" flag this app's own fit reports for such runs).
+ * Exported so RunLibraryPanel.tsx's runFit() can apply the same bar to
+ * already-fetched runs, not just to which summary-only runs are worth
+ * fetching in the first place -- see that file's own doc on why. */
+export const DURABILITY_MIN_DURATION_S = 60 * 60;
 /** Widen the candidate pool before diversifying by descent, so the final
  * picks span a range of descent profiles instead of just whichever happen
  * to be longest -- descent variety is what the tau-vs-descent diagnostic

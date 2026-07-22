@@ -17,7 +17,7 @@ import {
   type SafeFitResult,
   type TauConfidenceInterval,
 } from "../model/pacingFit";
-import { suggestRunsForFit } from "../model/suggestRuns";
+import { DURABILITY_MIN_DURATION_S, suggestRunsForFit } from "../model/suggestRuns";
 import { dedupeStoredRuns } from "../model/dedupeRuns";
 import { attachSurfaceData } from "../model/surfaceExposure";
 import { splitAtTransitGaps } from "../gpx/transitGap";
@@ -152,6 +152,7 @@ export function RunLibraryPanel({
   const [fitRan, setFitRan] = useState(false);
   const [fitting, setFitting] = useState(false);
   const [transitGapCount, setTransitGapCount] = useState(0);
+  const [excludedForDurationCount, setExcludedForDurationCount] = useState(0);
   // Kept locally (not just forwarded via onRacesFitted) so the tau
   // confidence-interval button below can reuse the exact same training
   // data without needing a Planning course or the parent's help.
@@ -236,6 +237,7 @@ export function RunLibraryPanel({
       setUnpavedCostMultiplierFitResult(null);
       setHrCalibrationFitResult(null);
       setTransitGapCount(0);
+      setExcludedForDurationCount(0);
       setFitRan(false);
       setDeselectedSuggestionIds(new Set());
       refresh();
@@ -392,10 +394,14 @@ export function RunLibraryPanel({
   };
 
   const runFit = async () => {
-    // Automatic: every stored run with full GPS data already fetched joins
-    // the fit, no manual curation -- runs still summary-only (backfilled but
-    // not fetched) are simply left out until fetched via the suggestions
-    // below or a direct import.
+    // Automatic: every stored run with full GPS data already fetched is a
+    // CANDIDATE for the fit, no manual curation needed -- runs still
+    // summary-only (backfilled but not fetched) are simply left out until
+    // fetched via the suggestions below or a direct import. Candidates
+    // themselves are still filtered by duration below (DURABILITY_MIN_DURATION_S)
+    // before actually feeding the pooled fits -- "no manual curation" means
+    // the user never has to pick which runs count, not that every fetched
+    // run automatically qualifies.
     const readyRuns = dedupedRuns.filter((r) => r.points !== null);
 
     setFitting(true);
@@ -416,6 +422,7 @@ export function RunLibraryPanel({
       const raceDates: (Date | null)[] = [];
       const finishTimeRaces: FinishTimeTrainingRace[] = [];
       let detectedTransitGaps = 0;
+      let excludedForDuration = 0;
       for (const run of readyRuns) {
         const points = await ensurePoints(run);
         const pointLegs = splitAtTransitGaps(points);
@@ -447,12 +454,30 @@ export function RunLibraryPanel({
             walkMaxMs: formInputs.walkMaxMs,
             altitudeAdjustment: formInputs.altitudeAdjustment,
           });
+          // Below DURABILITY_MIN_DURATION_S, a run can't span a meaningful
+          // fraction of any realistic tau -- pooling it in anyway doesn't
+          // just fail to help (the "unresponsive" flag already tries to
+          // catch that after the fact), it can actively distort the search:
+          // enough near-flat short runs pooled alongside a handful of long
+          // races can pull tau toward an implausibly small value that
+          // trivially "fits" the short runs' near-zero slope without
+          // reflecting real fatigue-decay behavior at all. suggestRuns.ts
+          // already uses this same bar to decide which summary-only runs
+          // are worth fetching for this fit -- applying it here too closes
+          // the gap where an already-fetched short run (uploaded directly,
+          // or fetched for some other reason) could still sneak into the
+          // pool uncurated.
+          if (analysis.totalMovingTimeS < DURABILITY_MIN_DURATION_S) {
+            excludedForDuration++;
+            continue;
+          }
           races.push(buildEffortTrendPoints(segments, analysis.segments, formInputs.altitudeAdjustment));
           raceDates.push(pointLegs.length > 1 ? (legPoints[0]?.time ?? runDate(run)) : runDate(run));
           finishTimeRaces.push({ segments, actualFinishTimeS: analysis.totalMovingTimeS });
         }
       }
       setTransitGapCount(detectedTransitGaps);
+      setExcludedForDurationCount(excludedForDuration);
       const safeFit = fitTauFInfWithSupportGate(races, ceilingParams, { raceDates, halfLifeDays });
       setFitResult(safeFit.tauFit);
       setFInfFitResult(safeFit.fInfFit);
@@ -602,7 +627,9 @@ export function RunLibraryPanel({
         race's own effort trend simultaneously, not just one run's idiosyncrasies. It doesn't separately identify f0
         or fInf: that needs races spanning a much wider range of durations than a typical library, plus an anchor on
         the ceiling's absolute level that this fit doesn't have. Every stored run with full GPS data and a recorded
-        timestamp is used automatically -- no manual curation needed.
+        timestamp is considered automatically -- no manual curation needed -- but runs under{" "}
+        {(DURABILITY_MIN_DURATION_S / 60).toFixed(0)} minutes are left out of the fit itself (too short to say
+        anything real about fatigue decay at ultra scale; see the note below if any were).
       </p>
 
       <label className="gpx-upload__control">
@@ -764,6 +791,15 @@ export function RunLibraryPanel({
           Detected and cropped out {transitGapCount} transit gap{transitGapCount === 1 ? "" : "s"} (GPS jumps far
           faster than running is possible, typically a watch left running across a train/bus/car leg) -- the genuine
           running before and after each gap was still used, just as separate legs.
+        </p>
+      )}
+
+      {fitRan && excludedForDurationCount > 0 && (
+        <p className="field-group-note">
+          Left out {excludedForDurationCount} run{excludedForDurationCount === 1 ? "" : "s"} under{" "}
+          {(DURABILITY_MIN_DURATION_S / 60).toFixed(0)} minutes -- too short to say anything real about fatigue-decay
+          over an ultra-scale race, and pooling them in anyway can pull tau toward an implausibly small value rather
+          than just having no effect.
         </p>
       )}
 
