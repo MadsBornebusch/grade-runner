@@ -18,6 +18,25 @@ export interface AnalysisInputs {
   /** Speed below which a segment is treated as running vs. walking gait, m/s. Default 2.0. */
   walkMaxMs?: number;
   altitudeAdjustment?: boolean;
+  /**
+   * Flat cost multiplier applied to costOfRunning/costOfWalking on segments
+   * classified unpaved (see gpx/pipeline.ts's CourseSegment.surfaceUnpaved),
+   * mirroring solver.ts's own field of the same name -- without it, a
+   * recorded run's technical trail segments would derive an understated
+   * grossPowerWPerKg for the same observed speed (the true metabolic cost
+   * of that pace was higher than the grade-only Minetti curve assumes).
+   * 1 = off (default).
+   *
+   * IMPORTANT for callers building training data for
+   * fitUnpavedCostMultiplier(AcrossRaces) in pacingFit.ts: that fit expects
+   * RAW, uncorrected grossPowerWPerKg (it applies its own candidate
+   * multiplier internally while searching) -- omit this field (or pass 1)
+   * when analyzing races destined for that fit, or the search would be
+   * compounding an already-applied correction with a new one. Only pass
+   * the real fitted value here for a genuine retrospective *display* of a
+   * past run's effort/fuel (e.g. Analysis mode's own charts).
+   */
+  unpavedCostMultiplier?: number;
 }
 
 export interface AnalysisSegmentResult {
@@ -107,7 +126,8 @@ export function analyzeRun(segments: CourseSegment[], inputs: AnalysisInputs): A
       grossPower = RESTING_METABOLISM_W_PER_KG;
     } else {
       speed = seg.distance3D / dt;
-      const cost = speed <= walkMaxMs ? costOfWalking(seg.gradient) : costOfRunning(seg.gradient);
+      const terrainMultiplier = seg.surfaceUnpaved ? (inputs.unpavedCostMultiplier ?? 1) : 1;
+      const cost = (speed <= walkMaxMs ? costOfWalking(seg.gradient) : costOfRunning(seg.gradient)) * terrainMultiplier;
       grossPower = netToGross(cost * speed);
       cumulativeMovingTimeS += dt;
 

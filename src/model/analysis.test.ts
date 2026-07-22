@@ -130,4 +130,32 @@ describe("analyzeRun", () => {
       expect(withStop.avgEffortFraction).toBeCloseTo(withoutStop.avgEffortFraction, 1);
     });
   });
+
+  describe("unpavedCostMultiplier", () => {
+    it("increases grossPowerWPerKg (and effortFraction) on segments classified unpaved", () => {
+      const segments = makeRunningSegments(1).map((s) => ({ ...s, surfaceUnpaved: true }));
+      const withoutMultiplier = analyzeRun(segments, baseInputs());
+      const withMultiplier = analyzeRun(segments, baseInputs({ unpavedCostMultiplier: 1.75 }));
+      expect(withMultiplier.segments[0].grossPowerWPerKg).toBeGreaterThan(withoutMultiplier.segments[0].grossPowerWPerKg);
+      expect(withMultiplier.segments[0].effortFraction!).toBeGreaterThan(withoutMultiplier.segments[0].effortFraction!);
+    });
+
+    it("has no effect on segments classified paved, or with no surface data at all", () => {
+      const paved = makeRunningSegments(1).map((s) => ({ ...s, surfaceUnpaved: false }));
+      const noData = makeRunningSegments(1);
+      const pavedResult = analyzeRun(paved, baseInputs({ unpavedCostMultiplier: 1.75 }));
+      const pavedBaseline = analyzeRun(paved, baseInputs());
+      const noDataResult = analyzeRun(noData, baseInputs({ unpavedCostMultiplier: 1.75 }));
+      const noDataBaseline = analyzeRun(noData, baseInputs());
+      expect(pavedResult.segments[0].grossPowerWPerKg).toBeCloseTo(pavedBaseline.segments[0].grossPowerWPerKg, 10);
+      expect(noDataResult.segments[0].grossPowerWPerKg).toBeCloseTo(noDataBaseline.segments[0].grossPowerWPerKg, 10);
+    });
+
+    it("multiplier=1 (the default) is a no-op even on an unpaved segment", () => {
+      const segments = makeRunningSegments(1).map((s) => ({ ...s, surfaceUnpaved: true }));
+      const withDefault = analyzeRun(segments, baseInputs());
+      const withExplicitOne = analyzeRun(segments, baseInputs({ unpavedCostMultiplier: 1 }));
+      expect(withExplicitOne).toEqual(withDefault);
+    });
+  });
 });

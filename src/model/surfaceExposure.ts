@@ -1,18 +1,17 @@
-// Terrain-surface durability drift (validated as a real, held-out-improving
-// effect: a leave-one-out backtest across 31 real races showed 28
-// improved, 0 regressed, when a fitted per-unpaved-meter drift term was
-// added on top of the existing tau/fInf fit). Unlike descent (derived
-// purely from the course's own elevation profile, already present on every
-// segment), surface classification needs an external map-matching lookup
-// (see attachSurfaceData below) -- there's no equivalent of
-// descentStepForSegment that can compute this from GPX data alone.
+// Terrain-surface classification, from an external map-matching lookup
+// (Valhalla) -- unlike descent (derived purely from the course's own
+// elevation profile, already present on every segment), surface needs a
+// network call, so this module owns mapping that response onto segments
+// rather than computing anything from GPX data alone.
 //
-// Only one exposure metric is offered here (cumulative unpaved meters),
-// unlike descentImpact.ts's three candidate bases -- that investigation
-// didn't know upfront which of raw/speed-weighted/speed-squared descent
-// would matter, but the surface backtest already validated raw unpaved
-// meters directly, so there's no open question to keep multiple readings
-// alive for.
+// Two rejected designs preceded the flat cost multiplier this app ships
+// today (see solver.ts's own doc comment on unpavedCostMultiplier for the
+// full comparison): a cumulative-exposure durability-drift term (mirroring
+// descentImpact.ts's mechanism) fit far worse in a leave-one-out backtest,
+// and a hard speed cap on unpaved terrain fit worse too once compared
+// honestly. See fitUnpavedCostMultiplierAcrossRaces in pacingFit.ts and the
+// cost multiplier applied in solver.ts/analysis.ts -- this module now only
+// owns the classification step, not any exposure/accumulation logic.
 
 import type { CourseSegment } from "../gpx/pipeline";
 
@@ -76,38 +75,4 @@ export function attachSurfaceData(segments: CourseSegment[], edges: ValhallaSurf
     const midpointKm = (s.cumulativeDistance3D - s.distance3D / 2) / 1000;
     return { ...s, surfaceUnpaved: unpavedFractionAt(midpointKm) >= 0.5 };
   });
-}
-
-export interface SurfaceStep {
-  /** Meters of THIS segment's own distance counted as unpaved -- 0 if
-   * classified as paved, or if no surface data is available at all. */
-  unpavedM: number;
-}
-
-/**
- * Per-segment core shared by cumulativeUnpavedMForSegments and by callers
- * that need to track a running cumulative total alongside their own other
- * per-segment state (pacingFit.ts's buildEffortTrendPoints, solver.ts's
- * simulate) -- mirrors descentStepForSegment's role for descent.
- */
-export function surfaceStepForSegment(seg: CourseSegment): SurfaceStep {
-  if (seg.paused || !seg.surfaceUnpaved) return { unpavedM: 0 };
-  return { unpavedM: seg.distance3D };
-}
-
-/** Total unpaved distance across a whole segment array -- for callers that
- * just want a summary number (e.g. the ceiling-loss sanity check this
- * feature was validated with), not a running per-segment total. */
-export function cumulativeUnpavedMForSegments(segments: CourseSegment[]): number {
-  let total = 0;
-  for (const seg of segments) total += surfaceStepForSegment(seg).unpavedM;
-  return total;
-}
-
-/** True if at least one segment carries surface data -- the basis for
- * deciding whether to apply a fitted surface-drift rate at all (see
- * solver.ts's simulate()): a course that was never surface-classified
- * should be silently unaffected, not treated as 0% unpaved. */
-export function hasSurfaceData(segments: CourseSegment[]): boolean {
-  return segments.some((s) => s.surfaceUnpaved !== undefined);
 }

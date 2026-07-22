@@ -328,45 +328,60 @@ describe("descent-based durability drift (PLAN.md §12/§13 stage 5)", () => {
   });
 });
 
-describe("surface-based durability drift", () => {
+describe("unpaved terrain cost multiplier", () => {
   const SURFACE_TEST_THETA = 0.8;
 
   function segmentsWithSurface(n: number, segLenM: number, unpaved: boolean | undefined): CourseSegment[] {
     return makeSegments(n, segLenM, 0).map((s) => ({ ...s, surfaceUnpaved: unpaved }));
   }
 
-  it("finishes slower on an unpaved course than an otherwise-identical paved one, when a rate is configured", () => {
-    const unpavedCourse = baseInputs({ segments: segmentsWithSurface(200, 50, true) });
-    const pavedCourse = baseInputs({ segments: segmentsWithSurface(200, 50, false) });
-    const rate = 0.00002;
+  it("finishes slower on an unpaved course than an otherwise-identical paved one, when a multiplier is configured", () => {
+    const unpavedCourse = baseInputs({ segments: segmentsWithSurface(200, 50, true), unpavedCostMultiplier: 1.75 });
+    const pavedCourse = baseInputs({ segments: segmentsWithSurface(200, 50, false), unpavedCostMultiplier: 1.75 });
 
-    const unpaved = simulate(SURFACE_TEST_THETA, { ...unpavedCourse, ceilingParams: { durabilityDriftPerUnpavedUnit: rate } });
-    const paved = simulate(SURFACE_TEST_THETA, { ...pavedCourse, ceilingParams: { durabilityDriftPerUnpavedUnit: rate } });
+    const unpaved = simulate(SURFACE_TEST_THETA, unpavedCourse);
+    const paved = simulate(SURFACE_TEST_THETA, pavedCourse);
 
     expect(unpaved.feasible).toBe(true);
     expect(unpaved.finishTimeS).toBeGreaterThan(paved.finishTimeS);
     // Paved course, all surfaceUnpaved:false, should be unaffected by the
-    // rate entirely (0 exposure throughout).
-    const pavedNoRate = simulate(SURFACE_TEST_THETA, pavedCourse);
-    expect(paved.finishTimeS).toBeCloseTo(pavedNoRate.finishTimeS, 6);
+    // multiplier entirely -- it only ever applies to unpaved segments.
+    const pavedNoMultiplier = simulate(SURFACE_TEST_THETA, baseInputs({ segments: segmentsWithSurface(200, 50, false) }));
+    expect(paved.finishTimeS).toBeCloseTo(pavedNoMultiplier.finishTimeS, 6);
   });
 
-  it("is byte-for-byte unchanged when no segment has surface data, even with a rate configured", () => {
+  it("is byte-for-byte unchanged when no segment has surface data, even with a multiplier configured", () => {
     const inputs = baseInputs({ segments: segmentsWithSurface(200, 50, undefined) });
-    const withRateNoData = simulate(SURFACE_TEST_THETA, { ...inputs, ceilingParams: { durabilityDriftPerUnpavedUnit: 0.00002 } });
+    const withMultiplierNoData = simulate(SURFACE_TEST_THETA, { ...inputs, unpavedCostMultiplier: 1.75 });
     const plain = simulate(SURFACE_TEST_THETA, inputs);
-    expect(withRateNoData).toEqual(plain);
+    expect(withMultiplierNoData).toEqual(plain);
   });
 
-  it("composes multiplicatively with descent-based drift when both are configured", () => {
+  it("multiplier=1 (the default) is a no-op even on a fully unpaved course", () => {
     const segments = segmentsWithSurface(200, 50, true);
-    const inputs = baseInputs({ segments });
-    const descentOnly = simulate(SURFACE_TEST_THETA, { ...inputs, ceilingParams: { durabilityDriftPerDescentUnit: 0.0001 } });
-    const both = simulate(SURFACE_TEST_THETA, {
-      ...inputs,
-      ceilingParams: { durabilityDriftPerDescentUnit: 0.0001, durabilityDriftPerUnpavedUnit: 0.00002 },
-    });
-    expect(both.feasible).toBe(true);
-    expect(both.finishTimeS).toBeGreaterThan(descentOnly.finishTimeS);
+    const withDefault = simulate(SURFACE_TEST_THETA, baseInputs({ segments }));
+    const withExplicitOne = simulate(SURFACE_TEST_THETA, baseInputs({ segments, unpavedCostMultiplier: 1 }));
+    expect(withDefault).toEqual(withExplicitOne);
+  });
+
+  it("is a flat, instantaneous effect with no carryover -- a paved segment right after a long unpaved stretch is unaffected", () => {
+    // Half unpaved, then half paved -- if this were a cumulative/durability
+    // effect (like the discarded earlier design), the back half would still
+    // show some lingering penalty. It shouldn't: cost is evaluated fresh
+    // per segment from surfaceUnpaved alone. Flat ceiling (f0=fInf, no
+    // time-based fade) isolates this from the ceiling's own natural decay,
+    // which would otherwise also make the back half differ between the two
+    // courses (it starts later, at a different elapsed time, in the mixed
+    // course) for a reason that has nothing to do with surface.
+    const flatCeiling = { f0: 0.7, fInf: 0.7, tauMin: 250 };
+    const segments = [...segmentsWithSurface(100, 50, true), ...segmentsWithSurface(100, 50, false)];
+    const mixed = simulate(SURFACE_TEST_THETA, baseInputs({ segments, unpavedCostMultiplier: 1.75, ceilingParams: flatCeiling }));
+    const allPaved = simulate(
+      SURFACE_TEST_THETA,
+      baseInputs({ segments: segmentsWithSurface(200, 50, false), ceilingParams: flatCeiling }),
+    );
+    const mixedBackHalfTimeS = mixed.segments.slice(100).reduce((s, r) => s + r.timeS, 0);
+    const pavedBackHalfTimeS = allPaved.segments.slice(100).reduce((s, r) => s + r.timeS, 0);
+    expect(mixedBackHalfTimeS).toBeCloseTo(pavedBackHalfTimeS, 6);
   });
 });

@@ -56,10 +56,12 @@ export interface FormInputs {
   altitudeAdjustment: boolean;
   /** Fraction lost per hour of durability drift. 0 = off. */
   durabilityDriftPerHour: number;
-  /** Fraction lost per meter of unpaved/technical trail surface covered --
-   * see src/model/surfaceExposure.ts. 0 = off (default; also the practical
-   * value for any course/race with no surface data available yet). */
-  durabilityDriftPerUnpavedUnit: number;
+  /** Flat cost multiplier applied to unpaved/technical trail segments (see
+   * src/model/surfaceExposure.ts) -- 1 = off (default; also the practical
+   * value for any course/race with no surface data available yet). Not a
+   * CeilingParams field -- threaded directly into SolverInputs/AnalysisInputs,
+   * since it's a cost-of-locomotion effect, not an aerobic-ceiling one. */
+  unpavedCostMultiplier: number;
   segmentLengthM: number;
   smoothingWindowM: number;
   /** Measured (pace, fat-oxidation) points. Non-empty overrides LT1/LT2 for the fuel/substrate split. */
@@ -100,7 +102,7 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   forceWalkAboveGrade: null,
   altitudeAdjustment: true,
   durabilityDriftPerHour: 0,
-  durabilityDriftPerUnpavedUnit: 0,
+  unpavedCostMultiplier: 1,
   segmentLengthM: 50,
   smoothingWindowM: 150,
   fatOxPoints: [],
@@ -288,7 +290,6 @@ export function resolveCeilingParams(inputs: FormInputs): CeilingParams {
     fInf: inputs.fInf,
     tauMin: inputs.tauMin,
     durabilityDriftPerHour: inputs.durabilityDriftPerHour,
-    durabilityDriftPerUnpavedUnit: inputs.durabilityDriftPerUnpavedUnit,
   };
 }
 

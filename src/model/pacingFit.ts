@@ -17,7 +17,7 @@ import type { CourseSegment } from "../gpx/pipeline";
 import type { AnalysisSegmentResult } from "./analysis";
 import { type CeilingParams, ceilingPower } from "./ceiling";
 import { descentStepForSegment } from "./descentImpact";
-import { hasSurfaceData, surfaceStepForSegment } from "./surfaceExposure";
+import { findSustainableTheta, type SolverInputs } from "./solver";
 
 export interface EffortTrendPoint {
   /** Hours elapsed since the start of the run, at the start of this segment. */
@@ -39,15 +39,14 @@ export interface EffortTrendPoint {
   cumulativeDescentImpact?: number;
   cumulativeDescentImpactSquared?: number;
   /**
-   * Cumulative unpaved/technical-trail distance accumulated *before* this
-   * segment, meters -- same "so far" convention as the descent fields
-   * above. Undefined for a whole race means no surface data was ever
-   * attached to it (see surfaceExposure.ts's attachSurfaceData) -- distinct
-   * from a genuinely all-paved race, where every point still gets 0.
-   * fitSurfaceDriftPerUnpavedUnit/fitSurfaceDriftAcrossRaces skip races
-   * with no surface data rather than treating them as 0% unpaved.
+   * True if this segment's own terrain is classified unpaved (see
+   * surfaceExposure.ts's attachSurfaceData), false if known paved,
+   * undefined if no surface data was ever attached to this race. Per-point
+   * (not cumulative, unlike the descent fields above) -- fitUnpavedCostMultiplier
+   * drives a flat instantaneous cost effect, not an accumulating one, so it
+   * only needs to know whether *this* segment itself was unpaved.
    */
-  cumulativeUnpavedM?: number;
+  surfaceUnpaved?: boolean;
 }
 
 /**
@@ -79,23 +78,6 @@ function cumulativeDescentBeforeEachSegment(
   return result;
 }
 
-/** Running per-segment unpaved-distance sums, same "start of each
- * courseSegments index" convention as cumulativeDescentBeforeEachSegment.
- * Returns all-undefined when the course has no surface data at all (see
- * surfaceExposure.ts's hasSurfaceData) rather than all-zero, so a race that
- * was never surface-classified isn't mistaken for one that's genuinely
- * 100% paved. */
-function cumulativeUnpavedBeforeEachSegment(courseSegments: CourseSegment[]): (number | undefined)[] {
-  if (!hasSurfaceData(courseSegments)) return courseSegments.map(() => undefined);
-  const result: number[] = [];
-  let m = 0;
-  for (const seg of courseSegments) {
-    result.push(m);
-    m += surfaceStepForSegment(seg).unpavedM;
-  }
-  return result;
-}
-
 /**
  * Raw (grossPower, elapsed time, altitude) per moving segment, from an
  * already-run analyzeRun() -- the fit needs to recompute the ceiling at many
@@ -109,7 +91,6 @@ export function buildEffortTrendPoints(
   altitudeAdjustment: boolean,
 ): EffortTrendPoint[] {
   const cumulativeDescent = cumulativeDescentBeforeEachSegment(courseSegments);
-  const cumulativeUnpaved = cumulativeUnpavedBeforeEachSegment(courseSegments);
   return analysisSegments
     .filter((s) => s.effortFraction !== null)
     .map((s) => ({
@@ -120,7 +101,7 @@ export function buildEffortTrendPoints(
       cumulativeDescentM: cumulativeDescent[s.index]?.m ?? 0,
       cumulativeDescentImpact: cumulativeDescent[s.index]?.impact ?? 0,
       cumulativeDescentImpactSquared: cumulativeDescent[s.index]?.impactSquared ?? 0,
-      cumulativeUnpavedM: cumulativeUnpaved[s.index],
+      surfaceUnpaved: courseSegments[s.index]?.surfaceUnpaved,
     }));
 }
 
@@ -139,17 +120,11 @@ export interface TrendFit {
  * descent-based drift term (if ceilingParams.durabilityDriftPerDescentUnit
  * is set) actually has something to act on. Omitting it leaves behavior
  * byte-for-byte identical to before this parameter existed.
- *
- * unpavedExposureSelector is the same idea, one level over: optional and
- * omitted by every caller except fitSurfaceDriftPerUnpavedUnit below, reads
- * cumulativeUnpavedM off each point and passes it through to ceilingPower
- * as unpavedExposureM for the surface-based drift term.
  */
 export function computeEffortTrend(
   points: EffortTrendPoint[],
   ceilingParams: CeilingParams,
   descentExposureSelector?: (p: EffortTrendPoint) => number,
-  unpavedExposureSelector?: (p: EffortTrendPoint) => number,
 ): TrendFit | null {
   const xs: number[] = [];
   const ys: number[] = [];
@@ -164,7 +139,6 @@ export function computeEffortTrend(
         altitudeM: p.altitudeM,
         elapsedHours: p.tHours,
         ...(descentExposureSelector ? { descentExposure: descentExposureSelector(p) } : {}),
-        ...(unpavedExposureSelector ? { unpavedExposureM: unpavedExposureSelector(p) } : {}),
       },
       ceilingParams,
     );
@@ -1313,179 +1287,157 @@ export function fitDurabilityDriftPerDescentUnitAcrossRaces(
   };
 }
 
-export interface SurfaceDriftFitResult {
-  durabilityDriftPerUnpavedUnit: number;
-  trendAtFitPctPerHour: number;
+/** Multiplier range searched below -- 1 (no penalty) to 4 (4x cost, i.e.
+ * 300% slower on unpaved terrain), comfortably past the ~1.5x this was
+ * validated at against real data, the same "let the range include plenty
+ * of headroom past the expected answer" approach the other fits in this
+ * file take. */
+const UNPAVED_COST_MULTIPLIER_RANGE: [number, number] = [1, 4];
+
+/** Reduced solver precision used only while *searching* for the multiplier
+ * (comparing many candidates against real finish times is far more
+ * expensive than the old effort-fraction-gap proxy, which needed no
+ * simulation at all) -- adequate to reliably locate the right candidate,
+ * not used for the real predictions solver.ts/analysis.ts make once a
+ * multiplier is chosen and applied. */
+const FIT_SEARCH_SOLVER_OPTIONS = { scanSteps: 12, iterations: 18 };
+
+/** One training race for the fit below -- needs the full course (with
+ * surface data already attached via surfaceExposure.ts's attachSurfaceData)
+ * and the athlete's actual recorded finish time, not just the lightweight
+ * EffortTrendPoint[] trend the other fits in this file use. */
+export interface FinishTimeTrainingRace {
+  segments: CourseSegment[];
+  actualFinishTimeS: number;
 }
 
-function unpavedExposure(p: EffortTrendPoint): number {
-  return p.cumulativeUnpavedM ?? 0;
+export interface RaceUnpavedCostMultiplierResult {
+  /** % error between the naive (multiplier=1) prediction and this race's
+   * actual recorded finish time. */
+  baselineErrPct: number;
+  /** % error at the fitted multiplier. */
+  fitErrPct: number;
+  /** True if this race has no unpaved segments at all -- the multiplier
+   * can't move its predicted finish time regardless of what it ends up
+   * being, so it had no real say in the fit. */
+  unresponsive: boolean;
 }
 
-/**
- * Same "hold tau/f0/fInf fixed, search one axis" shape as
- * fitDurabilityDriftPerDescentUnit above, keyed to cumulative unpaved/
- * technical-trail distance instead of descent -- terrain difficulty the
- * grade/altitude model alone doesn't capture. Unlike descent, there's only
- * one exposure metric here (raw unpaved meters, already validated by a
- * leave-one-out backtest across 31 real races: 28 improved, 0 regressed),
- * not several candidate bases to keep alive -- so no `basis` parameter.
- *
- * Returns null both when this race has no surface data at all (never
- * classified -- see EffortTrendPoint.cumulativeUnpavedM's own doc) and when
- * it does but is genuinely 0% unpaved throughout (a real result, just one
- * that can't identify a rate) -- either way, a single race with nothing to
- * act on can't inform this fit.
- */
-export function fitSurfaceDriftPerUnpavedUnit(
-  points: EffortTrendPoint[],
-  ceilingParams: CeilingParams,
-  range?: [number, number],
-): SurfaceDriftFitResult | null {
-  const trimmed = trimForPacingFit(points);
-  if (trimmed.length < MIN_FIT_POINTS) return null;
-  if (!trimmed.some((p) => p.cumulativeUnpavedM !== undefined)) return null;
-
-  const maxExposure = Math.max(...trimmed.map(unpavedExposure));
-  if (!(maxExposure > 0)) return null;
-
-  // Same "let the rate's range include full saturation" approach as
-  // fitDurabilityDriftPerDescentUnit's own [0, 1.5/maxExposure].
-  const resolvedRange: [number, number] = range ?? [0, 1.5 / maxExposure];
-
-  const search = (lo: number, hi: number, step: number) => {
-    let best = lo;
-    let bestAbsSlope = Infinity;
-    for (let drift = lo; drift <= hi; drift += step) {
-      const trend = computeEffortTrend(trimmed, { ...ceilingParams, durabilityDriftPerUnpavedUnit: drift }, undefined, unpavedExposure);
-      if (trend && Math.abs(trend.slopePerHour) < bestAbsSlope) {
-        bestAbsSlope = Math.abs(trend.slopePerHour);
-        best = drift;
-      }
-    }
-    return best;
-  };
-
-  const [lo, hi] = resolvedRange;
-  const coarseStep = (hi - lo) / 30;
-  const coarse = search(lo, hi, coarseStep);
-  const fine = search(Math.max(lo, coarse - coarseStep), Math.min(hi, coarse + coarseStep), coarseStep / 10);
-
-  const fittedTrend = computeEffortTrend(trimmed, { ...ceilingParams, durabilityDriftPerUnpavedUnit: fine }, undefined, unpavedExposure);
-  if (!fittedTrend) return null;
-
-  return {
-    durabilityDriftPerUnpavedUnit: fine,
-    trendAtFitPctPerHour: fittedTrend.slopePerHour * 100,
-  };
-}
-
-export interface MultiRaceSurfaceDriftFitResult {
-  durabilityDriftPerUnpavedUnit: number;
-  perRace: {
-    trendAtCurrentPctPerHour: number;
-    trendAtFitPctPerHour: number;
-    /** True if this race has no surface data at all, or has essentially no
-     * unpaved distance for the fitted rate to act on -- same "sat through
-     * this fit without informing it" idea as the descent/tau fits' own
-     * unresponsive flag. */
-    unresponsive: boolean;
-  }[];
-  /** See MIN_INFORMATIVE_RACES's doc above -- count of perRace entries with
-   * unresponsive === false. */
+export interface MultiRaceUnpavedCostMultiplierResult {
+  unpavedCostMultiplier: number;
+  perRace: RaceUnpavedCostMultiplierResult[];
   informativeRaceCount: number;
   hitSearchBoundary: "lower" | "upper" | null;
 }
 
 /**
- * Pooled version of fitSurfaceDriftPerUnpavedUnit, same "sum of squared
- * per-race slopes" shape as fitDurabilityDriftPerDescentUnitAcrossRaces.
- * Races with no surface data at all are excluded from the pool entirely
- * (not treated as 0% unpaved) -- everything else follows that function's
- * own reasoning, including its interpretive caveat: a good in-sample fit
- * here is close to guaranteed by construction (cumulative unpaved distance
- * is monotonic in elapsed time within a race, easily confounded with
- * tau/time-based drift), so real evidence has to come from out-of-sample
- * prediction accuracy, not from how well this flattens its own training
- * races -- exactly what this term was validated with before being added.
+ * Fits a flat, instantaneous cost multiplier applied to unpaved segments'
+ * Minetti cost (see solver.ts/analysis.ts) -- terrain difficulty the grade/
+ * altitude model alone doesn't capture. Chosen over an earlier cumulative-
+ * exposure durability-drift design after a leave-one-out backtest across
+ * real races showed this flat, no-carryover cost penalty fits far better.
+ *
+ * An earlier version of this fit searched for the multiplier that
+ * equalized recorded effort fraction between unpaved and paved segments --
+ * a real-data check found that gap is actually flat or slightly *negative*
+ * (this athlete's own recorded power isn't elevated on unpaved terrain, if
+ * anything slightly lower -- they simply move slower, likely a technical-
+ * terrain speed constraint rather than a metabolic one), so that objective
+ * structurally couldn't recover a multiplier anywhere near what a held-out
+ * finish-time backtest showed the mechanism actually needs (~1.5x vs.
+ * ~1.1x). This version fits directly against the objective that matters --
+ * how well each candidate multiplier predicts each training race's own
+ * actual finish time via the real solver -- holding tau/fInf fixed at
+ * whatever's in ceilingParams, same "one axis at a time" approach as the
+ * other fits in this file. Races with no unpaved segments at all can't
+ * inform the search (the multiplier has zero effect on their prediction)
+ * and are excluded from the objective, marked unresponsive rather than
+ * silently pulling the fit toward "no penalty".
+ *
+ * Meaningfully more expensive than a trend-based fit: each candidate
+ * multiplier requires a real forward-simulation solve per race, not just
+ * arithmetic over already-computed points (see FIT_SEARCH_SOLVER_OPTIONS).
  */
-export function fitSurfaceDriftAcrossRaces(
-  races: EffortTrendPoint[][],
+export function fitUnpavedCostMultiplierAcrossRaces(
+  races: FinishTimeTrainingRace[],
   ceilingParams: CeilingParams,
+  commonInputs: Omit<SolverInputs, "segments" | "ceilingParams" | "unpavedCostMultiplier">,
   opts: FitTauAcrossRacesOptions = {},
-): MultiRaceSurfaceDriftFitResult | null {
+): MultiRaceUnpavedCostMultiplierResult | null {
   const halfLifeDays = opts.halfLifeDays ?? DEFAULT_RECENCY_HALF_LIFE_DAYS;
   const now = opts.now ?? new Date();
 
-  const trimmedWithWeight = races
+  const withWeight = races
     .map((r, i) => {
       const date = opts.raceDates?.[i] ?? null;
       return {
-        points: trimForPacingFit(r),
+        race: r,
         recencyWeight: date ? Math.exp((-Math.LN2 * daysAgo(date, now)) / halfLifeDays) : 1,
+        hasUnpaved: r.segments.some((s) => s.surfaceUnpaved),
       };
     })
-    .filter((r) => r.points.length >= MIN_FIT_POINTS && r.points.some((p) => p.cumulativeUnpavedM !== undefined));
-  if (trimmedWithWeight.length === 0) return null;
+    .filter((r) => r.race.segments.length > 0 && r.race.actualFinishTimeS > 0);
+  if (withWeight.length === 0) return null;
 
-  const trimmed = trimmedWithWeight.map((r) => r.points);
-  const recencyWeights = trimmedWithWeight.map((r) => r.recencyWeight);
+  const informative = withWeight.filter((r) => r.hasUnpaved);
+  if (informative.length === 0) return null;
 
-  const currentTrends = trimmed.map((r) => computeEffortTrend(r, ceilingParams, undefined, unpavedExposure));
-  if (currentTrends.some((t) => !t)) return null;
+  const predictedFinishTimeS = (segments: CourseSegment[], multiplier: number): number => {
+    const { result } = findSustainableTheta(
+      { segments, ceilingParams, unpavedCostMultiplier: multiplier, ...commonInputs },
+      FIT_SEARCH_SOLVER_OPTIONS,
+    );
+    return result.finishTimeS;
+  };
 
-  const maxExposurePerRace = trimmed.map((r) => Math.max(...r.map(unpavedExposure)));
-  const overallMaxExposure = Math.max(...maxExposurePerRace);
-  if (!(overallMaxExposure > 0)) return null; // surface data present, but genuinely 0% unpaved everywhere
+  const errPctFor = (race: FinishTimeTrainingRace, multiplier: number): number =>
+    (100 * Math.abs(predictedFinishTimeS(race.segments, multiplier) - race.actualFinishTimeS)) / race.actualFinishTimeS;
 
-  const lo = 0;
-  const hi = 1.5 / overallMaxExposure;
-
-  const pooledSquaredSlope = (rate: number) => {
+  const pooledSquaredErr = (multiplier: number) => {
     let sum = 0;
-    for (let i = 0; i < trimmed.length; i++) {
-      const trend = computeEffortTrend(trimmed[i], { ...ceilingParams, durabilityDriftPerUnpavedUnit: rate }, undefined, unpavedExposure);
-      if (!trend) return Infinity;
-      sum += recencyWeights[i] * trend.slopePerHour ** 2;
+    for (const r of informative) {
+      const err = errPctFor(r.race, multiplier) / 100;
+      sum += r.recencyWeight * err * err;
     }
     return sum;
   };
 
+  const [lo, hi] = UNPAVED_COST_MULTIPLIER_RANGE;
   const search = (searchLo: number, searchHi: number, step: number) => {
-    let bestRate = searchLo;
+    let bestM = searchLo;
     let bestScore = Infinity;
-    for (let rate = searchLo; rate <= searchHi; rate += step) {
-      const score = pooledSquaredSlope(rate);
+    for (let m = searchLo; m <= searchHi; m += step) {
+      const score = pooledSquaredErr(m);
       if (score < bestScore) {
         bestScore = score;
-        bestRate = rate;
+        bestM = m;
       }
     }
-    return bestRate;
+    return bestM;
   };
 
-  const coarseStep = (hi - lo) / 40;
+  // Coarser grid than the old trend-based fit -- each step here is a real
+  // solver simulation per informative race, not free arithmetic.
+  const coarseStep = (hi - lo) / 16;
   const coarse = search(lo, hi, coarseStep);
-  const fine = search(Math.max(lo, coarse - coarseStep), Math.min(hi, coarse + coarseStep), Math.max(coarseStep / 100, (hi - lo) / 10000));
+  const fine = search(Math.max(lo, coarse - coarseStep), Math.min(hi, coarse + coarseStep), coarseStep / 8);
 
-  const durabilityDriftPerUnpavedUnit = fine;
-  const fittedTrends = trimmed.map((r) => computeEffortTrend(r, { ...ceilingParams, durabilityDriftPerUnpavedUnit }, undefined, unpavedExposure));
-  if (fittedTrends.some((t) => !t)) return null;
+  const unpavedCostMultiplier = fine;
 
   const boundaryEpsilon = (hi - lo) / 1000;
   const hitSearchBoundary =
-    durabilityDriftPerUnpavedUnit <= lo + boundaryEpsilon ? "lower" : durabilityDriftPerUnpavedUnit >= hi - boundaryEpsilon ? "upper" : null;
+    unpavedCostMultiplier <= lo + boundaryEpsilon ? "lower" : unpavedCostMultiplier >= hi - boundaryEpsilon ? "upper" : null;
 
-  const perRace = currentTrends.map((current, i) => ({
-    trendAtCurrentPctPerHour: current!.slopePerHour * 100,
-    trendAtFitPctPerHour: fittedTrends[i]!.slopePerHour * 100,
-    unresponsive: durabilityDriftPerUnpavedUnit * maxExposurePerRace[i] < MIN_CEILING_DROP_FRACTION,
+  const perRace = withWeight.map((r) => ({
+    baselineErrPct: errPctFor(r.race, 1),
+    fitErrPct: errPctFor(r.race, unpavedCostMultiplier),
+    unresponsive: !r.hasUnpaved,
   }));
 
   return {
-    durabilityDriftPerUnpavedUnit,
+    unpavedCostMultiplier,
     perRace,
-    informativeRaceCount: perRace.filter((r) => !r.unresponsive).length,
+    informativeRaceCount: informative.length,
     hitSearchBoundary,
   };
 }

@@ -98,8 +98,8 @@ function App() {
   // length/smoothing don't change the underlying GPS points a surface
   // lookup needs), applied to courseResult's segments below. A failed/slow
   // lookup just means predictions proceed without a surface term, exactly
-  // like durabilityDriftPerUnpavedUnit's own "no effect without exposure
-  // data" contract -- never blocks or errors the rest of planning.
+  // like unpavedCostMultiplier's own "no effect on segments with no
+  // surface data" contract -- never blocks or errors the rest of planning.
   const [surfaceEdges, setSurfaceEdges] = useState<ValhallaSurfaceEdge[] | null>(null);
   useEffect(() => {
     setSurfaceEdges(null);
@@ -152,6 +152,7 @@ function App() {
       walkMaxMs: formInputs.walkMaxMs,
       forceWalkAboveGrade: formInputs.forceWalkAboveGrade ?? undefined,
       altitudeAdjustment: formInputs.altitudeAdjustment,
+      unpavedCostMultiplier: formInputs.unpavedCostMultiplier,
     };
   }, [courseResult, formInputs]);
 
@@ -198,6 +199,11 @@ function App() {
       glycogenStoreG: resolveGlycogenStoreG(formInputs),
       walkMaxMs: formInputs.walkMaxMs,
       altitudeAdjustment: formInputs.altitudeAdjustment,
+      // Genuine retrospective display (this is Analysis mode reconstructing
+      // a real past run, not RunLibraryPanel building training data for the
+      // fit itself) -- the real fitted value belongs here, unlike
+      // RunLibraryPanel's own analyzeRun call which deliberately omits it.
+      unpavedCostMultiplier: formInputs.unpavedCostMultiplier,
     };
   }, [resultMode, courseResult, formInputs]);
 
@@ -427,7 +433,7 @@ function App() {
         onChange={setFormInputs}
         onApplyTau={(tauMin) => setFormInputs({ ...formInputs, tauMin })}
         onApplyFInf={(fInf) => setFormInputs({ ...formInputs, fInf })}
-        onApplySurfaceDrift={(durabilityDriftPerUnpavedUnit) => setFormInputs({ ...formInputs, durabilityDriftPerUnpavedUnit })}
+        onApplyUnpavedCostMultiplier={(unpavedCostMultiplier) => setFormInputs({ ...formInputs, unpavedCostMultiplier })}
         onAddVo2MaxEntry={(entry: Vo2MaxEntry) =>
           setFormInputs({ ...formInputs, vo2MaxHistory: [...formInputs.vo2MaxHistory, entry] })
         }

@@ -8,7 +8,6 @@ import { costOfRunning, costOfWalking, maxDescentSpeedMs } from "./minetti";
 import { grossToNet, netToGross } from "./energetics";
 import { type CeilingParams, ceilingPower, maxAerobicPower } from "./ceiling";
 import type { DescentExposureBasis } from "./pacingFit";
-import { hasSurfaceData as courseHasSurfaceData, surfaceStepForSegment } from "./surfaceExposure";
 import {
   type FuelingParams,
   type SubstrateParams,
@@ -41,6 +40,23 @@ export interface SolverInputs {
    * contract.
    */
   descentExposureBasis?: DescentExposureBasis;
+  /**
+   * Flat cost multiplier applied to costOfRunning/costOfWalking on segments
+   * classified unpaved (see gpx/pipeline.ts's CourseSegment.surfaceUnpaved
+   * and surfaceExposure.ts's attachSurfaceData). 1 = off (default) --
+   * chosen over two rejected alternatives after leave-one-out backtests
+   * against real races: (1) an earlier cumulative-exposure durability-drift
+   * design (mirroring descent's mechanism) fit far worse (~25% mean error
+   * vs ~9% for this flat version) -- technical terrain appears to cost more
+   * to move across right there, not to accumulate fatigue that lingers once
+   * you're back on pavement; (2) a hard cap on unpaved run speed (mirroring
+   * maxDescentSpeedMs), motivated by this athlete's recorded effort fraction
+   * not actually being elevated on unpaved terrain, also fit worse (~13%)
+   * once compared honestly -- a cost multiplier apparently captures the
+   * gradient-dependence of technical terrain (steep+technical costs more
+   * than flat+technical) that a flat speed cap can't.
+   */
+  unpavedCostMultiplier?: number;
 }
 
 export interface SegmentResult {
@@ -106,15 +122,7 @@ export function simulate(theta: number, inputs: SolverInputs): SimulationResult 
   let cumulativeDescentImpact = 0;
   let cumulativeDescentImpactSquared = 0;
   let previousElevation: number | null = null;
-
-  // Unlike descent, surface classification is a static per-segment property
-  // (attached upfront by surfaceExposure.ts's attachSurfaceData, not derived
-  // from this simulation's own speed), so whether it applies at all is
-  // decided once before the loop rather than inferred incrementally --
-  // avoids a partial-coverage course (map-matching gaps) silently looking
-  // "fully covered" for segments it never actually classified.
-  const courseHasSurface = courseHasSurfaceData(inputs.segments);
-  let cumulativeUnpavedM = 0;
+  const unpavedCostMultiplier = inputs.unpavedCostMultiplier ?? 1;
 
   for (const seg of inputs.segments) {
     const elapsedMin = cumulativeTimeS / 60;
@@ -136,14 +144,14 @@ export function simulate(theta: number, inputs: SolverInputs): SimulationResult 
         altitudeM,
         elapsedHours,
         ...(descentExposure !== undefined ? { descentExposure } : {}),
-        ...(courseHasSurface ? { unpavedExposureM: cumulativeUnpavedM } : {}),
       },
       inputs.ceilingParams,
     );
     const targetNet = Math.max(0, grossToNet(theta * ceilingGross));
 
-    const costRun = costOfRunning(seg.gradient);
-    const costWalk = costOfWalking(seg.gradient);
+    const terrainMultiplier = seg.surfaceUnpaved ? unpavedCostMultiplier : 1;
+    const costRun = costOfRunning(seg.gradient) * terrainMultiplier;
+    const costWalk = costOfWalking(seg.gradient) * terrainMultiplier;
     const vRun = Math.min(targetNet / costRun, maxDescentSpeedMs(seg.gradient));
     const vWalk = Math.min(walkMaxMs, targetNet / costWalk);
 
@@ -167,7 +175,6 @@ export function simulate(theta: number, inputs: SolverInputs): SimulationResult 
       cumulativeDescentImpact += descentM * speed;
       cumulativeDescentImpactSquared += descentM * speed * speed;
     }
-    cumulativeUnpavedM += surfaceStepForSegment(seg).unpavedM;
 
     const cost = mode === "run" ? costRun : costWalk;
     const grossPower = netToGross(cost * speed);
