@@ -517,27 +517,83 @@ as a direct substitute for the existing %VO2max intensity axis.
    others at least ~2x shorter), and the new fit reports
    `durationDiversityRatio` directly so the UI can flag when today's
    result is a rough guess rather than a firm number.
-3. **HR↔power/pace calibration** (optional stage). From any stored run with
-   both power/pace *and* HR, fit a per-athlete mapping (e.g. HR zone → power
-   fraction), restricted to the early, drift-minimal portion of each race.
-   Lets a *future* HR-only run (no footpod) still get a reasonable effort
-   estimate, with lower confidence flagged.
-4. **HR zone inputs on the Athlete page.** Threshold HR and/or max HR fields,
-   a zone-model selector (%HRmax / %HRR-Karvonen / %LTHR / fully custom
-   boundaries in bpm) — mirrors the existing LT1/LT2-as-fraction pattern, so
-   it slots into the same mental model rather than introducing a competing
-   one.
-5. **Fat/carb-ox curve reuse.** Already supported as a manual input
-   (`equivalentLT1LT2`, `resolveSubstrateAnchors`); a stored run with HR could
-   optionally attach a per-point HR value to each measured fat/carb-ox point,
-   letting a future run's HR data map onto the *same* curve via the HR↔effort
-   calibration from stage 3, instead of needing power for every future run.
+3. **HR↔power/pace calibration — built, scope narrowed after exploration.**
+   The original framing ("lets a future HR-only run with no footpod get an
+   effort estimate") turned out to already not apply to the common case:
+   `analyzeRun` always derives `grossPowerWPerKg` from GPS pace + gradient
+   via the Minetti cost curve, never from a device's own recorded power --
+   so a normal GPS run never actually *needs* HR for an effort estimate.
+   The only genuine "HR-only" case is a run with no GPS at all (e.g. a
+   treadmill session), which the pipeline can't ingest today (hard
+   requires lat/lon per point). Raised directly with the user: scope
+   confirmed as **GPS runs only, no new ingestion path** -- build the
+   calibration mechanism, HR zones, and a diagnostic overlay proving the
+   fat-ox-curve reuse works, without inventing a treadmill/manual-entry
+   format.
 
-Stages 1–2 are done and are the highest-value, least confounded by the HR
-caveats above — they work purely from power/pace data already being parsed.
-Stages 3–5 (not yet built) add HR-specific value but inherit the drift
-caveat, so they're framed as "lower-confidence, HR-only fallback," not a
-replacement.
+   `src/model/hrCalibration.ts`'s `fitHrToEffortCalibrationAcrossRaces`
+   fits `effortFraction ≈ intercept + slope × heartRateBpm` via a single
+   weighted least-squares regression pooling every (HR, effort) point
+   across every selected race -- unlike the tau/fInf fits, this isn't a
+   within-race fatigue shape, so it doesn't need their per-race-slope
+   pooling trick; HR-to-effort should be a roughly stable athlete-level
+   relationship across races. Restricted to the early ~65% of each race's
+   own duration, per the cardiac-drift research above (10-15bpm typical
+   drift over a long aerobic effort, worse in heat). Weighted by segment
+   duration and by race recency, same convention as the other multi-race
+   fits. `EffortTrendPoint` gained an optional `heartRateBpm` field
+   (mirrors `surfaceUnpaved`) to carry HR into the fit.
+
+   Verified with a synthetic recovery test first (known true slope/
+   intercept + noise, confirms the fit recovers close to truth; a
+   second test confirms points outside the early window are correctly
+   excluded by corrupting them and checking the recovered slope is
+   unaffected) before trusting it on real data. Auto-applies only when
+   R² clears a documented (not tuned-to-pass) 0.5 bar -- a low R² is a
+   legitimate result (this athlete's HR may just not track effort well),
+   not a bug to work around.
+
+   Real-data check (2026-07-22, 4 real races, downsampled for a browser
+   demo -- not the full-resolution backtest the terrain multiplier got,
+   since there's no equivalent "actual finish time" to validate an HR
+   calibration against): effort fraction ≈ -0.914 + 0.0116 × heart rate,
+   R² = 0.24 from 5287 pooled points across 4 runs -- below the 0.5 bar,
+   so correctly *not* auto-applied, with the UI explaining why. This is
+   the honest result for a rough demo dataset, not a claim the mechanism
+   is broken; a real athlete's own consistent HR data should fit better.
+4. **HR zone inputs on Settings — built.** `hrZoneModel` (%HRmax / %HRR-
+   Karvonen / %LTHR / custom boundaries in bpm), plus the relevant bpm
+   fields per model, mirror the existing LT1/LT2-as-fraction pattern. Zone
+   boundaries are resolved by `resolveHrZones` in `formInputs.ts` (standard
+   5-zone %HRmax/%HRR breakpoints; Garmin's own 6-zone %LTHR scheme, per
+   the same source PLAN.md already cites; user-entered boundaries for
+   `custom`) and shown read-only in a new "Heart rate zones" fieldset in
+   `InputsPanel.tsx`. Reference/display only, same as `lt1/lt2HeartRateBpm`
+   above -- nothing here feeds ceiling or substrate calculations; the
+   calibration in stage 3 is the one place HR actually drives a number,
+   and it's kept deliberately separate from these zone boundaries.
+5. **Fat/carb-ox curve reuse — validated, not separately built.**
+   `predictEffortFractionFromHr(hr, calibration) * ceilingPower(...)` gives
+   a power estimate usable anywhere pace-derived power already is,
+   including `substrate.ts`'s `splitPower`/`bonkPowerWPerKg` -- both are
+   already agnostic to where a power number came from, so no new
+   substrate-layer code was needed. Proven two ways: a unit test feeding
+   HR-calibration-derived power straight into `splitPower`, and a real
+   diagnostic overlay -- `PowerHrChart` (Analysis mode) now draws a third
+   "HR-calibrated power" line alongside modeled and measured power,
+   verified in a real browser against real GPS+HR+power data (Ecotrail 80)
+   with no console errors. The overlay is the practical value delivered
+   for GPS runs today: if the HR-derived line tracks modeled power early
+   and diverges late, that's cardiac drift showing up exactly where
+   expected, not a sign the calibration is wrong. A genuinely GPS-less
+   (treadmill) ingestion path, which would be the other place this reuse
+   could plug in, remains explicitly out of scope (see stage 3's note).
+
+Stages 1–5 are now built. Stages 1-2 work purely from power/pace data
+already being parsed; stages 3-5 add HR-specific value within the scope
+the user confirmed (GPS runs only) -- genuinely useful (zone awareness, an
+independent effort cross-check, drift visualization) without overclaiming
+a "HR-only" capability the pipeline doesn't actually support yet.
 
 ## 12. Future work: intensity-dependent fade, time-varying tracking, input provenance
 
