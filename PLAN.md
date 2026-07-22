@@ -561,6 +561,27 @@ as a direct substitute for the existing %VO2max intensity axis.
    so correctly *not* auto-applied, with the UI explaining why. This is
    the honest result for a rough demo dataset, not a claim the mechanism
    is broken; a real athlete's own consistent HR data should fit better.
+
+   **Fixed: power is now smoothed before regressing against HR.** The
+   first version above compared raw per-segment power to raw per-segment
+   HR -- the user pushed back on this, on physiological grounds: the
+   cardiac/pulmonary response to a change in output is lagged and
+   effectively low-pass filtered, not instantaneous, so a point-by-point
+   comparison would wash out a real relationship whenever effort is noisy
+   at short timescales (terrain variation, walk/run transitions). Checked
+   directly on real full-resolution power+HR data from 3 real ultras
+   (Soria Moria, Ecotrail 80, Ås Backyard): pooled R² was 0.31 at zero
+   lag/no smoothing, rose only to ~0.35 with the best fixed lag on HR
+   (~30s), but rose to **~0.43** when power was smoothed over a trailing
+   ~60-90s window before regressing against HR -- matching published
+   VO2/HR on-transient time constants (roughly 20-45s for moderate
+   exercise). A "sustained effort only" filter (steady 3-minute stretches)
+   pushed R² to ~0.59 but kept only ~5% of points; smoothing alone was
+   judged the better production tradeoff. `hrCalibration.ts` now smooths
+   `grossPowerWPerKg` over a trailing 75s window (the empirical midpoint)
+   before computing effort fraction, verified with a synthetic test that
+   recovers a true slope through large high-frequency power noise a raw
+   comparison would be swamped by.
 4. **HR zone inputs on Settings — built.** `hrZoneModel` (%HRmax / %HRR-
    Karvonen / %LTHR / custom boundaries in bpm), plus the relevant bpm
    fields per model, mirror the existing LT1/LT2-as-fraction pattern. Zone
@@ -588,6 +609,18 @@ as a direct substitute for the existing %VO2max intensity axis.
    expected, not a sign the calibration is wrong. A genuinely GPS-less
    (treadmill) ingestion path, which would be the other place this reuse
    could plug in, remains explicitly out of scope (see stage 3's note).
+
+   **Follow-up: estimated heart rate on the results page — built.** The
+   overlay above runs the calibration forward (HR → effort); a Planning-
+   mode course has no recorded HR to run it on in the first place, so the
+   useful direction there is the inverse: `predictHeartRateFromEffortFraction`
+   estimates the HR this athlete would likely show at a given effort
+   fraction. `ChartPoint` gained `estimatedHeartRateBpm`, computed per
+   point from `grossPowerWPerKg`/ceiling when a calibration is applied
+   (null otherwise); the split table gained a time-weighted "Est. HR"
+   column, shown only when a calibration is configured. Verified in a real
+   browser: sensible bpm estimates tracking terrain/pace across splits, no
+   console errors.
 
 Stages 1–5 are now built. Stages 1-2 work purely from power/pace data
 already being parsed; stages 3-5 add HR-specific value within the scope
@@ -1195,6 +1228,28 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    and diagnostics — the real running on either side of a transit gap is
    still used, just as separate legs, instead of discarding the whole
    recording.
+
+   **Follow-up: does the full surface-type granularity help? Checked
+   twice, negative both times.** The user asked whether using Valhalla's
+   full surface vocabulary (gravel/dirt/compacted/path), not just binary
+   paved/unpaved, would improve on the single flat multiplier. First
+   check: pooled effort fraction by surface type across 145 runs (not
+   just the 7-8 marquee races) -- a real, orderly pattern held up with far
+   more data than before: paved 88.3% > dirt 81.6% > gravel 76.9% ≈
+   compacted 75.1% > path 66.2%, with path showing the largest gap (-22pp
+   from paved) across 73 diverse runs. That motivated retesting the
+   2-group finish-time backtest (see stage 6 above) along a path-vs-rest
+   split instead of the earlier failed gravel-vs-rest one. Result: 25.4%
+   baseline → 10.1% -- better than gravel-vs-rest's 13.5%, but still worse
+   than the single multiplier's 8.1%, and path's own multiplier landed
+   exactly at its search boundary (1.00x, no effect) in every fold, with
+   all the cost pushed into the other category. Real, informative, and
+   negative: this athlete's raw effort genuinely varies by surface type
+   (confirmed with much more data than the first pass), but that finer
+   behavioral signal doesn't translate into a better finish-time-
+   prediction mechanism for this solver-based approach -- the extra
+   parameter doesn't earn its keep for that specific objective. Binary
+   paved/unpaved remains the shipped granularity.
 
 Stages 1-6 are now built. Stages 1-4 (plus the avgIntensity/within-race
 fixes folded into stage 4 above) are well-supported by existing literature
