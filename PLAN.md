@@ -2013,10 +2013,117 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
      grade" and the tests lock it in on purpose — flagged here so a future
      grade-bin residual oddity gets recognized rather than re-debugged from
      scratch.
-3. **Surface regression across the full library** — the well-motivated half
-   (real, non-circular signal already found in §12 stage 6's real-power
-   check); fit first since it doesn't need the duration filter stage 4
-   needs.
+3. **Surface regression across the full library — done (2026-07-23),
+   and the real conclusion is not the one the first pass reached.**
+   `src/model/segmentLibrary.ts`'s `buildSegmentLibrary` tags every
+   monotonic segment with its source run's id (the gap Stage 2 flagged),
+   feeding `src/model/surfaceCostAnalysis.ts`'s `buildSurfaceCostTable` /
+   `summarizeAcrossGradeBins` — a grade-bin × surface-category table (not
+   a single collapsed mean) comparing device-power-implied log-speed
+   residuals, restricted to running gait by default. Both built to avoid
+   the grade/gait confound directly: tabulating this athlete's real data
+   first (before writing any fitting code) showed path averages ~10% grade
+   vs. paved's ~3%, and is 53% walked vs. paved's 20% — exactly the
+   confound that would make a single per-category mean blend "this terrain
+   is slower" with "this terrain's segments happen to be steeper/more
+   often walked." Verified with 10 synthetic tests (recovering an injected
+   multiplier within one grade bin at matched power; correctly reporting
+   `null`, not a spurious number, when a category never overlaps paved in
+   any bin; run-count vs. segment-count; gait/power/surface filtering;
+   weighted pooling across bins).
+
+   **First real-data pass: near-null.** Across 8824 segments/203 runs,
+   running-gait-only, the paved-relative implied cost multiplier came back
+   close to 1.0 for every category (gravel 1.012, dirt 1.030, compacted
+   1.020, path 0.999) — in sharp contrast to both the shipped whole-race
+   `unpavedCostMultiplier` (~1.8-1.9x) and §12 stage 6's own earlier
+   real-power finding (path 9-31% slower at matched power+gradient).
+
+   **That near-null turned out to be an artifact of the instrument, not
+   evidence of no effect — caught before writing it up, not after.**
+   The residual this table computes reduces algebraically to comparing
+   *device power* at matched speed+grade across surfaces (log(speed) −
+   log(power/cost(grade)), held at fixed grade, is a comparison of
+   speed-per-watt). Stryd's own power estimate is substantially derived
+   from speed and grade in the first place — so if it doesn't independently
+   respond to surface roughness (which a footpod, lacking any way to sense
+   trail technicality, has no obvious reason to), the whole comparison is
+   structurally blind, and a near-1.0 result reflects what the instrument
+   *can* report, not what's physically happening. Checked directly, not
+   assumed: `scripts/testStrydSurfaceSensitivity.ts` bins running segments
+   by (grade, speed) — not grade alone, since this specifically asks "at
+   the same pace and grade" — and compares mean device power across
+   surfaces within each matched cell. Result: **1.01-1.03x across all four
+   categories** — device power barely responds to surface at all when pace
+   and grade are truly held fixed. The instrument is blind. This also
+   retroactively explains why it disagreed with §12 stage 6's earlier
+   device-power finding: both analyses used the same blind instrument,
+   just with different (and apparently inconsistent) binning/confound
+   handling — neither number was trustworthy, which is why they disagreed,
+   not because one used a better method than the other.
+
+   **Heart rate — not derived from speed or grade the way Stryd's power
+   is — was checked next as a genuinely independent signal, and it found a
+   real effect.** `scripts/testHrBySurface.ts` compares HR at matched
+   (grade, speed) cells across surfaces, restricted to the early ~65% of
+   each activity (same convention as `hrCalibration.ts`, to control
+   cardiac drift). Pooled across all runs: gravel +4.7bpm, dirt +5.4bpm,
+   compacted +6.3bpm, path +8.7bpm vs. paved, at matched pace and grade —
+   real, orderly, and roughly tracking the terrain-difficulty ordering
+   already found elsewhere in this project.
+
+   **That pooled number has its own confound, caught before trusting it:
+   road-run days vs. trail-run days, not just road vs. trail terrain.**
+   Pooling matched cells across every activity compares HR from
+   road-running days against HR from trail-running days — and day-to-day
+   HR baseline swings 5-10bpm from heat, hydration, sleep, and cumulative
+   fatigue, independent of surface, in a direction (trail/mountain days
+   plausibly hotter/longer/more fatigued) that could account for much of
+   the pooled effect. The same "pooled regression reflects cross-race
+   differences, not the thing being fit" lesson §11's tau fit already
+   required (pooling per-race squared slopes, not raw pooled regression)
+   — applied here to HR instead of pacing slope. **The discriminating
+   check: compare paved vs. each category only using cells from the SAME
+   run (same day, same physiology), then pool those within-run
+   comparisons.** There was enough mixed-surface data to run this for
+   real (most of this athlete's runs aren't single-surface): gravel
+   +2.5bpm (279 comparisons), dirt +3.3bpm (124), compacted +3.6bpm (105),
+   path +8.3bpm (29) — **the ordering survives, and path's effect is
+   essentially unchanged (+8.3 vs. the pooled +8.7)**, while gravel/dirt/
+   compacted shrink by roughly half, meaning the pooled cross-run version
+   *was* inflating those three via the day-level confound, but not
+   inventing the effect outright — a real, if smaller, cost survives the
+   correction for all four categories.
+
+   **Net conclusion, and what it does (and doesn't) license:** this
+   athlete really does appear to work harder — a genuine physiological
+   cost, not just slower pacing choice — on rougher terrain at matched
+   pace and grade, with path the largest and most robust effect and
+   gravel/dirt/compacted smaller. Device power (Stryd) cannot be used to
+   settle this question either way, which also means neither this
+   session's near-null nor §12 stage 6's earlier 9-31% number should be
+   trusted going forward. **This does NOT yet license a specific cost
+   multiplier**: converting bpm into an effort-fraction or cost multiplier
+   needs `hrCalibration.ts`'s own HR-to-effort fit, already documented
+   there as R²=0.24 (weak) for this athlete — the bpm numbers are a real,
+   ordered signal, not a precise multiplier to plug into `ceiling.ts` or
+   `solver.ts`. **One caveat not yet checked:** HR lags true effort by
+   ~20-45s (established in §11's own HR-calibration work); at ~50m/15-20s
+   segments, a segment's HR partly reflects the preceding 1-3 segments'
+   effort, and path — the steepest, most clustered category — is
+   disproportionately likely to follow a climb, which could inflate
+   exactly the category showing the largest effect. Not resolved here;
+   flagged as an open gap before this result is leaned on further.
+
+   **Where this leaves the shipped 1.8x `unpavedCostMultiplier`:** neither
+   confirmed nor replaced by this stage. A real, ordered, within-run-
+   robust surface-cost signal now exists (unlike before, when the only
+   real-power-based finding was itself confounded) — that's new evidence
+   the mechanism might be real, not proof of its exact magnitude. Any
+   future attempt to convert this into a model term must go through
+   Stage 5's held-out finish-time backtest, the same arbiter every other
+   mechanism in this file answers to, not be adopted directly from a
+   segment-level HR diagnostic.
 4. **Fatigue/impact regression across the duration-filtered long-run
    subset** — fit each candidate proxy from the shortlist above, check the
    design matrix's condition number before trusting coefficients, report
