@@ -12,6 +12,7 @@ dist
 dist-ssr
 *.local
 .strava-cache/
+.surface-cache/
 
 # Editor directories and files
 .vscode/*

@@ -1491,3 +1491,391 @@ work — not folded into stage 4/5. Prediction intervals (above) are now
 built. Proceeding with stage 4 as scoped, testing tau against descent load
 specifically (not just generic "intensity") per the sharpened stage 5
 target above.
+
+---
+
+## 14. Plan B — segment-level slowdown-factor regression (new fitting method)
+
+**Goal (user request, 2026-07-23):** replace how the aerobic-fade part of the
+model is fit. Everything through §13 fits parameters *indirectly*: pool
+whole races, forward-simulate a candidate parameter set through the solver,
+and search for the value whose predicted finish time best matches what
+actually happened. That gives one usable data point per race (dozens of
+races, at best). Plan B fits *directly*: cut every GPX in the athlete's
+run library into segments that are internally consistent in grade and
+surface, read off each segment's own speed and power, and regress pace
+directly against a linear combination of slowdown factors — surface
+(external) and aerobic fatigue + accumulated impact/distance (internal).
+Thousands of segments across the whole library, not dozens of races.
+
+**Confirmed with the user: Plan B replaces the tau/f0/fInf duration-decay
+curve specifically** (`ceiling.ts`'s `sustainableFraction`), not the
+surrounding architecture. `minetti.ts`'s cost curves, `substrate.ts`'s
+glycogen model, and `solver.ts`'s forward-simulation/bisection-on-θ
+machinery all stay. What changes is *what drives the power ceiling down
+over the course of a race* — instead of an assumed exponential-decay shape
+in elapsed time, it's whatever fatigue proxy this regression finds actually
+explains the athlete's own pace decrement, wired in at the same
+composition points `ceiling.ts`/`solver.ts` already expose (a ceiling-side
+term for aerobic fatigue, a cost-multiplier-side term for impact — see
+"Two internal channels, not one" below). Surface reuses the existing
+`unpavedCostMultiplier` composition point in `solver.ts`/`analysis.ts`
+directly; only *how its value is fit* changes.
+
+### Why this can work where the whole-race approach struggled
+
+§12 stage 5's within-race descent/fatigue diagnostics are the closest thing
+already built to Plan B, and they're the honest reason for extra caution
+here, not just optimism: the descent-vs-fade correlation *weakened* as more
+data came in (-0.58 at n=7 whole-race-halves → -0.21 at n=16) — the
+signature of small-sample noise fitting itself to a hypothesis, not a real
+effect firming up. That diagnostic had, at best, ~16 data points (one
+early/late split per race). A segment-level regression over the same
+library has thousands — real statistical power to detect an effect that
+size, if it's real, instead of reading tea leaves in n=16. But this cuts
+both ways: if the effect really is that weak, more power will show that
+clearly too, and Plan B should be prepared to report a genuine null on the
+internal-fatigue side rather than manufacture a coefficient because the
+regression can always produce *some* number.
+
+### Stage 0 (gate, do this first): does measured power actually follow the Minetti curve?
+
+This has never actually been tested end-to-end — it's an assumption the
+whole model has run on since §2. It can't be tested using this app's own
+`grossPowerWPerKg`: `analysis.ts`'s `analyzeRun` *derives* that number from
+GPS speed via `costOfRunning`/`costOfWalking`, so comparing it back to the
+Minetti curve is circular by construction (at fixed grade, model-power *is*
+speed — this exact trap already burned the first pass at the path-surface
+multiplier in §12 stage 6, "second attempt"). The only real test uses
+**device power** (`CourseSegment.powerWatts`, e.g. Stryd — ~109 cached runs
+already have it): compute `device-power / (speed × mass)` per segment and
+check whether that traces `Cr(i)` across grade, restricted to *clean*
+segments (paved surface, low cumulative fatigue/impact, moving not paused)
+so surface and fatigue effects — the very things Plan B is about to
+fit — don't contaminate the baseline it's fit against.
+
+Caveat to carry into the read: Stryd's own power number comes from its own
+internal biomechanical model (it isn't a direct force/velocity
+measurement), so a shape mismatch could mean "Stryd's grade model disagrees
+with Minetti's" rather than "this athlete disagrees with Minetti's." If the
+shape doesn't hold even on clean segments, the whole premise — that power
+minus a few explicit slowdown factors explains pace — needs rethinking
+before any regression is worth building. This is a go/no-go gate, not a
+diagnostic to note and move past.
+
+**Real-data result (2026-07-23): pass — proceed, keep raw Minetti as the
+baseline.** `scripts/testMinettiPowerShape.ts` (new; reads the existing
+on-disk `.strava-cache/` activities directly, no live Strava session
+needed; fetches surface once per activity from Valhalla's public endpoint
+directly — no `vercel dev` required, since `api/surface.ts` needs no auth
+— and caches responses forever in the new gitignored `.surface-cache/`)
+ran against 203 cached activities with both device power and timestamps,
+restricted to paved, moving, non-paused segments in the first 35% of each
+activity's elapsed time: **6186 clean segments**, comparing
+`powerWatts/bodyMassKg` (bodyMassKg=70 assumed — see note below) to
+`grossMetabolicPower(Cr(i), speed)` at the same observed speed and grade.
+
+The overall level (median ratio 0.42) is exactly the kind of flat
+calibration constant expected and doesn't matter on its own — Stryd's
+power definition isn't metabolic W/kg, so some constant offset was always
+going to be there. The shape is the real question, and in the range that
+actually carries statistical weight it holds well: from −10% to +5% grade
+(n=139 to 3697 per bin, and — importantly, see below — running-gait-
+dominant), the ratio moves only from 0.46 to 0.42, a modest ~9% relative
+drift. Re-ran at three fatigue-window settings (20%, 35%, no filter at
+all) to rule out a fatigue artifact: the trend was stable across all
+three, so whatever it is, it isn't the fatigue filter creating it.
+
+**A steeper apparent decline beyond +10% grade turned out to be a gait
+confound, not a Minetti/athlete mismatch — caught by adding a walk%
+column to the same table.** Beyond +10% grade the ratio does drop further
+(0.40 at +10%, 0.38 at +15%, down to 0.13-0.32 above +20%) — but walk
+fraction rises in exact lockstep: 29% walking at +10%, 43% at +15%, 71-100%
+at +20% and above. Stryd's power algorithm is built and validated for
+running gait; power-hiking segments are exactly where its own accuracy is
+weakest, and that's also where sample size collapses (n=4-44 above +15%
+vs. thousands below +10%). So the visually dramatic steep-grade decline is
+best explained by "device power is least trustworthy exactly where the
+athlete is walking," not by "this athlete's uphill running economy departs
+from Minetti's" — the data can't actually distinguish those two, and the
+gait/sample-size pattern favors the boring explanation.
+
+**Verdict, kept deliberately narrow: the power↔grade↔speed relationship is
+monotonic, non-degenerate, and — over the well-sampled, running-dominant
+core — close to the flat calibration constant the premise needs. That's
+enough to proceed. It is not independent confirmation that this athlete's
+absolute grade-cost shape differs from Minetti's, and a single,
+walking-contaminated, device-limited power source can't provide that
+confirmation.** The correct response to "the shape can't be independently
+validated from this data" is to keep the published, lab-validated Minetti
+curve as Stage 2's fixed baseline — not to bend it toward an uncertain
+device reading. If a grade-dependent correction is added at all, it goes
+in as **one candidate regressor among others, on equal footing with
+surface/fatigue/impact, earning its place only if it improves the same
+held-out finish-time backtest every other mechanism in this file answers
+to (§12 stage 5/6's own arbiter)** — never assumed up front from this
+gate alone.
+
+**Follow-up probe, not run yet, worth it if this athlete's own grade
+economy specifically becomes a live question later:** bin real device
+power itself (not the ratio) and look at how speed falls off with grade
+*at matched power*, comparing against `1/Cr(i)`'s shape — the same
+power-held-constant slice §12 stage 6's third attempt used for the
+surface question, which is less confounded than dividing two
+different-unit quantities by each other (still not clean with only one
+power source, which is itself the argument for defaulting to "keep
+Minetti" rather than chasing this further right now).
+
+One methodology note carried forward: `bodyMassKg` was left at the generic
+default (70) rather than this athlete's real mass — it only shifts the
+overall calibration constant uniformly, not the shape, so it doesn't
+affect the verdict above, but the *absolute* power numbers this script
+prints (not the ratio-vs-grade trend) shouldn't be read literally until
+the real mass is substituted.
+
+### Two internal channels, not one
+
+The user's two internal factors map onto two physiologically distinct,
+already-separated composition points in this codebase, not one shared
+"fatigue" number:
+
+- **Aerobic fatigue** — reduces the *power the athlete can aerobically
+  sustain*. This is what `ceiling.ts`'s duration curve already represents;
+  Plan B changes what drives it (see next section), not where it plugs in.
+- **Accumulated impact/distance** — muscular/eccentric load degrading
+  *running economy* (more speed lost for the same power) rather than the
+  aerobic ceiling itself. This is a cost-side multiplier, the same slot
+  `unpavedCostMultiplier` occupies, and the same mechanism §12 stage 5's
+  (reverted) cumulative-exposure durability term tried on the ceiling side —
+  the fix there isn't the mechanism, it's putting it on the correct side
+  (cost, not ceiling) and fitting it with enough statistical power to trust
+  the answer either way.
+
+**This two-channel split is this document's interpretation of the request,
+not something the user specified directly — flag if a single combined
+"fatigue" term was actually intended.** It's reconciled as one log-pace
+regression either way (coefficients just get attributed to different
+solver composition points), so it doesn't change the regression itself,
+only where each fitted number plugs in afterward.
+
+**Important dependency: separating the two channels requires device power,
+and only on segments that have it.** On a Minetti-derived-power segment
+(no Stryd/footpod), power is *defined* as `Cr(grade) × speed` — so "less
+aerobic power available" and "same power, less speed from worse economy"
+are the same observation, perfectly confounded, no regression can tell them
+apart from that segment alone. The two channels are only separable either
+(a) per-segment, where real device power lets `measured cost = powerWatts /
+speed` be compared to the Minetti baseline directly and isolate the economy
+channel, or (b) across runs, if the fatigue-proxy and impact-proxy end up
+decorrelated enough in the pooled regression to pull apart on their own —
+which runs straight into the same "this athlete's real training data sits
+on a diagonal" decorrelation problem §11/§12 already found hard for
+exactly this reason. Concretely: **of the long (duration-filtered) runs
+stage 4 fits from, how many carry `powerWatts`?** Checked against the local
+`.strava-cache/` activity cache (the script-side dataset the backtest tools
+already use, not necessarily identical to the browser's IndexedDB run
+library, but the best real proxy on hand): of 262 cached activities, 159
+are ≥1h, and **122 of those 159 (77%)** carry at least one non-null power
+point. That's a real majority — the per-segment separation path is
+plausible on this athlete's actual data, not just a theoretical option —
+though "has some power points" isn't the same as "has continuous power
+coverage on the specific long monotonic segments stage 4 needs"; worth
+rechecking at the segment level once the splitter exists, not just at the
+whole-activity level checked here.
+
+Conflating these into one "fatigue" scalar would re-create exactly the
+tau/durabilityDriftPerHour collinearity problem §11/§13 already diagnosed
+(two things that are "functions of the same clock" can't be told apart from
+one signal) — keeping them on their existing separate composition points is
+what makes them separable in principle. Whether the *data* actually
+separates them is an open empirical question, not a given (see
+Collinearity below).
+
+### Segmentation: monotonic-grade + constant-surface runs
+
+Default reading of "monotonous in grade and surface type" — flag for
+correction if this isn't what was meant: a segment is a maximal run of
+consecutive fixed-length pipeline segments (`CourseSegment`, already
+resampled to `segmentLengthM`) where:
+- `gradient` stays the same sign (uphill / downhill / flat), with a small
+  hysteresis band (e.g. ±1-2%) around zero so GPS/elevation noise doesn't
+  shatter a genuinely flat stretch into dozens of alternating micro-segments
+  — this is the same noise-vs-signal tension §5 already resolved once for
+  `smoothingWindowM`/`segmentLengthM`, not a new problem;
+- `surfaceUnpaved` (or the finer Valhalla category, see below) stays constant;
+- not paused, and (open question) probably not spanning a walk/run gait
+  change either, since that's itself a pacing decision this model already
+  represents separately.
+
+Each resulting segment carries: total distance, total time (→ average
+speed), average recorded device power where available (else Minetti-implied
+power, clearly flagged as which), average gradient, surface category, and —
+carried over from the underlying fixed-length segments, computed *before*
+this aggregation step, per the user's own framing — the internal-state
+features below evaluated at the segment's start (matching
+`EffortTrendPoint`'s existing "value at the start of this segment"
+convention).
+
+A minimum segment length/duration floor is needed (very short monotonic
+runs are mostly noise, and Plan B's per-segment power/speed averages need
+enough points to mean anything) — no default chosen yet, worth checking
+empirically against the real segment-length distribution once this is
+built rather than guessing.
+
+**Surface granularity — plan to re-test, not assume the prior answer
+carries over.** §12 stage 6 found the full Valhalla vocabulary
+(gravel/dirt/compacted/path) didn't beat binary paved/unpaved *under the
+finish-time-backtest objective*. Plan B's objective is different (directly
+explaining segment-level pace variance, not a downstream finish-time
+prediction), and the same section's real-device-power check already found
+a genuine, non-circular, granularity-specific signal (path 9-31% slower
+than paved at fixed power+gradient; gravel/dirt/compacted showed no
+consistent pattern) — so start with the full category set here rather than
+collapsing to binary early, and let the regression's own fit quality decide
+whether the extra categories earn their keep for *this* objective.
+
+### Internal fatigue proxy: candidates to test, not one to assume
+
+The user asked to look in the literature rather than pick one blind. §12's
+own literature sweep (critical-power/W′-balance modeling, central vs.
+peripheral fatigue, Maunder's "durability" framing) already surveyed this
+ground for the whole-race fit; the candidates below are the same research
+read for segment-level use, kept as a shortlist to fit and compare — the
+same "build every candidate, let a real backtest arbitrate" discipline
+already used for the descent-exposure bases (§12 stage 4) and the
+unpaved-cost mechanism (§12 stage 6), not a new methodology:
+
+- **Elapsed time** — what the current tau/fInf curve already assumes.
+  Cheapest baseline to beat; if nothing below beats it, that's a real
+  result (the current shape was right), not a failure of the exercise.
+- **Cumulative supra-threshold ("hard") work, `E_hard`** — §13's own
+  sharpened recommendation from the mechanistic-model second-opinion
+  review: integral of (power − LT2 power) over time, clamped at 0, rather
+  than wall-clock time. Directly targets the Maunder/Tiller-Millet finding
+  that fade tracks relative intensity and eccentric load, not elapsed time
+  per se (§12 Q2).
+- **W′-balance depletion state** (Skiba bi-exponential reconstitution
+  model) — the standard critical-power-literature answer to "how fatigued
+  is this athlete right now," tracking a depleting/recovering anaerobic-work
+  reserve rather than a monotonic clock. Standard in cycling
+  power-duration modeling; not previously applied in this project. Real
+  cost: needs its own recovery-time-constant fit, one more thing this
+  segment library may or may not identify well.
+- **Cumulative mechanical work / distance** — simplest alternative to
+  elapsed time that's still monotonic but decouples from the clock when
+  pace varies (a fast early section and a slow one accumulate work/distance
+  differently even over the same elapsed time) — partially addresses the
+  collinearity problem below, though only partially, since work and time
+  are still highly correlated in practice.
+
+Fit each candidate's own coefficient against the segment library, compare
+fit quality honestly (the same way `descentMeters`/`descentImpact`/
+`descentImpactSquared` were compared, not picking a favorite up front), and
+report which wins — including the honest possibility that plain elapsed
+time wins and the added complexity of `E_hard`/W′-balance doesn't earn its
+keep on this athlete's data.
+
+### Three landmines to design around — two already documented elsewhere in this file, one found during Stage 0
+
+- **Non-independence / clustering (found running Stage 0).** Stage 0's
+  6186 segments are not independent draws — they're autocorrelated within
+  a run (consecutive 50m segments share conditions) and clustered by run.
+  The Stage 0 verdict itself doesn't lean on treating them as independent
+  (it rests on direction + the running-core flatness + the walk-gait
+  explanation, all robust to this), but Stage 3/4's actual slowdown
+  regression will: naive OLS standard errors/R² computed over
+  thousands-of-segments-as-if-independent will badly overstate precision,
+  and "does this coefficient earn its place" depends on honest SEs. Treat
+  *run* as the clustering unit — cluster-robust standard errors, or
+  aggregate to one row per (run × bin) before fitting — rather than
+  reporting per-segment significance at face value. Distinct from, and
+  compounds with, the collinearity landmine below (that one is
+  feature-vs-feature; this one is observation-vs-observation).
+- **Collinearity.** Within a single run, elapsed time, cumulative work, and
+  cumulative descent-impact all rise together — §11/§13 call this out
+  repeatedly as "functions of the same clock." A segment library inherits
+  this at the segment level exactly as the whole-race fits did at the race
+  level. The pooled *cross-run* regression is the thing that can break it,
+  and only to the extent the library's runs are genuinely diverse in
+  duration/intensity/terrain mix — the same duration-diversity requirement
+  §11 already needed for the fInf/tau fit, now needed for a design matrix
+  instead of a race-duration spread. Check the design matrix's condition
+  number (or per-feature VIF) once real segments exist, before trusting any
+  individual coefficient — a well-fit regression with a near-singular
+  design matrix is not evidence the mechanism is real.
+- **Transfer from training runs to ultras.** §12 stage 6's third attempt
+  found the momentary power-vs-speed relationship measured on ordinary
+  training runs "doesn't capture what a 15-25 hour technical ultra actually
+  costs" — fresh legs and familiar local trails understate what
+  multi-hour accumulated fatigue and technical/night terrain actually do.
+  This library is mostly short training runs plus a handful of long races
+  (the same imbalance §12 stage 1 had to filter for the pooled fits) — a
+  segment regression pooled naively across all of it will be dominated by
+  short-run segments and will describe *training-run* slowdown, not
+  *ultra* slowdown, exactly where the fatigue/impact terms matter most.
+  Plan: fit **surface** from the full library (external, physically
+  present regardless of run length or fatigue state — no reason to expect
+  it not to transfer), but restrict the **fatigue/impact** terms to
+  long-enough runs specifically, mirroring `DURABILITY_MIN_DURATION_S`'s
+  existing 1-hour bar in `suggestRuns.ts`/`RunLibraryPanel.tsx` rather than
+  inventing a new threshold from scratch.
+
+One more honest framing carried over from §12 stage 6: this athlete's own
+recorded effort fraction on unpaved terrain is flat-or-slightly-negative,
+not elevated — they don't push harder there, they just move slower. That
+means surface behaves partly as an observed *pacing choice* (footing,
+navigation caution) as much as a pure metabolic-cost multiplier. Worth
+keeping in mind when interpreting a fitted surface coefficient: it's "how
+much slower this athlete goes," not necessarily "how much more this terrain
+costs metabolically" — the distinction doesn't change where the multiplier
+plugs into `solver.ts` (it's already specified as a pace/cost effect, not a
+claimed metabolic mechanism), but it does matter for how confidently a
+number like "1.8x on unpaved" gets described anywhere user-facing.
+
+### Proposed staged build order
+
+1. **Stage 0 gate above — done (2026-07-23).** Real device power vs.
+   Minetti shape, clean segments only: pass (see result above) — proceed
+   with raw Minetti as Stage 2's fixed baseline; a grade-dependent
+   correction is at most a candidate regressor to test later, not a
+   correction applied up front.
+2. **Segmentation + feature extraction** — build the monotonic-run splitter
+   and per-segment feature builder (surface category, all fatigue-proxy
+   candidates evaluated at segment start, device/Minetti power, speed) as a
+   pure function over an existing `CourseSegment[]`, verified with a
+   synthetic course (known grade/surface pattern → known segment
+   boundaries) before running on real data, same discipline as every other
+   mechanism in this file.
+3. **Surface regression across the full library** — the well-motivated half
+   (real, non-circular signal already found in §12 stage 6's real-power
+   check); fit first since it doesn't need the duration filter stage 4
+   needs.
+4. **Fatigue/impact regression across the duration-filtered long-run
+   subset** — fit each candidate proxy from the shortlist above, check the
+   design matrix's condition number before trusting coefficients, report
+   fit quality per candidate rather than picking one in advance.
+5. **Held-out backtest** — same arbiter every other mechanism in this file
+   answers to: refit on a training subset of races, predict a held-out
+   race's finish time through the *existing* solver with the new
+   ceiling/cost terms wired in, compare against actual. A good in-sample
+   regression fit is not sufficient on its own (§12 stage 5's own
+   "in-sample fit is close to guaranteed by construction" caveat applies
+   here too) — only this step decides whether Plan B's fitted terms replace
+   tau/f0/fInf in `ceiling.ts`, or whether the honest result is "the old
+   curve was fine, this didn't beat it."
+
+### Open questions
+
+- Segmentation definition above (same-signed run with hysteresis, vs. a
+  stricter reading of "monotonic") — flag if the assumption is wrong.
+- Whether a walk/run gait change should also break a segment — assumed yes
+  above (gait is already a separate pacing decision in this model), open to
+  correction.
+- No default chosen yet for the minimum segment length/duration floor —
+  needs the real segment-length distribution once built, not a guess now.
+- Whether `E_hard`/W′-balance's own extra parameters (LT2 power for the
+  clamp, W′-balance's recovery time constant) get fit jointly with the
+  slowdown regression or fixed from the athlete's already-configured
+  LT1/LT2 inputs first — leaning toward fixing them (same "hold the
+  lab-measured constants, fit only the latent coefficient" regularization
+  discipline §13 already confirmed this project follows), but not decided.
