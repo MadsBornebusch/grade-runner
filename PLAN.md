@@ -2452,27 +2452,57 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    anywhere near its own feasibility limit, so the model overpredicts its
    speed almost by construction. That's exactly the uniform bias that
    makes ANY slowdown look like an improvement, and exactly why a blind
-   control was the load-bearing check here, not an optional extra. A
-   race-only backtest population would likely not carry the same uniform
-   bias (races, unlike training runs, ARE typically paced near the
-   model's own sustainable-effort assumption) and would be the more
-   discriminating version of this test — flagged as a concrete follow-up,
-   not attempted here (this codebase has no first-class "race" flag to
-   cut on without inventing a new, debatable heuristic).
+   control was the load-bearing check here, not an optional extra.
+
+   **The discriminating check: does the tie survive on the population
+   that actually matters?** A pure population-bias story predicts the
+   uniform under-prediction (and the tie it produces) should mostly
+   disappear on sustained-effort races specifically, which — unlike easy
+   training runs — ARE paced near the model's own sustainable-effort
+   assumption. No new heuristic needed to test this: Stage 4's own
+   `buildWithinRaceDiagnosticPoint` already gates on exactly "sustained
+   effort" (a real single-race tau fit succeeds, late window has enough
+   points *and* enough elapsed time) — reusing it to restrict this
+   backtest's TARGET set (training pool stays full) is a race-only rerun
+   with nothing invented. Only 9 of 203 cached activities clear that gate
+   (smaller than Stage 4's ~16 — a slightly different population/filter
+   combination, not a discrepancy worth chasing further at this n). Result:
+
+   | candidate | mean \|err%\| | median \|err%\| | mean signed err% |
+   |---|---|---|---|
+   | baseline (no surface term) | 23.47% | 24.93% | −23.47% |
+   | baseline + fitted per-category surface | 21.51% | 23.14% | −21.51% |
+   | baseline + surface-blind uniform multiplier (control) | 21.46% | 22.95% | −21.46% |
+
+   **The population-bias hypothesis doesn't survive its own test.** Every
+   one of these 9 sustained-effort races is *still* under-predicted with
+   no exceptions (mean\|err%\| again equals \|mean signed err%\| exactly) —
+   the uniform bias isn't specific to easy training runs after all, it's a
+   property of this baseline model more broadly. And the tie holds up
+   here too, if anything slightly favoring the blind control (21.46% vs.
+   21.51% — a 0.05-point gap, noise at n=9). This is a *stronger* result
+   than "inconclusive, population-confounded": the one population where a
+   real surface-targeting advantage should have shown up if it existed
+   still shows none. The obvious caveat — n=9 is a small sample, so this
+   doesn't have much power to detect a modest real effect either — applies
+   equally to both readings and doesn't rescue the surface claim.
 
    **Verdict: Plan B has not produced a single candidate — surface,
    aerobic-fade clock, or impact/muscular-fatigue term — that clears its
-   own held-out bar.** The surface term's Stage 5 in-sample fit remains
-   real, robust, grade-controlled, and low-VIF; nothing here disproves a
-   genuine terrain-cost effect exists. But this backtest, on this
-   population, cannot distinguish that real effect from a same-sized
-   blind nudge, so it does not license shipping `surfaceCostMultipliers`
-   as a validated per-athlete correction yet. `tau`/`f0`/`fInf` in
-   `ceiling.ts` are unchanged and untouched by anything Plan B built —
-   "the old curve was fine" (this section's own standing alternative
-   outcome) is the honest destination for all three channels this
-   session investigated, pending the race-only backtest re-run flagged
-   above as the one concrete step that could still flip this verdict.
+   own held-out bar, on either the full mixed population or the smaller
+   sustained-effort-only one.** Stage 5's in-sample surface fit remains
+   real, robust, grade-controlled, and low-VIF on its own terms — nothing
+   here disproves a genuine terrain-cost effect exists, and the two
+   backtests here are both small-n and probably underpowered to detect a
+   modest real effect against this athlete's own considerable run-to-run
+   variability. But two separate held-out checks, including the one
+   specifically designed to be the more favorable population, both failed
+   to distinguish it from a same-sized blind nudge, so it does not license
+   shipping `surfaceCostMultipliers` as a validated per-athlete correction.
+   `tau`/`f0`/`fInf` in `ceiling.ts` are unchanged and untouched by
+   anything Plan B built — "the old curve was fine" (this section's own
+   standing alternative outcome) is the honest destination for all three
+   channels this session investigated.
 
 ### Open questions
 

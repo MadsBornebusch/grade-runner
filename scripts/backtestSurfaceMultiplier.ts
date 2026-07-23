@@ -21,6 +21,14 @@
 // the right terrain -- the control is what actually distinguishes "the
 // per-category fit is real" from "any nudge in this direction helps."
 //
+// --raceOnly=true restricts the TARGET set (training pool stays full) to
+// activities that clear withinRaceDescentDiagnostic.ts's own sustained-
+// effort gate (Stage 4's already-built race-like filter -- no new
+// heuristic needed) -- the discriminating rerun PLAN.md §14 stage 6 uses
+// to check whether the blind-control tie is really a population-bias
+// artifact (ordinary training runs aren't paced near the solver's own
+// sustainable-effort assumption) or something that survives on races too.
+//
 // Scoped to the PRIMARY comparison only (baseline vs. baseline + Stage 5's
 // surface term) -- deliberately NOT running all twelve Stage 5 clock/impact
 // combinations through this backtest and picking the best held-out
@@ -42,7 +50,7 @@
 // of O(N^2).
 //
 // Usage:
-//   npx tsx scripts/backtestSurfaceMultiplier.ts [--bodyMassKg=70] [--maxActivities=250] [--maxFolds=20]
+//   npx tsx scripts/backtestSurfaceMultiplier.ts [--bodyMassKg=70] [--maxActivities=250] [--maxFolds=20] [--raceOnly=true]
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -54,6 +62,7 @@ import { buildSegmentLibrary, type TaggedMonotonicSegment } from "../src/model/s
 import { fitJointSlowdownModel } from "../src/model/jointSlowdownFit.ts";
 import { buildEffortTrendPoints, fitTauFInfWithSupportGate, type EffortTrendPoint } from "../src/model/pacingFit.ts";
 import { findSustainableTheta, type SolverInputs } from "../src/model/solver.ts";
+import { buildWithinRaceDiagnosticPoint } from "../src/model/withinRaceDescentDiagnostic.ts";
 import { DEFAULT_FORM_INPUTS, resolveCeilingParams, resolveGlycogenStoreG } from "../src/ui/formInputs.ts";
 import { arg } from "./stravaScriptHelpers.ts";
 
@@ -69,6 +78,17 @@ const MAX_ACTIVITIES = parseInt(arg("maxActivities", "250"), 10);
 // each fold's training pool at (almost) full size while bounding total
 // runtime to roughly MAX_FOLDS x one full-size fit (~25 min at the default 20).
 const MAX_FOLDS = parseInt(arg("maxFolds", "20"), 10);
+// The mixed population (any cached activity, per this session's own
+// scoping choice) turned out to systematically under-predict finish time
+// for ordinary training runs (paced nowhere near the solver's own
+// sustainable-effort assumption), which is exactly what made the
+// surface-blind control tie the real per-category fit -- see PLAN.md §14
+// stage 6. --raceOnly restricts the TARGET set (training pool stays full)
+// to activities that clear buildWithinRaceDiagnosticPoint's own
+// sustained-effort gate (a real single-race tau fit succeeds, late window
+// has enough points AND enough elapsed time) -- reusing Stage 4's already-
+// built race-like filter rather than inventing a new heuristic.
+const RACE_ONLY = arg("raceOnly", "false") === "true";
 
 const CACHE_DIR = fileURLToPath(new URL("../.strava-cache/", import.meta.url));
 const SURFACE_CACHE_DIR = fileURLToPath(new URL("../.surface-cache/", import.meta.url));
@@ -96,6 +116,10 @@ interface RunRecord {
   segments: CourseSegment[];
   effortTrendPoints: EffortTrendPoint[];
   actualFinishTimeS: number;
+  /** True iff this run clears buildWithinRaceDiagnosticPoint's own
+   * sustained-effort gate (Stage 4's already-built race-like filter) --
+   * see RACE_ONLY's own doc. */
+  isSustainedEffort: boolean;
 }
 
 function main() {
@@ -136,10 +160,13 @@ function main() {
     // own convention for building tau/fInf training data.
     const analysis = analyzeRun(segments, { ...commonInputs, ceilingParams: baseCeilingParams });
     const effortTrendPoints = buildEffortTrendPoints(segments, analysis.segments, formInputs.altitudeAdjustment);
+    const isSustainedEffort =
+      buildWithinRaceDiagnosticPoint(id, { ...course, segments }, { ...commonInputs, ceilingParams: baseCeilingParams }) !== null;
     const firstTimed = points.find((p) => p.time !== null);
     runs.push({
       id,
       date: firstTimed?.time ?? null,
+      isSustainedEffort,
       segments,
       effortTrendPoints,
       actualFinishTimeS: analysis.totalMovingTimeS,
@@ -175,10 +202,19 @@ function main() {
     { name: "baseline + surface-blind uniform multiplier (control)", mode: "uniformBlind", absPctErrors: [], signedPctErrors: [], foldsSkipped: 0 },
   ];
 
-  // Evenly-spaced target indices across the whole pool (deterministic, not
-  // a random sample) rather than every index -- see MAX_FOLDS's own doc.
-  const foldCount = Math.min(MAX_FOLDS, runs.length);
-  const targetIndices = Array.from({ length: foldCount }, (_, i) => Math.floor((i * runs.length) / foldCount));
+  // RACE_ONLY: every sustained-effort run, full stop (no further sampling --
+  // Stage 4 found only ~16 of these across this athlete's whole library, an
+  // already-small population not worth subsampling further). Otherwise,
+  // evenly-spaced target indices across the whole pool (deterministic, not
+  // a random sample) -- see MAX_FOLDS's own doc.
+  let targetIndices: number[];
+  if (RACE_ONLY) {
+    targetIndices = runs.map((_, i) => i).filter((i) => runs[i].isSustainedEffort);
+    console.log(`--raceOnly: ${targetIndices.length} of ${runs.length} activities clear the sustained-effort gate\n`);
+  } else {
+    const foldCount = Math.min(MAX_FOLDS, runs.length);
+    targetIndices = Array.from({ length: foldCount }, (_, i) => Math.floor((i * runs.length) / foldCount));
+  }
 
   let foldsRun = 0;
   for (const targetIdx of targetIndices) {
