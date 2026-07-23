@@ -7,18 +7,25 @@
 // discipline as every other mechanism in this file.
 //
 // Also computes, per resulting segment, the internal-state candidates
-// (elapsed time, cumulative net work, cumulative supra-LT2 "hard" work --
-// see §14's fatigue-proxy shortlist) evaluated AT THE START of that segment
-// -- i.e. reflecting everything before it, not including its own
-// contribution -- matching pacingFit.ts's EffortTrendPoint convention
-// elsewhere in this codebase. W'-balance is deliberately NOT implemented
-// here yet (§14 flags it as needing its own recovery-time-constant fit,
-// real added complexity) -- only the three cheaper candidates.
+// evaluated AT THE START of that segment -- i.e. reflecting everything
+// before it, not including its own contribution -- matching pacingFit.ts's
+// EffortTrendPoint convention elsewhere in this codebase:
+// - aerobic-fatigue candidates (§14 fatigue-proxy shortlist): elapsed time,
+//   cumulative net work, cumulative supra-LT2 "hard" work. W'-balance is
+//   deliberately NOT implemented here yet (§14 flags it as needing its own
+//   recovery-time-constant fit, real added complexity).
+// - impact/muscular-fatigue candidates (§14's second internal channel,
+//   cost-side rather than ceiling-side): the same three descent-exposure
+//   bases already validated in descentImpact.ts and used by the whole-race
+//   fits (pacingFit.ts, ceiling.ts's durabilityDriftPerDescentUnit) --
+//   reused via descentStepForSegment rather than reimplemented a fourth
+//   time, per that module's own stated reason for existing.
 
 import type { CourseSegment, SurfaceCategory } from "../gpx/pipeline";
 import { costOfRunning, costOfWalking } from "./minetti";
 import { netToGross } from "./energetics";
 import { type CeilingParams, maxAerobicPower } from "./ceiling";
+import { descentStepForSegment } from "./descentImpact";
 
 export type GradeSign = -1 | 0 | 1;
 export type GaitMode = "run" | "walk";
@@ -84,6 +91,16 @@ export interface MonotonicSegment {
   /** Cumulative supra-LT2 ("hard") work so far, J/kg -- null unless
    * ceilingParams was supplied (see that option's own doc). */
   cumulativeHardWorkJPerKgAtStart: number | null;
+  /** Impact/muscular-fatigue candidates -- three parallel readings of
+   * cumulative descent exposure so far (raw meters, meters x speed, meters
+   * x speed^2), same three bases as descentImpact.ts/EffortTrendPoint.
+   * Always computed (no opt-in needed -- unlike cumulativeHardWork, these
+   * need no athlete-specific params, only the course's own elevation and
+   * pace). See descentStepForSegment for the exact elevation-delta/pause
+   * exclusion rules. */
+  cumulativeDescentMAtStart: number;
+  cumulativeDescentImpactAtStart: number;
+  cumulativeDescentImpactSquaredAtStart: number;
 }
 
 const DEFAULT_GRADE_HYSTERESIS_FRACTION = 0.015;
@@ -119,6 +136,9 @@ interface Accumulator {
   distanceMAtStart: number;
   netWorkJPerKgAtStart: number;
   hardWorkJPerKgAtStart: number | null;
+  descentMAtStart: number;
+  descentImpactAtStart: number;
+  descentImpactSquaredAtStart: number;
 }
 
 /**
@@ -151,6 +171,13 @@ export function buildMonotonicSegments(
   let cumulativeDistanceM = 0;
   let cumulativeNetWorkJPerKg = 0;
   let cumulativeHardWorkJPerKg: number | null = hardWorkEnabled ? 0 : null;
+  let cumulativeDescentM = 0;
+  let cumulativeDescentImpact = 0;
+  let cumulativeDescentImpactSquared = 0;
+  /** Previous segment's own elevation, in course order -- descentStepForSegment's
+   * contract requires this be threaded across EVERY segment (paused or not),
+   * unconditionally, same as pacingFit.ts/solver.ts already do. */
+  let previousElevation: number | null = null;
 
   function finalizeCurrent(): void {
     if (current === null) return;
@@ -173,6 +200,9 @@ export function buildMonotonicSegments(
         cumulativeDistanceMAtStart: c.distanceMAtStart,
         cumulativeNetWorkJPerKgAtStart: c.netWorkJPerKgAtStart,
         cumulativeHardWorkJPerKgAtStart: c.hardWorkJPerKgAtStart,
+        cumulativeDescentMAtStart: c.descentMAtStart,
+        cumulativeDescentImpactAtStart: c.descentImpactAtStart,
+        cumulativeDescentImpactSquaredAtStart: c.descentImpactSquaredAtStart,
       });
     }
     current = null;
@@ -181,6 +211,14 @@ export function buildMonotonicSegments(
   for (const seg of segments) {
     const dt = seg.dtS;
     const usable = !seg.paused && dt !== null && dt > 0;
+
+    // Must run for EVERY segment, in course order, regardless of usability --
+    // descentStepForSegment's own contract (paused/untimed/climbing segments
+    // already resolve to a zero contribution internally, so this is a no-op
+    // in the `!usable` branch below, not a special case to guard against).
+    const descentStep = descentStepForSegment(seg, previousElevation);
+    previousElevation = seg.elevation;
+
     if (!usable) {
       finalizeCurrent();
       if (dt !== null && dt > 0) cumulativeElapsedHours += dt / 3600; // pause time still counts as elapsed wall-clock (ceiling.ts's own convention)
@@ -223,6 +261,9 @@ export function buildMonotonicSegments(
         distanceMAtStart: cumulativeDistanceM,
         netWorkJPerKgAtStart: cumulativeNetWorkJPerKg,
         hardWorkJPerKgAtStart: cumulativeHardWorkJPerKg,
+        descentMAtStart: cumulativeDescentM,
+        descentImpactAtStart: cumulativeDescentImpact,
+        descentImpactSquaredAtStart: cumulativeDescentImpactSquared,
       };
     }
 
@@ -241,6 +282,11 @@ export function buildMonotonicSegments(
     cumulativeDistanceM += seg.distance3D;
     cumulativeNetWorkJPerKg += netWorkJPerKg;
     if (cumulativeHardWorkJPerKg !== null && hardWorkJPerKg !== null) cumulativeHardWorkJPerKg += hardWorkJPerKg;
+    if (descentStep.speedMs !== null) {
+      cumulativeDescentM += descentStep.descentM;
+      cumulativeDescentImpact += descentStep.descentM * descentStep.speedMs;
+      cumulativeDescentImpactSquared += descentStep.descentM * descentStep.speedMs * descentStep.speedMs;
+    }
   }
   finalizeCurrent();
 

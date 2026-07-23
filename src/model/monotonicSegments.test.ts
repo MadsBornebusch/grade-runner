@@ -13,6 +13,11 @@ function course(specs: Array<Partial<CourseSegment>>): CourseSegment[] {
     const distance3D = spec.distance3D ?? 50;
     const gradient = spec.gradient ?? 0;
     cumulative += distance3D;
+    // Elevation is CourseSegment's "at the end of this segment" value (per
+    // its own doc), so it must be updated with this segment's own rise
+    // BEFORE being assigned below -- not after, which would attribute each
+    // segment's rise to the following one instead.
+    elevation += gradient * distance3D;
     const seg: CourseSegment = {
       index: i,
       cumulativeDistance3D: cumulative,
@@ -27,9 +32,28 @@ function course(specs: Array<Partial<CourseSegment>>): CourseSegment[] {
       powerWatts: null,
       ...spec,
     };
-    elevation += gradient * distance3D;
     return seg;
   });
+}
+
+/** Single-segment factory for tests that need explicit, un-auto-computed
+ * elevation control (e.g. a pause with its own elevation drift) -- mirrors
+ * descentImpact.test.ts's own `segment()` helper. */
+function seg(overrides: Partial<CourseSegment> = {}): CourseSegment {
+  return {
+    index: 0,
+    cumulativeDistance3D: 0,
+    distanceHorizontal: 50,
+    distance3D: 50,
+    elevation: 0,
+    gradient: 0,
+    time: null,
+    dtS: 25,
+    paused: false,
+    heartRateBpm: null,
+    powerWatts: null,
+    ...overrides,
+  };
 }
 
 describe("buildMonotonicSegments", () => {
@@ -199,5 +223,47 @@ describe("buildMonotonicSegments", () => {
 
   it("returns an empty array for an empty course", () => {
     expect(buildMonotonicSegments([])).toEqual([]);
+  });
+
+  it("accumulates the three descent-impact bases across a descending run, readable from the following run's AtStart snapshot", () => {
+    const segments = course([
+      { gradient: 0, distance3D: 50, dtS: 20 }, // flat baseline, contributes 0 descent
+      { gradient: -0.2, distance3D: 50, dtS: 20 }, // 10m drop at 2.5 m/s
+      { gradient: -0.2, distance3D: 50, dtS: 20 },
+      { gradient: -0.2, distance3D: 50, dtS: 20 },
+      { gradient: 0.1, distance3D: 50, dtS: 20 }, // breaks the descending run
+    ]);
+    const runs = buildMonotonicSegments(segments, { minDistanceM: 0, minTimeS: 0 });
+    expect(runs).toHaveLength(3); // [flat], [3 descending], [climb]
+
+    const descendingRun = runs[1];
+    expect(descendingRun.gradeSign).toBe(-1);
+    // nothing descended before this run (only the flat segment preceded it)
+    expect(descendingRun.cumulativeDescentMAtStart).toBe(0);
+    expect(descendingRun.cumulativeDescentImpactAtStart).toBe(0);
+    expect(descendingRun.cumulativeDescentImpactSquaredAtStart).toBe(0);
+
+    const afterDescent = runs[2];
+    // 3 segments x 10m drop at 2.5 m/s each: 30m total, 30*2.5=75 impact, 30*2.5^2=187.5 impact^2
+    expect(afterDescent.cumulativeDescentMAtStart).toBeCloseTo(30, 10);
+    expect(afterDescent.cumulativeDescentImpactAtStart).toBeCloseTo(75, 10);
+    expect(afterDescent.cumulativeDescentImpactSquaredAtStart).toBeCloseTo(187.5, 10);
+  });
+
+  it("threads elevation continuity across a pause so descent isn't lost or double-counted", () => {
+    const segments: CourseSegment[] = [
+      seg({ index: 0, cumulativeDistance3D: 50, elevation: 0, gradient: 0, dtS: 20 }),
+      // paused, but elevation still genuinely drifted -5m during the rest
+      seg({ index: 1, cumulativeDistance3D: 100, elevation: -5, paused: true, dtS: 90 }),
+      // resumes and descends a further 10m from where the pause left off (-5 -> -15)
+      seg({ index: 2, cumulativeDistance3D: 150, elevation: -15, gradient: -0.2, dtS: 20 }),
+      // breaks the descending run so its AtStart snapshot can be read
+      seg({ index: 3, cumulativeDistance3D: 200, elevation: -10, gradient: 0.1, dtS: 20 }),
+    ];
+    const runs = buildMonotonicSegments(segments, { minDistanceM: 0, minTimeS: 0 });
+    const afterDescent = runs[runs.length - 1];
+    // only the real 10m post-pause drop should count -- not 15m (which would
+    // double-count the pause's own -5m drift as if it were a second descent).
+    expect(afterDescent.cumulativeDescentMAtStart).toBeCloseTo(10, 10);
   });
 });

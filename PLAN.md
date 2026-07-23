@@ -1917,20 +1917,38 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    untimed segment. Per run: distance, time, avg speed/gradient, surface
    category, gait, average measured (device) and Minetti-implied power/kg,
    and — evaluated *before* the run's own contribution, matching
-   `EffortTrendPoint`'s convention — cumulative elapsed hours, cumulative
-   distance, cumulative Minetti net work, and cumulative supra-LT2 "hard"
-   work (opt-in via `ceilingParams`; W′-balance deliberately deferred, per
-   §14's own note that it needs its own recovery-time-constant fit).
+   `EffortTrendPoint`'s convention — both internal-fatigue channels from
+   §14's "two channels, not one" design:
+   - **Aerobic-fatigue candidates** (ceiling-side): cumulative elapsed
+     hours, cumulative distance, cumulative Minetti net work, and
+     cumulative supra-LT2 "hard" work (opt-in via `ceilingParams`; W′-
+     balance deliberately deferred, per §14's own note that it needs its
+     own recovery-time-constant fit).
+   - **Impact/muscular-fatigue candidates** (cost-side, added after the
+     user flagged this field was still missing): the same three
+     descent-exposure bases already validated and shipped for the
+     whole-race fits — cumulative descent meters, descent×speed, and
+     descent×speed² — computed via `descentImpact.ts`'s
+     `descentStepForSegment` (reused, not reimplemented a fourth time,
+     threading `previousElevation` across every segment including pauses,
+     exactly matching that function's existing contract).
+
    `surfaceExposure.ts`'s `attachSurfaceData` was extended in the same pass
    to also set the new `CourseSegment.surfaceCategory` (the full Valhalla
    vocabulary — paved/gravel/dirt/compacted/path/other — confirmed above),
    alongside the existing binary `surfaceUnpaved` it already fed
    `unpavedCostMultiplier`; both fields now come from one lookup, so they
-   can never disagree with each other. Verified with 13 synthetic-course
+   can never disagree with each other. Verified with 15 synthetic-course
    tests (`monotonicSegments.test.ts`) before touching real data — grade/
    surface/gait boundary triggers, pause/untimed exclusion, the floor's
-   OR-logic in both directions, cumulative-at-start correctness, and the
-   `ceilingParams`/`bodyMassKg` opt-in gating.
+   OR-logic in both directions, cumulative-at-start correctness (both
+   channels), the `ceilingParams`/`bodyMassKg` opt-in gating, and elevation
+   continuity across a pause (a paused segment's own elevation drift must
+   update the running "previous elevation" state without itself counting
+   as descent — caught by a dedicated test after the general course-builder
+   test helper turned out to have an off-by-one in when it stamped each
+   segment's elevation, fixed before it could produce a silently-wrong
+   expected value in the new descent tests).
 
    **Real-data sanity check** (`scripts/buildSegmentLibrarySample.ts`,
    offline — reuses Stage 0's `.surface-cache/`, no new Valhalla calls):
@@ -1942,7 +1960,10 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    so aggressive it's discarding most of the library either. All 5 surface
    categories are well-populated (gravel 42%, paved 27%, dirt 14%,
    compacted 11%, path 7% — even the smallest, path, has 619 segments).
-   Gait split 72.5% run / 27.5% walk.
+   Gait split 72.5% run / 27.5% walk. Cumulative descent exposure reaches
+   plausible, non-degenerate values across the library (max
+   `cumulativeDescentMAtStart` seen: 4158m) — a sanity check only, not a
+   per-activity summary (see the run-of-origin gap below).
 
    **Two things carried forward, not fixed now:**
    - **Segment output has no run-of-origin field.** `MonotonicSegment` only

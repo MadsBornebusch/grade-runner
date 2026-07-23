@@ -114,6 +114,15 @@ function main() {
 
   const avgSegmentsPerActivity = allRuns.length / usedActivities;
   console.log(`\nAverage monotonic segments per activity: ${avgSegmentsPerActivity.toFixed(1)}`);
+
+  // Sanity only -- allRuns is flattened across activities (no run-of-origin
+  // field yet, see PLAN.md §14 stage 2's own flagged TODO), so this is just
+  // "does cumulative descent exposure reach plausible, growing values
+  // somewhere in the library", not a per-activity or per-athlete summary.
+  const maxDescentM = Math.max(...allRuns.map((r) => r.cumulativeDescentMAtStart));
+  const maxDescentImpact = Math.max(...allRuns.map((r) => r.cumulativeDescentImpactAtStart));
+  console.log(`\nMax cumulativeDescentMAtStart seen anywhere in the library: ${maxDescentM.toFixed(0)} m`);
+  console.log(`Max cumulativeDescentImpactAtStart seen anywhere in the library: ${maxDescentImpact.toFixed(0)} m·m/s`);
 }
 
 main();
