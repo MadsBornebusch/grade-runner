@@ -2454,19 +2454,20 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    makes ANY slowdown look like an improvement, and exactly why a blind
    control was the load-bearing check here, not an optional extra.
 
-   **The discriminating check: does the tie survive on the population
-   that actually matters?** A pure population-bias story predicts the
-   uniform under-prediction (and the tie it produces) should mostly
-   disappear on sustained-effort races specifically, which — unlike easy
-   training runs — ARE paced near the model's own sustainable-effort
-   assumption. No new heuristic needed to test this: Stage 4's own
-   `buildWithinRaceDiagnosticPoint` already gates on exactly "sustained
-   effort" (a real single-race tau fit succeeds, late window has enough
-   points *and* enough elapsed time) — reusing it to restrict this
-   backtest's TARGET set (training pool stays full) is a race-only rerun
-   with nothing invented. Only 9 of 203 cached activities clear that gate
-   (smaller than Stage 4's ~16 — a slightly different population/filter
-   combination, not a discrepancy worth chasing further at this n). Result:
+   **Attempted discriminating check: does the tie survive on the
+   sustained-effort (≥~2h, fittable fade curve) subset specifically?**
+   ("Race-only" overstates this filter — it's a proxy for races, not a
+   race flag.) A pure population-bias story predicts the uniform under-
+   prediction should mostly disappear here, since these runs — unlike
+   easy training jogs — are at least closer to the model's own
+   sustainable-effort assumption. No new heuristic needed: Stage 4's own
+   `buildWithinRaceDiagnosticPoint` already gates on exactly this
+   (a real single-race tau fit succeeds, late window has enough points
+   *and* enough elapsed time) — reusing it to restrict this backtest's
+   TARGET set (training pool stays full) needed nothing invented. Only 9
+   of 203 cached activities clear that gate (smaller than Stage 4's ~16 —
+   a slightly different population/filter combination, not a discrepancy
+   worth chasing further at this n). Result:
 
    | candidate | mean \|err%\| | median \|err%\| | mean signed err% |
    |---|---|---|---|
@@ -2474,35 +2475,55 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    | baseline + fitted per-category surface | 21.51% | 23.14% | −21.51% |
    | baseline + surface-blind uniform multiplier (control) | 21.46% | 22.95% | −21.46% |
 
-   **The population-bias hypothesis doesn't survive its own test.** Every
-   one of these 9 sustained-effort races is *still* under-predicted with
-   no exceptions (mean\|err%\| again equals \|mean signed err%\| exactly) —
-   the uniform bias isn't specific to easy training runs after all, it's a
-   property of this baseline model more broadly. And the tie holds up
-   here too, if anything slightly favoring the blind control (21.46% vs.
-   21.51% — a 0.05-point gap, noise at n=9). This is a *stronger* result
-   than "inconclusive, population-confounded": the one population where a
-   real surface-targeting advantage should have shown up if it existed
-   still shows none. The obvious caveat — n=9 is a small sample, so this
-   doesn't have much power to detect a modest real effect either — applies
-   equally to both readings and doesn't rescue the surface claim.
+   **The bias didn't disappear — which points at a different, more
+   fundamental cause than "training runs vs. races."** Every one of these
+   9 sustained-effort runs is *still* under-predicted with no exceptions.
+   That's a clue, not a dead end: a uniform, one-directional ~22-23% error
+   across BOTH populations, training and sustained-effort alike, is a
+   global-scale symptom, not a terrain one. Two concrete causes were never
+   ruled out: (1) every fold ran on `DEFAULT_FORM_INPUTS`'s generic
+   `vo2MaxMlPerKgPerMin: 50` / `bodyMassKg: 70` — `fitTauFInfWithSupportGate`
+   only fits `fInf`/`tauMin` per fold, never this athlete's own actual
+   VO2max or mass, and VO2max scales predicted power (hence predicted
+   pace) directly enough that a real value meaningfully below 50 would by
+   itself produce a bias of about this size and direction; (2)
+   `findSustainableTheta` predicts the *theoretical* fastest sustainable
+   pace, and any real athlete — even racing — paces with some margin
+   below their own theoretical limit, which is also a uniform, one-
+   directional gap no amount of surface/clock/impact tuning can close.
 
-   **Verdict: Plan B has not produced a single candidate — surface,
-   aerobic-fade clock, or impact/muscular-fatigue term — that clears its
-   own held-out bar, on either the full mixed population or the smaller
-   sustained-effort-only one.** Stage 5's in-sample surface fit remains
-   real, robust, grade-controlled, and low-VIF on its own terms — nothing
-   here disproves a genuine terrain-cost effect exists, and the two
-   backtests here are both small-n and probably underpowered to detect a
-   modest real effect against this athlete's own considerable run-to-run
-   variability. But two separate held-out checks, including the one
-   specifically designed to be the more favorable population, both failed
-   to distinguish it from a same-sized blind nudge, so it does not license
-   shipping `surfaceCostMultipliers` as a validated per-athlete correction.
-   `tau`/`f0`/`fInf` in `ceiling.ts` are unchanged and untouched by
-   anything Plan B built — "the old curve was fine" (this section's own
-   standing alternative outcome) is the honest destination for all three
-   channels this session investigated.
+   **Why this changes what the tie means:** against a baseline that reads
+   ~22% fast on *every* run regardless of terrain, any multiplier > 1
+   improves the metric almost by construction — correct per-terrain
+   targeting and a same-sized blind nudge are close to indistinguishable
+   whenever one global bias this large dominates. The tie is therefore
+   **inconclusive for the surface term specifically, not evidence against
+   it**: this backtest, run against an uncalibrated baseline, is
+   structurally unable to see a modest, correctly-targeted effect once a
+   much larger uniform bias is already present. Concluding "surface
+   doesn't help" from this result would be the same category of mistake
+   this stage already caught once (declaring a true effect from a
+   confounded win) — just pointed the other direction.
+
+   **Verdict, stated at the grain the evidence actually supports:**
+   Stage 5's in-sample surface finding (robust, grade-controlled, low-VIF
+   across all 12 clock/impact combinations) **stands on its own evidence,
+   uncontradicted** — this backtest could not confirm it, but could not
+   refute it either, and the reason is now identified (an uncalibrated
+   baseline dominating the signal) rather than left as an unexplained
+   null. The aerobic-fade and impact/muscular-fatigue channels are a
+   genuinely different, weaker case: those never produced a coefficient
+   trustworthy enough in-sample to even reach this backtest (Stage 4's
+   n=16 diagnostic and Stage 5's VIF/collinearity results, independent of
+   any baseline-calibration issue) — "no trustworthy candidate produced,"
+   not "produced but the arbiter couldn't adjudicate it." `tau`/`f0`/`fInf`
+   in `ceiling.ts` are unchanged either way. **The load-bearing finding
+   for any future attempt to validate a cost term this way: this arbiter
+   needs a per-athlete-calibrated baseline (real VO2max and body mass,
+   not generic defaults) before it can center near zero error and become
+   sensitive to a modest term at all** — a finding about the *method*'s
+   current limits, not a verdict on surface, and worth fixing before
+   trying this kind of backtest again rather than re-running it as-is.
 
 ### Open questions
 
