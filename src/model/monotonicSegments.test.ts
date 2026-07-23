@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CourseSegment } from "../gpx/pipeline";
 import { buildMonotonicSegments } from "./monotonicSegments";
+import { DEFAULT_RUNNING_IMPACT_COEFFICIENTS, hillSurchargeKm } from "./runningImpact";
 
 /** Builds a sequential CourseSegment[] from per-segment partial overrides,
  * filling in index/cumulativeDistance3D/elevation consistently -- mirrors
@@ -265,5 +266,33 @@ describe("buildMonotonicSegments", () => {
     // only the real 10m post-pause drop should count -- not 15m (which would
     // double-count the pause's own -5m drift as if it were a second descent).
     expect(afterDescent.cumulativeDescentMAtStart).toBeCloseTo(10, 10);
+  });
+
+  it("computes cumulativeRunningImpactAtStart consistently with runningImpact.ts's own hillSurchargeKm, evaluated on the equivalent course prefix", () => {
+    const segments = course([
+      { gradient: 0 },
+      { gradient: 0.15 },
+      { gradient: 0.15 },
+      { gradient: -0.05 }, // breaks the climb so its AtStart snapshot can be read
+    ]);
+    const runs = buildMonotonicSegments(segments, { minDistanceM: 0, minTimeS: 0 });
+    const afterClimb = runs[runs.length - 1];
+
+    const priorSegments = segments.slice(0, 3); // flat + the 2-segment climb preceding the final run
+    const expectedDistanceKm = priorSegments.reduce((sum, s) => sum + s.distance3D, 0) / 1000;
+    const expected =
+      DEFAULT_RUNNING_IMPACT_COEFFICIENTS.distanceCoefficient * expectedDistanceKm +
+      DEFAULT_RUNNING_IMPACT_COEFFICIENTS.hillSurchargeCoefficient * hillSurchargeKm(priorSegments);
+    expect(afterClimb.cumulativeRunningImpactAtStart).toBeCloseTo(expected, 8);
+  });
+
+  it("respects a custom runningImpactCoefficients override", () => {
+    const segments = course([{ gradient: 0.1 }, { gradient: -0.1 }]);
+    const runs = buildMonotonicSegments(segments, {
+      minDistanceM: 0,
+      minTimeS: 0,
+      runningImpactCoefficients: { distanceCoefficient: 0, hillSurchargeCoefficient: 0 },
+    });
+    expect(runs[1].cumulativeRunningImpactAtStart).toBe(0);
   });
 });

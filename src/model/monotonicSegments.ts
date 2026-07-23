@@ -19,13 +19,20 @@
 //   bases already validated in descentImpact.ts and used by the whole-race
 //   fits (pacingFit.ts, ceiling.ts's durabilityDriftPerDescentUnit) --
 //   reused via descentStepForSegment rather than reimplemented a fourth
-//   time, per that module's own stated reason for existing.
+//   time, per that module's own stated reason for existing. Plus a fourth,
+//   independent impact reading: runningImpact.ts's externally-validated
+//   "running impact" score (reverse-engineered against an athlete-facing
+//   app metric, §12 stage 4's "Follow-up" -- distance plus a Minetti
+//   hill-surcharge term, NOT the same hypothesis as the speed-weighted
+//   descent bases above), accumulated incrementally via its own exported
+//   hillSurchargeKm() rather than re-slicing the whole course per segment.
 
 import type { CourseSegment, SurfaceCategory } from "../gpx/pipeline";
 import { costOfRunning, costOfWalking } from "./minetti";
 import { netToGross } from "./energetics";
 import { type CeilingParams, maxAerobicPower } from "./ceiling";
 import { descentStepForSegment } from "./descentImpact";
+import { DEFAULT_RUNNING_IMPACT_COEFFICIENTS, hillSurchargeKm, type RunningImpactCoefficients } from "./runningImpact";
 
 export type GradeSign = -1 | 0 | 1;
 export type GaitMode = "run" | "walk";
@@ -55,6 +62,12 @@ export interface MonotonicSegmentOptions {
    * ceilingPower does elsewhere.
    */
   ceilingParams?: CeilingParams;
+  /** Coefficients for the runningImpact.ts-derived candidate below.
+   * Defaults to that module's own DEFAULT_RUNNING_IMPACT_COEFFICIENTS --
+   * unlike ceilingParams, this needs no per-athlete opt-in since the
+   * module already ships a concrete (if small-sample-fit, per its own
+   * doc) default rather than a generic placeholder. */
+  runningImpactCoefficients?: RunningImpactCoefficients;
 }
 
 export interface MonotonicSegment {
@@ -101,6 +114,18 @@ export interface MonotonicSegment {
   cumulativeDescentMAtStart: number;
   cumulativeDescentImpactAtStart: number;
   cumulativeDescentImpactSquaredAtStart: number;
+  /** Fourth, independent impact reading -- runningImpact.ts's externally-
+   * validated distance+hill-surcharge score, accumulated so far. Not the
+   * same hypothesis as the three descent bases above (see that module's
+   * own doc for why it's kept as a separate, not competing, candidate).
+   * Minor documented divergence from that module's own usage: its distance
+   * term is normally read off a course's raw cumulativeDistance3D (which
+   * includes whatever tiny drift accumulates during a paused segment);
+   * this reuses cumulativeDistanceMAtStart above instead, which only
+   * advances on non-paused segments. Expected to be negligible in practice
+   * -- a "paused" segment is classified that way precisely because its own
+   * distance is already near zero -- but not literally identical. */
+  cumulativeRunningImpactAtStart: number;
 }
 
 const DEFAULT_GRADE_HYSTERESIS_FRACTION = 0.015;
@@ -139,6 +164,7 @@ interface Accumulator {
   descentMAtStart: number;
   descentImpactAtStart: number;
   descentImpactSquaredAtStart: number;
+  hillSurchargeKmAtStart: number;
 }
 
 /**
@@ -162,6 +188,7 @@ export function buildMonotonicSegments(
   const hardWorkEnabled = options.ceilingParams !== undefined;
   const ceilingParams = options.ceilingParams ?? {};
   const lt2Fraction = ceilingParams.lt2Fraction ?? DEFAULT_LT2_FRACTION;
+  const runningImpactCoefficients = options.runningImpactCoefficients ?? DEFAULT_RUNNING_IMPACT_COEFFICIENTS;
 
   const result: MonotonicSegment[] = [];
   let current: Accumulator | null = null;
@@ -174,6 +201,7 @@ export function buildMonotonicSegments(
   let cumulativeDescentM = 0;
   let cumulativeDescentImpact = 0;
   let cumulativeDescentImpactSquared = 0;
+  let cumulativeHillSurchargeKm = 0;
   /** Previous segment's own elevation, in course order -- descentStepForSegment's
    * contract requires this be threaded across EVERY segment (paused or not),
    * unconditionally, same as pacingFit.ts/solver.ts already do. */
@@ -203,6 +231,9 @@ export function buildMonotonicSegments(
         cumulativeDescentMAtStart: c.descentMAtStart,
         cumulativeDescentImpactAtStart: c.descentImpactAtStart,
         cumulativeDescentImpactSquaredAtStart: c.descentImpactSquaredAtStart,
+        cumulativeRunningImpactAtStart:
+          runningImpactCoefficients.distanceCoefficient * (c.distanceMAtStart / 1000) +
+          runningImpactCoefficients.hillSurchargeCoefficient * c.hillSurchargeKmAtStart,
       });
     }
     current = null;
@@ -242,6 +273,11 @@ export function buildMonotonicSegments(
     const hardWorkJPerKg = hardWorkEnabled
       ? Math.max(0, grossPowerWPerKg - maxAerobicPower(seg.elevation, ceilingParams) * lt2Fraction) * dt
       : null;
+    // Reuses runningImpact.ts's own exported hillSurchargeKm() on a
+    // single-segment slice rather than reimplementing its grade-cost-ratio
+    // formula -- hillSurchargeKm() has no "must start at course index 0"
+    // restriction (unlike runningImpact() itself), so this is safe.
+    const hillSurchargeKmStep = hillSurchargeKm([seg]);
 
     if (current === null) {
       current = {
@@ -264,6 +300,7 @@ export function buildMonotonicSegments(
         descentMAtStart: cumulativeDescentM,
         descentImpactAtStart: cumulativeDescentImpact,
         descentImpactSquaredAtStart: cumulativeDescentImpactSquared,
+        hillSurchargeKmAtStart: cumulativeHillSurchargeKm,
       };
     }
 
@@ -287,6 +324,7 @@ export function buildMonotonicSegments(
       cumulativeDescentImpact += descentStep.descentM * descentStep.speedMs;
       cumulativeDescentImpactSquared += descentStep.descentM * descentStep.speedMs * descentStep.speedMs;
     }
+    cumulativeHillSurchargeKm += hillSurchargeKmStep;
   }
   finalizeCurrent();
 

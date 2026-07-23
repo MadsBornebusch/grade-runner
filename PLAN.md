@@ -1925,30 +1925,50 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
      balance deliberately deferred, per §14's own note that it needs its
      own recovery-time-constant fit).
    - **Impact/muscular-fatigue candidates** (cost-side, added after the
-     user flagged this field was still missing): the same three
-     descent-exposure bases already validated and shipped for the
-     whole-race fits — cumulative descent meters, descent×speed, and
-     descent×speed² — computed via `descentImpact.ts`'s
+     user flagged this field was still missing): four parallel readings,
+     not three — the three descent-exposure bases already validated and
+     shipped for the whole-race fits (cumulative descent meters,
+     descent×speed, descent×speed²), computed via `descentImpact.ts`'s
      `descentStepForSegment` (reused, not reimplemented a fourth time,
      threading `previousElevation` across every segment including pauses,
-     exactly matching that function's existing contract).
+     exactly matching that function's existing contract) — **plus a
+     fourth, independently-sourced reading recovered when the user asked
+     whether it had been carried over: `runningImpact.ts`'s "running
+     impact" score (§12 stage 4's "Follow-up"), reverse-engineered against
+     an athlete-facing app metric from real (distance, elevation, score)
+     tuples, not the same hypothesis as the speed-weighted descent bases
+     (distance + Minetti hill-surcharge vs. speed-weighted descent).**
+     Accumulated incrementally by calling that module's own exported
+     `hillSurchargeKm()` on each single segment rather than re-slicing the
+     whole course per point (`hillSurchargeKm` has no "must start at
+     course index 0" restriction, unlike `runningImpact()` itself, which
+     is what makes the incremental form safe). One documented, expected-
+     negligible divergence from that module's original validated usage:
+     its distance term normally reads a course's raw `cumulativeDistance3D`
+     (including whatever drift a paused segment accumulates), but this
+     reuses the already-tracked moving-distance-only accumulator instead —
+     a "paused" segment is classified that way precisely because its own
+     distance is already near zero, so the practical difference should be
+     tiny, but it isn't literally identical.
 
    `surfaceExposure.ts`'s `attachSurfaceData` was extended in the same pass
    to also set the new `CourseSegment.surfaceCategory` (the full Valhalla
    vocabulary — paved/gravel/dirt/compacted/path/other — confirmed above),
    alongside the existing binary `surfaceUnpaved` it already fed
    `unpavedCostMultiplier`; both fields now come from one lookup, so they
-   can never disagree with each other. Verified with 15 synthetic-course
+   can never disagree with each other. Verified with 17 synthetic-course
    tests (`monotonicSegments.test.ts`) before touching real data — grade/
    surface/gait boundary triggers, pause/untimed exclusion, the floor's
-   OR-logic in both directions, cumulative-at-start correctness (both
-   channels), the `ceilingParams`/`bodyMassKg` opt-in gating, and elevation
+   OR-logic in both directions, cumulative-at-start correctness (all four
+   channels), the `ceilingParams`/`bodyMassKg` opt-in gating, elevation
    continuity across a pause (a paused segment's own elevation drift must
    update the running "previous elevation" state without itself counting
    as descent — caught by a dedicated test after the general course-builder
    test helper turned out to have an off-by-one in when it stamped each
    segment's elevation, fixed before it could produce a silently-wrong
-   expected value in the new descent tests).
+   expected value in the new descent tests), and the running-impact
+   accumulation cross-checked directly against `hillSurchargeKm()` called
+   on the equivalent course prefix (not just a hand-rederived formula).
 
    **Real-data sanity check** (`scripts/buildSegmentLibrarySample.ts`,
    offline — reuses Stage 0's `.surface-cache/`, no new Valhalla calls):
