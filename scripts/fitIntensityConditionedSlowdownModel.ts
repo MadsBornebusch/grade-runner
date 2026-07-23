@@ -5,15 +5,19 @@
 // impact model, compared side by side.
 //
 // Fair-comparison mechanics: the three arms need measured device power,
-// heart rate, and Minetti power respectively -- device power coverage
-// (~122/159 long runs per Stage 3) and HR coverage differ from each other,
-// so comparing raw R^2 across arms fit on their own native samples would
-// conflate "different intensity basis" with "different population". This
-// restricts all three to the INTERSECTION (segments with both HR and
-// device power, on top of the usual gait/surface filters) for the
-// head-to-head, then separately reports pulse on its own larger native
-// sample -- since that's the one actually useful for a course with no
-// device-power history.
+// heart rate, and Minetti power respectively, and comparing raw R^2 across
+// arms fit on different populations would conflate "different intensity
+// basis" with "different population". This restricts all three to the
+// INTERSECTION (segments with both HR and device power, on top of the
+// usual gait/surface filters) for the head-to-head, then separately
+// reports pulse on its own native sample -- intended to be a BROADER,
+// HR-only population, since that's the one actually useful for a course
+// with no device-power history. In practice, on THIS cache, that row comes
+// out identical to the intersection row: .surface-cache/ was itself
+// pre-filtered back in Stage 0 to hasPower && hasTime activities only, so
+// every segment here already has both instruments. The broader-population
+// check this was meant to provide is untestable with the current cache,
+// not something this run confirmed is unnecessary.
 //
 // One aerobicClockBasis/impactBasis combination only (elapsedHours +
 // descentMeters) -- Stage 5's own script already covers the full 3x4 grid
@@ -118,23 +122,29 @@ function main() {
   }
 
   console.log(
-    "\nRead: modelledPower's R^2 is expected to sit near 1 with its own intensity term's VIF blown out --\n" +
-      "that's the circularity signature (avgMinettiGrossPowerWPerKg is a deterministic function of THIS SAME\n" +
-      "segment's grade+speed), not evidence terrain doesn't matter. measuredPower is expected to sit closer to\n" +
-      "pulse but still partially blind (Stage 3's own testStrydSurfaceSensitivity.ts found device power barely\n" +
-      "moves with surface at matched speed+grade). Pulse is the one candidate whose surface/clock/impact\n" +
-      "coefficients should be trusted here -- it's the only intensity reading that isn't itself derived from\n" +
-      "pace, so a real surface-driven slowdown has somewhere to show up instead of being absorbed.\n",
+    "\nRead: modelledPower's R^2 is NOT reliably near 1 at real monotonic-segment granularity -- a real run\n" +
+      "found 0.44 with intensity's own VIF at 1.15 (not blown out), well short of the point-level circularity\n" +
+      "signature intensityConditionedSlowdownFit.test.ts locks in synthetically. That's because\n" +
+      "avgMinettiGrossPowerWPerKg averages PER-POINT power across a run that's only constant in grade SIGN,\n" +
+      "not grade value -- a different, nonlinearly-averaged view of the same data than avgGradient/avgSpeedMs\n" +
+      "(see PLAN.md §14 stage 7 and this module's own doc). A higher R^2 here still isn't fit-quality evidence\n" +
+      "for modelledPower -- read it as residual point-level speed-power coupling, diluted not eliminated by\n" +
+      "averaging. What DOES still hold: both power-based arms under-read the surface slowdown relative to\n" +
+      "pulse on every category (Stage 3's original 'power absorbs some of the true slowdown' finding, now\n" +
+      "partial rather than complete). Pulse's own surface/clock/impact coefficients are the ones to trust here\n" +
+      "-- it's the only intensity reading that isn't itself derived from pace -- though see PLAN.md's own\n" +
+      "caveat on HR lag before leaning on the exact magnitude.\n",
   );
 
-  console.log("=== Pulse on its own full native sample (no device-power availability restriction) ===");
-  printResult("pulse (full)", fitIntensityConditionedSlowdownModel(withHr, { intensityBasis: "pulse", aerobicClockBasis: "elapsedHours", impactBasis: "descentMeters" }));
+  console.log("=== Pulse on its own native sample (no device-power availability restriction) ===");
+  printResult("pulse (native)", fitIntensityConditionedSlowdownModel(withHr, { intensityBasis: "pulse", aerobicClockBasis: "elapsedHours", impactBasis: "descentMeters" }));
 
   console.log(
-    "\nThis is the version actually usable in practice -- HR-only activities don't need a footpod, so this\n" +
-      "sample is closer to what a real course/athlete's surface-cost fit would draw on. Compare its surface\n" +
-      "coefficients to the intersection-population pulse row above: a large shift would mean the intersection\n" +
-      "restriction itself (runs with BOTH instruments) is a biased subsample, not just a smaller one.",
+    "\nIntended as the broader, HR-only population an athlete with no footpod would actually have -- but on\n" +
+      "THIS cache it comes out identical to the intersection-population pulse row above, because\n" +
+      ".surface-cache/ was itself pre-filtered back in Stage 0 to hasPower && hasTime activities, so every\n" +
+      "cached segment already carries both instruments. This row can't currently test what it was built to\n" +
+      "test; that would need a cache built without the hasPower prefilter.",
   );
 }
 

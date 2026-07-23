@@ -2627,8 +2627,12 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    predict: real modelledPower is NOT anywhere near the point-level
    circularity signature.** Restricted to the 6400 running/known-surface
    segments (which, in this athlete's data, ALL carry both HR and device
-   power — the intersection-vs-native-sample distinction the fair-
-   comparison design worried about turned out to be moot here):
+   power — NOT because the two happen to coincide, but because
+   `.surface-cache/` was itself pre-filtered back in Stage 0 to
+   `hasPower && hasTime` activities only (§14 stage 0's own note). The
+   fair-comparison design wanted a broader HR-only population to check
+   pulse against; this cache structurally can't provide one — that
+   distinction is untestable with the current cache, not moot):
 
    | intensity basis | within-run R² | gravel | dirt | compacted | path |
    |---|---|---|---|---|---|
@@ -2636,8 +2640,15 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    | modelledPower | 0.441 | −1.02% | −1.72% | −2.02% | −7.91% |
    | measuredPower | 0.137 | −1.01% | −1.86% | −2.27% | −7.65% |
 
-   modelledPower's R²=0.44 is well above pulse's 0.127, but nowhere near
-   the ~1.0 the point-level math predicts, and its intensity column's VIF
+   modelledPower's R²=0.44 is well above pulse's 0.127 — but read that gap
+   as "power is still mechanically coupled to pace at the per-point level,
+   diluted rather than eliminated by segment-level averaging," NOT as
+   "modelled power explains pace better than heart rate." A higher R² here
+   is exactly the residual-tautology risk this module's own doc warns
+   against reading as fit quality; it says nothing about which arm's
+   surface coefficients to trust (that's the coefficient-stability
+   comparison below, not this column). R²=0.44 is nowhere near the ~1.0 the
+   point-level math predicts, and its intensity column's VIF
    sits at 1.15 (not blown out at all) — the opposite of the synthetic
    fingerprint. **Reason, traced to `monotonicSegments.ts`'s own documented
    design**: `avgMinettiGrossPowerWPerKg` is the average of *per-underlying-
@@ -2669,17 +2680,41 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    — the same clock-vs-impact near-collinearity Stage 5 already found,
    unaffected by which intensity basis is used.
 
-   **Verdict:** pulse's surface coefficients are the ones to trust, same
-   conclusion Stage 3 reached and now confirmed inside a joint regression
-   that also controls for clock/impact — and they're LARGER than Stage 5's
-   own log-GAP-based ones (path −10.17% here vs Stage 5's ~10% — close,
-   reassuringly, since Stage 5's within-run-demeaned effort proxy and an
-   explicit pulse term are two different ways of trying to hold effort
-   constant). Still in-sample, same caveat as every other mechanism in this
-   file — Stage 6's held-out backtest is the eventual arbiter, once it has
-   a fitted pacing-margin term to be sensitive to a modest effect at all
-   (stage 6's own standing conclusion). `scripts/fitIntensityConditionedSlowdownModel.ts`
-   runs all three arms plus pulse-on-its-native-sample side by side.
+   **Caveat on the pulse arm specifically, not yet closed: `avgHeartRateBpm`
+   is a plain, un-lag-corrected per-point mean.** `hrCalibration.ts`'s own
+   documented ~20-45s HR response lag means a segment's contemporaneous
+   average HR is partly contaminated by the preceding segment's effort —
+   and this isn't a generic noise concern, since path segments are
+   systematically the steep ones (Stage 3: path ~10% grade vs paved ~3%),
+   so lag-driven HR error is correlated with exactly the category carrying
+   this fit's largest coefficient (path −10.17%). Not corrected for here.
+   What partly mitigates it without fixing it: **Stage 5's log-GAP fit is
+   entirely HR-free and independently produced ~10% for path** — two
+   different specifications, one of which structurally cannot have an
+   HR-lag problem, landing close together is real evidence the lag isn't
+   grossly distorting this number, not proof it's exactly right. Segments
+   here average roughly 1-4 minutes (8824 segments / 203 runs, distributed
+   over each run's full duration), so a 20-45s boundary lag is a minority
+   of most segments' own span — plausible this is a second-order effect,
+   not verified. A lagged/trailing-window HR rebuild (matching
+   hrCalibration.ts's own smoothing) is the one concrete follow-up worth
+   doing before leaning on this fit's pulse coefficients for anything
+   downstream.
+
+   **Verdict:** pulse's surface coefficients are the ones to trust over the
+   two power-based arms — same conclusion Stage 3 reached, now confirmed
+   inside a joint regression that also controls for clock/impact — and
+   they're close to Stage 5's own, independently-derived log-GAP-based
+   ones (path −10.17% here vs Stage 5's ~10%), which is corroborating
+   evidence for both the surface effect's existence and (per the caveat
+   above) that HR-lag isn't badly distorting it. Still in-sample, same
+   caveat as every other mechanism in this file — Stage 6's held-out
+   backtest is the eventual arbiter, once it has a fitted pacing-margin
+   term to be sensitive to a modest effect at all (stage 6's own standing
+   conclusion). `scripts/fitIntensityConditionedSlowdownModel.ts` runs all
+   three arms side by side (plus a pulse-only row that, per the cache note
+   above, is currently identical to the intersection row, not a broader
+   check).
 
 ### Open questions
 
