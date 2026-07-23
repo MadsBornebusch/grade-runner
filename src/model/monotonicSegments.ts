@@ -28,11 +28,10 @@
 //   hillSurchargeKm() rather than re-slicing the whole course per segment.
 
 import type { CourseSegment, SurfaceCategory } from "../gpx/pipeline";
-import { costOfRunning, costOfWalking } from "./minetti";
-import { netToGross } from "./energetics";
-import { type CeilingParams, maxAerobicPower } from "./ceiling";
+import { type CeilingParams } from "./ceiling";
 import { descentStepForSegment } from "./descentImpact";
 import { DEFAULT_RUNNING_IMPACT_COEFFICIENTS, hillSurchargeKm, type RunningImpactCoefficients } from "./runningImpact";
+import { workStepForSegment } from "./workAccumulation";
 
 export type GradeSign = -1 | 0 | 1;
 export type GaitMode = "run" | "walk";
@@ -132,11 +131,6 @@ const DEFAULT_GRADE_HYSTERESIS_FRACTION = 0.015;
 const DEFAULT_WALK_MAX_MS = 2.0;
 const DEFAULT_MIN_DISTANCE_M = 100;
 const DEFAULT_MIN_TIME_S = 30;
-/** Matches ceiling.ts's own DEFAULTS.lt2Fraction -- not exported there, so
- * duplicated here rather than threading an extra export through for one
- * constant. Only used when ceilingParams is supplied without its own
- * lt2Fraction. */
-const DEFAULT_LT2_FRACTION = 0.85;
 
 function gradeSignWithHysteresis(gradient: number, previous: GradeSign, hysteresisFraction: number): GradeSign {
   if (gradient > hysteresisFraction) return 1;
@@ -187,7 +181,6 @@ export function buildMonotonicSegments(
   const bodyMassKg = options.bodyMassKg;
   const hardWorkEnabled = options.ceilingParams !== undefined;
   const ceilingParams = options.ceilingParams ?? {};
-  const lt2Fraction = ceilingParams.lt2Fraction ?? DEFAULT_LT2_FRACTION;
   const runningImpactCoefficients = options.runningImpactCoefficients ?? DEFAULT_RUNNING_IMPACT_COEFFICIENTS;
 
   const result: MonotonicSegment[] = [];
@@ -267,12 +260,10 @@ export function buildMonotonicSegments(
       finalizeCurrent();
     }
 
-    const cost = gaitMode === "walk" ? costOfWalking(seg.gradient) : costOfRunning(seg.gradient);
-    const netWorkJPerKg = cost * seg.distance3D;
-    const grossPowerWPerKg = netToGross(cost * speedMs);
-    const hardWorkJPerKg = hardWorkEnabled
-      ? Math.max(0, grossPowerWPerKg - maxAerobicPower(seg.elevation, ceilingParams) * lt2Fraction) * dt
-      : null;
+    const workStep = workStepForSegment(seg, ceilingParams, walkMaxMs);
+    const netWorkJPerKg = workStep.netWorkJPerKg;
+    const grossPowerWPerKg = workStep.grossPowerWPerKg;
+    const hardWorkJPerKg = hardWorkEnabled ? workStep.hardWorkJPerKg : null;
     // Reuses runningImpact.ts's own exported hillSurchargeKm() on a
     // single-segment slice rather than reimplementing its grade-cost-ratio
     // formula -- hillSurchargeKm() has no "must start at course index 0"

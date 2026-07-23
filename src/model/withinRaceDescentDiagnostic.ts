@@ -19,6 +19,32 @@
 // *some* early descent -- it doesn't need a specially-shaped race, since
 // the comparison is internal to each race, not between races.
 //
+// PLAN.md §14 Plan B, Stage 4: also carries two aerobic-fatigue-clock
+// candidates from the §14 shortlist -- early-window cumulative Minetti net
+// locomotion work and early-window cumulative supra-LT2 "hard" work
+// (workAccumulation.ts), normalized the same per-km way as the descent
+// metrics -- so the SAME late-window residual outcome used to judge the
+// impact/muscular-fatigue candidates below also judges these two head to
+// head against elapsed time (already implicitly "tested" by construction,
+// since lateResidualTrendPctPerHour is itself the residual left over AFTER
+// removing a single elapsed-time-based tau decay -- a strong net/hard-work
+// correlation here would say elapsed time isn't the whole story, not that
+// time is irrelevant).
+//
+// IMPORTANT caveat, not shared by the descent/running-impact predictors:
+// both net work and hard work are Minetti-cost-curve-derived from GPS
+// speed+grade -- the exact same basis as grossPowerWPerKg, the numerator of
+// the effortFraction this file's residual is built from (see analysis.ts).
+// A run paced aggressively early and slower late (an ordinary negative-split
+// shape, nothing pathological) will mechanically show BOTH high early
+// cumulative work/hard-work AND a more negative late residual, since faster
+// early pace is exactly what produces both numbers. So a positive
+// correlation here does not distinguish "cumulative work is the real
+// fatigue clock" from "this run happened to be paced hard early" -- unlike
+// heart rate in Stage 3, this isn't an independent instrument reading.
+// Read as a candidate worth carrying into Stage 5's held-out backtest, not
+// as standalone evidence.
+//
 // Also carries runningImpact.ts's fitted "running impact" score as a fourth
 // early-window predictor, for a head-to-head comparison against the three
 // descent-specific ones. Its distance term does NOT make this predictor
@@ -51,6 +77,7 @@ import {
 } from "./pacingFit";
 import { runningImpact } from "./runningImpact";
 import { pearsonCorrelation } from "./tauDiagnostic";
+import { hardWorkJPerKg, netLocomotionWorkJPerKg } from "./workAccumulation";
 import type { BuildRaceDiagnosticPointOptions } from "./raceDiagnosticPoint";
 
 /** Simplest defensible default -- a tunable parameter, not a hardcoded
@@ -86,6 +113,12 @@ export interface WithinRaceDiagnosticPoint {
    * normalized per km the same way as the descent metrics above. See this
    * file's header comment for why it's a weaker, more confounded probe. */
   earlyRunningImpactPerKm: number;
+  /** Aerobic-fatigue-clock candidates (PLAN.md §14 Plan B, Stage 4), early
+   * window only, normalized per km of the early window's own distance --
+   * see this file's header comment for the negative-split confound these
+   * two candidates carry that the descent/running-impact ones above don't. */
+  earlyNetWorkPerKmJPerKg: number;
+  earlyHardWorkPerKmJPerKg: number;
 }
 
 export interface WithinRaceDiagnosticResult {
@@ -101,6 +134,11 @@ export interface WithinRaceDiagnosticResult {
   lateResidualVsEarlyDescentImpactCorrelation: number | null;
   lateResidualVsEarlyDescentImpactSquaredCorrelation: number | null;
   lateResidualVsEarlyRunningImpactCorrelation: number | null;
+  /** See earlyNetWorkPerKmJPerKg/earlyHardWorkPerKmJPerKg's own doc for the
+   * negative-split confound that makes these two harder to read than the
+   * four above -- carried into Stage 5's held-out backtest, not concluded from here alone. */
+  lateResidualVsEarlyNetWorkCorrelation: number | null;
+  lateResidualVsEarlyHardWorkCorrelation: number | null;
 }
 
 /**
@@ -167,6 +205,8 @@ export function buildWithinRaceDiagnosticPoint(
     earlyDescentImpactPerKm: descentImpact(earlySegments) / earlyDistanceKm,
     earlyDescentImpactSquaredPerKm: descentImpactSquared(earlySegments) / earlyDistanceKm,
     earlyRunningImpactPerKm: runningImpact(earlySegments) / earlyDistanceKm,
+    earlyNetWorkPerKmJPerKg: netLocomotionWorkJPerKg(earlySegments, options.ceilingParams) / earlyDistanceKm,
+    earlyHardWorkPerKmJPerKg: hardWorkJPerKg(earlySegments, options.ceilingParams) / earlyDistanceKm,
   };
 }
 
@@ -189,6 +229,14 @@ export function computeWithinRaceDescentDiagnostic(points: WithinRaceDiagnosticP
     lateResidualVsEarlyRunningImpactCorrelation: pearsonCorrelation(
       lateResidualValues,
       points.map((p) => p.earlyRunningImpactPerKm),
+    ),
+    lateResidualVsEarlyNetWorkCorrelation: pearsonCorrelation(
+      lateResidualValues,
+      points.map((p) => p.earlyNetWorkPerKmJPerKg),
+    ),
+    lateResidualVsEarlyHardWorkCorrelation: pearsonCorrelation(
+      lateResidualValues,
+      points.map((p) => p.earlyHardWorkPerKmJPerKg),
     ),
   };
 }

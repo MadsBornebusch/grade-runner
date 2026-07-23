@@ -4,6 +4,7 @@ import { RESTING_METABOLISM_W_PER_KG } from "./energetics";
 import { costOfRunning } from "./minetti";
 import type { CourseSegment, PipelineResult } from "../gpx/pipeline";
 import type { BuildRaceDiagnosticPointOptions } from "./raceDiagnosticPoint";
+import { hardWorkJPerKg, netLocomotionWorkJPerKg } from "./workAccumulation";
 import {
   buildWithinRaceDiagnosticPoint,
   computeWithinRaceDescentDiagnostic,
@@ -127,9 +128,41 @@ describe("buildWithinRaceDiagnosticPoint / computeWithinRaceDescentDiagnostic", 
     const impacts = points.map((p) => p.earlyDescentImpactPerKm);
     for (let i = 1; i < impacts.length; i++) expect(impacts[i]).toBeGreaterThan(impacts[i - 1]);
 
+    // Work/hard-work are always non-negative by construction (Minetti cost
+    // and the LT2 excess are both >= 0), regardless of the correlation's sign.
+    for (const p of points) {
+      expect(p.earlyNetWorkPerKmJPerKg).toBeGreaterThan(0);
+      expect(p.earlyHardWorkPerKmJPerKg).toBeGreaterThanOrEqual(0);
+    }
+
     const result = computeWithinRaceDescentDiagnostic(points);
     expect(result.lateResidualVsEarlyDescentImpactCorrelation).not.toBeNull();
     expect(result.lateResidualVsEarlyDescentImpactCorrelation!).toBeLessThan(-0.8);
+  });
+
+  it("wires early net/hard work through to match calling workAccumulation.ts directly on the same early slice", () => {
+    // Rebuilds this test's own early-window slice independently (mirroring
+    // buildWithinRaceDiagnosticPoint's own split logic) to catch a wiring
+    // bug -- wrong ceilingParams, wrong split boundary -- that a mere
+    // "is it positive" check above wouldn't.
+    const gradient = -0.15;
+    const course = courseFrom(buildRace(gradient, 0.3));
+    const point = buildWithinRaceDiagnosticPoint("wiring check", course, OPTIONS);
+    expect(point).not.toBeNull();
+
+    const allSegments = buildRace(gradient, 0.3);
+    const splitIndex = Math.round(allSegments.length * 0.5);
+    const earlySegments = allSegments.slice(0, splitIndex);
+    const earlyDistanceKm = earlySegments.at(-1)!.cumulativeDistance3D / 1000;
+
+    expect(point!.earlyNetWorkPerKmJPerKg).toBeCloseTo(
+      netLocomotionWorkJPerKg(earlySegments, OPTIONS.ceilingParams) / earlyDistanceKm,
+      3,
+    );
+    expect(point!.earlyHardWorkPerKmJPerKg).toBeCloseTo(
+      hardWorkJPerKg(earlySegments, OPTIONS.ceilingParams) / earlyDistanceKm,
+      3,
+    );
   });
 
   it("picks up a *positive* correlation via the running-impact score -- the opposite sign from descentImpact, for a real reason", () => {
@@ -193,6 +226,10 @@ describe("buildWithinRaceDiagnosticPoint / computeWithinRaceDescentDiagnostic", 
     expect(correlation === null || Math.abs(correlation) < 0.5).toBe(true);
     const runningImpactCorrelation = result.lateResidualVsEarlyRunningImpactCorrelation;
     expect(runningImpactCorrelation === null || Math.abs(runningImpactCorrelation) < 0.5).toBe(true);
+    const netWorkCorrelation = result.lateResidualVsEarlyNetWorkCorrelation;
+    expect(netWorkCorrelation === null || Math.abs(netWorkCorrelation) < 0.5).toBe(true);
+    const hardWorkCorrelation = result.lateResidualVsEarlyHardWorkCorrelation;
+    expect(hardWorkCorrelation === null || Math.abs(hardWorkCorrelation) < 0.5).toBe(true);
   });
 
   it("returns null when the course has no timestamps", () => {

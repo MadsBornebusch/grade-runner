@@ -2125,9 +2125,84 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    mechanism in this file answers to, not be adopted directly from a
    segment-level HR diagnostic.
 4. **Fatigue/impact regression across the duration-filtered long-run
-   subset** — fit each candidate proxy from the shortlist above, check the
-   design matrix's condition number before trusting coefficients, report
-   fit quality per candidate rather than picking one in advance.
+   subset — done (2026-07-23), and the effective sample size turned out to
+   be much smaller than the segment library's own size implies.** Before
+   writing any regression, checked the actual candidate pool: of 159
+   cached activities ≥1h (`suggestRuns.ts`'s own `DURABILITY_MIN_DURATION_S`
+   bar, not a new threshold), 122 also have device power — but device
+   power is irrelevant here (this diagnostic runs on GPS-derived
+   `grossPowerWPerKg`, the same basis `analysis.ts` already uses
+   everywhere else, not Stryd). The real constraint is different: fatigue
+   and impact accumulation are *per-run trajectories*, monotonic within a
+   run, so slicing 159 long runs into thousands of monotonic segments
+   doesn't create thousands of independent fatigue observations — it
+   creates one early/late contrast per run, measured more precisely. That
+   makes this stage closer to §12/§13's own within-race diagnostic than to
+   a fresh segment-level regression, and its honest sample size is however
+   many runs actually produce a usable diagnostic point, not the segment
+   count.
+
+   Extended `src/model/withinRaceDescentDiagnostic.ts` (the existing
+   early/late-window residual-correlation machinery, unchanged in its own
+   design) with the two aerobic-fatigue-clock candidates the shortlist
+   hadn't tested yet — early-window cumulative Minetti net locomotion work
+   and cumulative supra-LT2 "hard" work, both per km of the early window —
+   correlated against the *same* late-window residual outcome the existing
+   three descent bases and the running-impact score already use. The
+   underlying cost/hard-work formula was pulled out of
+   `monotonicSegments.ts` into a new shared primitive,
+   `src/model/workAccumulation.ts` (`workStepForSegment` plus two
+   whole-array reducers), mirroring `descentImpact.ts`'s own
+   step-function-plus-reducer shape — `monotonicSegments.ts` now calls
+   into it rather than computing the same formula inline a second time.
+   17 new synthetic tests (10 for the new module, plus `monotonicSegments`
+   and `segmentLibrary`'s existing 20 tests confirmed byte-identical after
+   the refactor); 2 new within-race-diagnostic tests (a wiring
+   cross-check against calling the reducers directly on the same early
+   slice, and confirming the null-control race reads near-zero for these
+   two candidates too, same as the four existing ones).
+
+   **Real-data run** (`scripts/fitFatigueClockDiagnostic.ts`, offline, no
+   surface cache needed): of 159 long-enough activities, only **16**
+   cleared every diagnostic gate (a real single-race tau fit, and a late
+   window with both enough points and enough of its own elapsed time) —
+   confirming the "N is runs, not segments" concern was not hypothetical.
+   Six-candidate correlation table, all against the same late-window
+   residual:
+
+   | predictor | r |
+   |---|---|
+   | early descent (m/km) | −0.206 |
+   | early descent impact (speed-weighted) | −0.211 |
+   | early descent impact (speed²-weighted) | −0.218 |
+   | early running-impact score | +0.189 |
+   | early cumulative net work | +0.112 |
+   | early cumulative hard work | +0.194 |
+
+   None of these clear even a loose significance bar at n=16 (roughly
+   ±0.5 needed). Two things worth noting about this table rather than
+   just the null result itself: **the descent-impact number (−0.211)
+   reproduces §12 stage 4's own earlier finding at the same sample size
+   (−0.21 at n=16) almost exactly** — a real cross-check that this
+   session's independently-rebuilt segment/work pipeline agrees with the
+   already-shipped one, not a new discovery. And **net/hard work carry a
+   confound the other four don't**: both are Minetti-derived from the
+   same GPS speed the residual's own numerator is built from, so an
+   ordinary negative-split pacing choice (nothing pathological) mechanically
+   produces both a higher early-work number and a more negative late
+   residual — a positive-and-weak reading here is consistent with either
+   "no real cumulative-work fatigue effect" or "too little signal at n=16
+   to separate the effect from the pacing-choice artifact," and this
+   diagnostic cannot tell those apart.
+
+   **Conclusion, matching Stage 3's own discipline: no candidate is
+   crowned a winner here.** At n=16, every candidate reads as noise-level.
+   This does not mean none of these mechanisms are real — it means a
+   within-run correlation at this sample size cannot arbitrate between
+   them, the same conclusion Stage 3 reached for the surface cost
+   multiplier's exact magnitude. Stage 5's held-out finish-time backtest,
+   not this table, decides whether any of these six candidates earns a
+   place in `ceiling.ts` in place of (or alongside) tau.
 5. **Held-out backtest** — same arbiter every other mechanism in this file
    answers to: refit on a training subset of races, predict a held-out
    race's finish time through the *existing* solver with the new
