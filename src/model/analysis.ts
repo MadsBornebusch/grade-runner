@@ -2,7 +2,7 @@
 // actual GPS speed and elevation, rather than solving for a plan. See
 // PLAN.md §4 "Analysis mode" and §5 "Analysis-mode speed".
 
-import type { CourseSegment } from "../gpx/pipeline";
+import type { CourseSegment, SurfaceCategory } from "../gpx/pipeline";
 import { CARB_KJ_PER_G, FAT_KJ_PER_G, RESTING_METABOLISM_W_PER_KG, joulesToGrams, netToGross } from "./energetics";
 import { costOfRunning, costOfWalking } from "./minetti";
 import { type CeilingParams, ceilingPower, maxAerobicPower } from "./ceiling";
@@ -37,6 +37,19 @@ export interface AnalysisInputs {
    * past run's effort/fuel (e.g. Analysis mode's own charts).
    */
   unpavedCostMultiplier?: number;
+  /**
+   * PLAN.md §14 Plan B, Stage 6: per-category cost multiplier (keyed by
+   * gpx/pipeline.ts's SurfaceCategory), fit from jointSlowdownFit.ts's
+   * within-run surface coefficients rather than assumed as a single flat
+   * binary value. Takes priority over unpavedCostMultiplier when a
+   * segment's own surfaceCategory has an entry here -- falls back to the
+   * binary unpavedCostMultiplier logic otherwise (undefined, or the
+   * category has no entry), so passing neither keeps this byte-for-byte
+   * identical to before this field existed. A category with no entry
+   * (e.g. the reference "paved") is implicitly 1 (no adjustment), same
+   * convention as unpavedCostMultiplier's own default.
+   */
+  surfaceCostMultipliers?: Partial<Record<SurfaceCategory, number>>;
 }
 
 export interface AnalysisSegmentResult {
@@ -126,7 +139,9 @@ export function analyzeRun(segments: CourseSegment[], inputs: AnalysisInputs): A
       grossPower = RESTING_METABOLISM_W_PER_KG;
     } else {
       speed = seg.distance3D / dt;
-      const terrainMultiplier = seg.surfaceUnpaved ? (inputs.unpavedCostMultiplier ?? 1) : 1;
+      const perCategoryMultiplier =
+        seg.surfaceCategory !== undefined ? inputs.surfaceCostMultipliers?.[seg.surfaceCategory] : undefined;
+      const terrainMultiplier = perCategoryMultiplier ?? (seg.surfaceUnpaved ? (inputs.unpavedCostMultiplier ?? 1) : 1);
       const cost = (speed <= walkMaxMs ? costOfWalking(seg.gradient) : costOfRunning(seg.gradient)) * terrainMultiplier;
       grossPower = netToGross(cost * speed);
       cumulativeMovingTimeS += dt;

@@ -158,4 +158,34 @@ describe("analyzeRun", () => {
       expect(withExplicitOne).toEqual(withDefault);
     });
   });
+
+  describe("surfaceCostMultipliers", () => {
+    it("applies the per-category multiplier for a segment's own surfaceCategory", () => {
+      const segments = makeRunningSegments(1).map((s) => ({ ...s, surfaceCategory: "path" as const }));
+      const withoutMultiplier = analyzeRun(segments, baseInputs());
+      const withMultiplier = analyzeRun(segments, baseInputs({ surfaceCostMultipliers: { path: 1.3 } }));
+      expect(withMultiplier.segments[0].grossPowerWPerKg).toBeGreaterThan(withoutMultiplier.segments[0].grossPowerWPerKg);
+    });
+
+    it("takes priority over unpavedCostMultiplier when the segment's category has an entry", () => {
+      const segments = makeRunningSegments(1).map((s) => ({ ...s, surfaceUnpaved: true, surfaceCategory: "gravel" as const }));
+      const result = analyzeRun(segments, baseInputs({ unpavedCostMultiplier: 1.75, surfaceCostMultipliers: { gravel: 1.1 } }));
+      const gravelOnly = analyzeRun(segments, baseInputs({ surfaceCostMultipliers: { gravel: 1.1 } }));
+      expect(result.segments[0].grossPowerWPerKg).toBeCloseTo(gravelOnly.segments[0].grossPowerWPerKg, 10);
+    });
+
+    it("falls back to unpavedCostMultiplier when the segment's category has no entry in the map", () => {
+      const segments = makeRunningSegments(1).map((s) => ({ ...s, surfaceUnpaved: true, surfaceCategory: "dirt" as const }));
+      const result = analyzeRun(segments, baseInputs({ unpavedCostMultiplier: 1.75, surfaceCostMultipliers: { path: 1.3 } }));
+      const unpavedOnly = analyzeRun(segments, baseInputs({ unpavedCostMultiplier: 1.75 }));
+      expect(result.segments[0].grossPowerWPerKg).toBeCloseTo(unpavedOnly.segments[0].grossPowerWPerKg, 10);
+    });
+
+    it("has no effect on a segment with undefined surfaceCategory", () => {
+      const segments = makeRunningSegments(1);
+      const result = analyzeRun(segments, baseInputs({ surfaceCostMultipliers: { path: 1.3, gravel: 1.1 } }));
+      const baseline = analyzeRun(segments, baseInputs());
+      expect(result.segments[0].grossPowerWPerKg).toBeCloseTo(baseline.segments[0].grossPowerWPerKg, 10);
+    });
+  });
 });

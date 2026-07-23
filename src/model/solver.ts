@@ -3,7 +3,7 @@
 // then bisect" — not a closed-form intersection of the aerobic and fuel
 // constraints) and §6 (walk/run transition).
 
-import type { CourseSegment } from "../gpx/pipeline";
+import type { CourseSegment, SurfaceCategory } from "../gpx/pipeline";
 import { costOfRunning, costOfWalking, maxDescentSpeedMs } from "./minetti";
 import { grossToNet, netToGross } from "./energetics";
 import { type CeilingParams, ceilingPower, maxAerobicPower } from "./ceiling";
@@ -57,6 +57,17 @@ export interface SolverInputs {
    * than flat+technical) that a flat speed cap can't.
    */
   unpavedCostMultiplier?: number;
+  /**
+   * PLAN.md §14 Plan B, Stage 6: per-category cost multiplier (keyed by
+   * gpx/pipeline.ts's SurfaceCategory), fit from jointSlowdownFit.ts's
+   * within-run surface coefficients rather than assumed as a single flat
+   * binary value. Takes priority over unpavedCostMultiplier when a
+   * segment's own surfaceCategory has an entry here -- falls back to the
+   * binary unpavedCostMultiplier logic otherwise (undefined, or the
+   * category has no entry), so passing neither keeps this byte-for-byte
+   * identical to before this field existed.
+   */
+  surfaceCostMultipliers?: Partial<Record<SurfaceCategory, number>>;
 }
 
 export interface SegmentResult {
@@ -149,7 +160,9 @@ export function simulate(theta: number, inputs: SolverInputs): SimulationResult 
     );
     const targetNet = Math.max(0, grossToNet(theta * ceilingGross));
 
-    const terrainMultiplier = seg.surfaceUnpaved ? unpavedCostMultiplier : 1;
+    const perCategoryMultiplier =
+      seg.surfaceCategory !== undefined ? inputs.surfaceCostMultipliers?.[seg.surfaceCategory] : undefined;
+    const terrainMultiplier = perCategoryMultiplier ?? (seg.surfaceUnpaved ? unpavedCostMultiplier : 1);
     const costRun = costOfRunning(seg.gradient) * terrainMultiplier;
     const costWalk = costOfWalking(seg.gradient) * terrainMultiplier;
     const vRun = Math.min(targetNet / costRun, maxDescentSpeedMs(seg.gradient));

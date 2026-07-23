@@ -385,3 +385,41 @@ describe("unpaved terrain cost multiplier", () => {
     expect(mixedBackHalfTimeS).toBeCloseTo(pavedBackHalfTimeS, 6);
   });
 });
+
+describe("per-category surface cost multiplier", () => {
+  const SURFACE_TEST_THETA = 0.8;
+
+  function segmentsWithCategory(n: number, segLenM: number, category: CourseSegment["surfaceCategory"]): CourseSegment[] {
+    return makeSegments(n, segLenM, 0).map((s) => ({ ...s, surfaceCategory: category }));
+  }
+
+  it("finishes slower on a course with a per-category multiplier configured for its surface", () => {
+    const pathCourse = baseInputs({ segments: segmentsWithCategory(200, 50, "path"), surfaceCostMultipliers: { path: 1.3 } });
+    const baseline = baseInputs({ segments: segmentsWithCategory(200, 50, "path") });
+    const withMultiplier = simulate(SURFACE_TEST_THETA, pathCourse);
+    const withoutMultiplier = simulate(SURFACE_TEST_THETA, baseline);
+    expect(withMultiplier.feasible).toBe(true);
+    expect(withMultiplier.finishTimeS).toBeGreaterThan(withoutMultiplier.finishTimeS);
+  });
+
+  it("takes priority over unpavedCostMultiplier when the segment's category has an entry", () => {
+    const segments = segmentsWithCategory(200, 50, "gravel").map((s) => ({ ...s, surfaceUnpaved: true }));
+    const combined = simulate(SURFACE_TEST_THETA, baseInputs({ segments, unpavedCostMultiplier: 1.75, surfaceCostMultipliers: { gravel: 1.1 } }));
+    const perCategoryOnly = simulate(SURFACE_TEST_THETA, baseInputs({ segments, surfaceCostMultipliers: { gravel: 1.1 } }));
+    expect(combined.finishTimeS).toBeCloseTo(perCategoryOnly.finishTimeS, 6);
+  });
+
+  it("falls back to unpavedCostMultiplier when the segment's own category has no entry in the map", () => {
+    const segments = segmentsWithCategory(200, 50, "dirt").map((s) => ({ ...s, surfaceUnpaved: true }));
+    const combined = simulate(SURFACE_TEST_THETA, baseInputs({ segments, unpavedCostMultiplier: 1.75, surfaceCostMultipliers: { path: 1.3 } }));
+    const unpavedOnly = simulate(SURFACE_TEST_THETA, baseInputs({ segments, unpavedCostMultiplier: 1.75 }));
+    expect(combined.finishTimeS).toBeCloseTo(unpavedOnly.finishTimeS, 6);
+  });
+
+  it("is byte-for-byte unchanged when no segment has a surfaceCategory, even with multipliers configured", () => {
+    const inputs = baseInputs({ segments: segmentsWithCategory(200, 50, undefined) });
+    const withMultiplierNoData = simulate(SURFACE_TEST_THETA, { ...inputs, surfaceCostMultipliers: { path: 1.3 } });
+    const plain = simulate(SURFACE_TEST_THETA, inputs);
+    expect(withMultiplierNoData).toEqual(plain);
+  });
+});
