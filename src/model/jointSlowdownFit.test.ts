@@ -20,6 +20,8 @@ function segmentFromTargetLogGap(params: {
   clockNetWork?: number;
   clockHardWork?: number | null;
   impactDescentM?: number;
+  heartRateBpm?: number | null;
+  measuredPowerWPerKg?: number | null;
 }): TaggedMonotonicSegment {
   const timeS = 60;
   const avgGradient = params.avgGradient ?? 0;
@@ -35,8 +37,10 @@ function segmentFromTargetLogGap(params: {
     gradeSign: 0,
     surfaceCategory: params.surfaceCategory ?? "paved",
     gaitMode: params.gaitMode ?? "run",
-    avgMeasuredPowerWPerKg: null,
-    measuredPowerCoverage: 0,
+    avgMeasuredPowerWPerKg: params.measuredPowerWPerKg ?? null,
+    measuredPowerCoverage: (params.measuredPowerWPerKg ?? null) !== null ? 1 : 0,
+    avgHeartRateBpm: params.heartRateBpm ?? null,
+    heartRateCoverage: (params.heartRateBpm ?? null) !== null ? 1 : 0,
     avgMinettiGrossPowerWPerKg: 0,
     cumulativeElapsedHoursAtStart: params.clockElapsedHours ?? params.index * 0.05,
     cumulativeDistanceMAtStart: params.index * 500,

@@ -18,6 +18,8 @@ function taggedSeg(overrides: Partial<TaggedMonotonicSegment> = {}): TaggedMonot
     gaitMode: "run",
     avgMeasuredPowerWPerKg: 15,
     measuredPowerCoverage: 1,
+    avgHeartRateBpm: null,
+    heartRateCoverage: 0,
     avgMinettiGrossPowerWPerKg: 12,
     cumulativeElapsedHoursAtStart: 0,
     cumulativeDistanceMAtStart: 0,

@@ -89,6 +89,14 @@ export interface MonotonicSegment {
   /** Fraction (0..1) of underlying points that had device power -- lets a
    * caller distinguish "no power at all" from "power on part of this run". */
   measuredPowerCoverage: number;
+  /** Average heart rate (bpm) across underlying points that had a reading.
+   * Null if no point in this run had heart rate data at all -- same
+   * null-vs-low-coverage distinction as avgMeasuredPowerWPerKg. Unlike
+   * device power, this needs no bodyMassKg conversion, so it's always
+   * populated when the source data has it. */
+  avgHeartRateBpm: number | null;
+  /** Fraction (0..1) of underlying points that had a heart rate reading. */
+  heartRateCoverage: number;
   /** Minetti-implied gross power/kg, averaged per underlying point (not
    * computed from the segment's own averaged gradient/speed, since the cost
    * curve is nonlinear) -- always available, model-derived. */
@@ -149,6 +157,8 @@ interface Accumulator {
   gaitMode: GaitMode;
   measuredPowerSum: number;
   measuredPowerCount: number;
+  heartRateSum: number;
+  heartRateCount: number;
   minettiPowerSum: number;
   pointCount: number;
   elapsedHoursAtStart: number;
@@ -216,6 +226,8 @@ export function buildMonotonicSegments(
         gaitMode: c.gaitMode,
         avgMeasuredPowerWPerKg: c.measuredPowerCount > 0 ? c.measuredPowerSum / c.measuredPowerCount : null,
         measuredPowerCoverage: c.pointCount > 0 ? c.measuredPowerCount / c.pointCount : 0,
+        avgHeartRateBpm: c.heartRateCount > 0 ? c.heartRateSum / c.heartRateCount : null,
+        heartRateCoverage: c.pointCount > 0 ? c.heartRateCount / c.pointCount : 0,
         avgMinettiGrossPowerWPerKg: c.minettiPowerSum / c.pointCount,
         cumulativeElapsedHoursAtStart: c.elapsedHoursAtStart,
         cumulativeDistanceMAtStart: c.distanceMAtStart,
@@ -282,6 +294,8 @@ export function buildMonotonicSegments(
         gaitMode,
         measuredPowerSum: 0,
         measuredPowerCount: 0,
+        heartRateSum: 0,
+        heartRateCount: 0,
         minettiPowerSum: 0,
         pointCount: 0,
         elapsedHoursAtStart: cumulativeElapsedHours,
@@ -304,6 +318,10 @@ export function buildMonotonicSegments(
     if (seg.powerWatts !== null && bodyMassKg !== undefined) {
       current.measuredPowerSum += seg.powerWatts / bodyMassKg;
       current.measuredPowerCount += 1;
+    }
+    if (seg.heartRateBpm !== null) {
+      current.heartRateSum += seg.heartRateBpm;
+      current.heartRateCount += 1;
     }
 
     cumulativeElapsedHours += dt / 3600;

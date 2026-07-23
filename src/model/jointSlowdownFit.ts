@@ -49,12 +49,12 @@ import { varianceInflationFactors, weightedLeastSquares } from "./linearSolve";
 export type AerobicClockBasis = "elapsedHours" | "netWork" | "hardWork";
 export type ImpactBasis = "descentMeters" | "descentImpact" | "descentImpactSquared" | "runningImpact";
 
-const SURFACE_CATEGORIES: SurfaceCategory[] = ["paved", "gravel", "dirt", "compacted", "path", "other"];
+export const SURFACE_CATEGORIES: SurfaceCategory[] = ["paved", "gravel", "dirt", "compacted", "path", "other"];
 /** Arbitrary but fixed reference category every surface coefficient below
  * is measured relative to -- paved, since it's this athlete's most common
  * surface (see Stage 2's real-data sanity check) and matches Stage 3's own
  * "vs. paved" framing throughout. */
-const REFERENCE_SURFACE: SurfaceCategory = "paved";
+export const REFERENCE_SURFACE: SurfaceCategory = "paved";
 
 export interface JointSlowdownFitOptions {
   aerobicClockBasis: AerobicClockBasis;
@@ -86,7 +86,7 @@ export interface JointSlowdownFitResult {
   variableInflationFactors: number[];
 }
 
-function aerobicClockValue(seg: TaggedMonotonicSegment, basis: AerobicClockBasis): number | null {
+export function aerobicClockValue(seg: TaggedMonotonicSegment, basis: AerobicClockBasis): number | null {
   switch (basis) {
     case "elapsedHours":
       return seg.cumulativeElapsedHoursAtStart;
@@ -97,7 +97,7 @@ function aerobicClockValue(seg: TaggedMonotonicSegment, basis: AerobicClockBasis
   }
 }
 
-function impactValue(seg: TaggedMonotonicSegment, basis: ImpactBasis): number {
+export function impactValue(seg: TaggedMonotonicSegment, basis: ImpactBasis): number {
   switch (basis) {
     case "descentMeters":
       return seg.cumulativeDescentMAtStart;

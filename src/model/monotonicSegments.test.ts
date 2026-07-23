@@ -202,6 +202,24 @@ describe("buildMonotonicSegments", () => {
     expect(withMass[0].avgMeasuredPowerWPerKg).toBeCloseTo((210 / 70 + 230 / 70) / 2, 10);
   });
 
+  it("computes avgHeartRateBpm and coverage from segments that have a heart rate reading, no bodyMassKg needed", () => {
+    const segments = course([
+      { gradient: 0, distance3D: 50, dtS: 20, heartRateBpm: 140 },
+      { gradient: 0, distance3D: 50, dtS: 20, heartRateBpm: null },
+      { gradient: 0, distance3D: 50, dtS: 20, heartRateBpm: 160 },
+    ]);
+    const runs = buildMonotonicSegments(segments, { minDistanceM: 0, minTimeS: 0 });
+    expect(runs[0].heartRateCoverage).toBeCloseTo(2 / 3, 10);
+    expect(runs[0].avgHeartRateBpm).toBeCloseTo((140 + 160) / 2, 10);
+  });
+
+  it("reports null avgHeartRateBpm and zero coverage when no underlying point has a heart rate reading", () => {
+    const segments = course([{ gradient: 0, distance3D: 50, dtS: 20, heartRateBpm: null }]);
+    const runs = buildMonotonicSegments(segments, { minDistanceM: 0, minTimeS: 0 });
+    expect(runs[0].avgHeartRateBpm).toBeNull();
+    expect(runs[0].heartRateCoverage).toBe(0);
+  });
+
   it("only computes cumulativeHardWorkJPerKgAtStart when ceilingParams is supplied", () => {
     // High-power steep climb followed by a long-enough second run to read the accumulated value from.
     const segments = course([
