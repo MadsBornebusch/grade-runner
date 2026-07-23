@@ -111,11 +111,25 @@ function impactValue(seg: TaggedMonotonicSegment, basis: ImpactBasis): number {
 }
 
 /**
- * Fits log-GAP ~ surface + aerobicClock + impact jointly, within-run
- * fixed effects, weighted by segment duration. Returns null if no run
- * contributes at least two usable segments (fixed effects need within-run
- * variance to estimate anything) or if the resulting design is singular
- * (see linearSolve.ts's solveLinearSystem).
+ * Fits log-GAP ~ grade + grade^2 + surface + aerobicClock + impact jointly,
+ * within-run fixed effects, weighted by segment duration. Returns null if
+ * no run contributes at least two usable segments (fixed effects need
+ * within-run variance to estimate anything) or if the resulting design is
+ * singular (see linearSolve.ts's solveLinearSystem).
+ *
+ * grade/grade^2 are control regressors, not candidates: log-GAP already
+ * divides out the Minetti cost curve's OWN grade dependence, but that
+ * removes exactly the assumed shape, not necessarily the true one for this
+ * athlete at every grade. Within a run, surface and grade are correlated
+ * (Stage 3's own real-data check: path segments average ~10% grade vs.
+ * paved's ~3%) -- so any residual Minetti mismatch concentrates on
+ * whichever surface category happens to run steepest, and would otherwise
+ * be misread as a surface effect. Including grade explicitly gives that
+ * residual somewhere else to go before the surface dummies get credit for
+ * it. A caught real bug, not a hypothetical: an earlier version of this
+ * fit without these two columns produced a stable-looking path coefficient
+ * across all twelve clock/impact combinations that could not be
+ * distinguished from this exact grade-confound (see PLAN.md §14 stage 5).
  */
 export function fitJointSlowdownModel(
   library: TaggedMonotonicSegment[],
@@ -145,7 +159,7 @@ export function fitJointSlowdownModel(
   const presentCategories = new Set(usable.map((s) => s.surfaceCategory));
   const nonReferenceSurfaces = SURFACE_CATEGORIES.filter((c) => c !== REFERENCE_SURFACE && presentCategories.has(c));
 
-  const columns = [...nonReferenceSurfaces, "aerobicClock", "impact"];
+  const columns = ["grade", "gradeSquared", ...nonReferenceSurfaces, "aerobicClock", "impact"];
   const k = columns.length;
 
   const rowsX: number[][] = [];
@@ -157,6 +171,8 @@ export function fitJointSlowdownModel(
     if (segs.length < 2) continue;
 
     const raw: number[][] = segs.map((s) => [
+      s.avgGradient,
+      s.avgGradient * s.avgGradient,
       ...nonReferenceSurfaces.map((cat) => (s.surfaceCategory === cat ? 1 : 0)),
       aerobicClockValue(s, options.aerobicClockBasis)!,
       impactValue(s, options.impactBasis),

@@ -2250,36 +2250,65 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    discipline as Stage 3/4, and specifically the fix for the bolt-on
    pattern's blind spot: a run that's simultaneously hard-early and
    descending-fast-early no longer lets one term's coefficient silently
-   absorb variance that belongs to the other). 8 synthetic tests: recovers
-   an injected surface offset / clock coefficient / impact coefficient in
-   isolation, flags a high VIF when clock and impact are constructed
-   near-collinear, returns null with no within-run variance, excludes
-   walk-gait and undefined-surface segments, and excludes the hard-work
-   basis specifically when `cumulativeHardWorkJPerKgAtStart` is null.
+   absorb variance that belongs to the other).
 
-   **Real-data run** (`scripts/fitJointSlowdownModel.ts`, offline, reuses
-   `.surface-cache/`): all 3 aerobic-clock × 4 impact-basis combinations
-   (12 total), 8824 segments / 203 runs / 6400 rows surviving the running-
-   gait + known-surface filter. Two very different stories in the same
-   table:
+   **Second opinion caught a real bug in the first version before it was
+   trusted: grade itself wasn't a regressor, only implicitly divided out
+   via the Minetti cost ratio.** Within a run, surface and grade are
+   correlated (Stage 3's own real-data check: path segments average
+   ~10% grade vs. paved's ~3%) — so any gap between Minetti's assumed
+   grade-pace shape and this athlete's real one lands disproportionately
+   on whichever surface category happens to run steepest, and gets
+   misread as a surface effect. Confirmed as a real, not hypothetical,
+   problem: the first version's surface coefficients were stable across
+   all twelve clock/impact combinations (which only proves surface is
+   orthogonal to *clock/impact*, not to grade — an identical confound
+   affecting all twelve specs equally can't show up as instability
+   between them) and its within-run R² was only 0.03, meaning 97% of
+   within-run pace variance was left on the table for a grade-correlated
+   residual to hide in. Fixed by adding `grade` and `grade²` as explicit
+   control regressors, fit jointly with everything else — caught by a new
+   synthetic test first (surface and grade deliberately correlated, a
+   real grade² effect injected, confirms the slowdown lands on the grade
+   control rather than leaking into the surface dummy) before re-running
+   on real data. 9 synthetic tests total: the grade-confound test above,
+   recovers an injected surface offset / clock coefficient / impact
+   coefficient in isolation, flags a high VIF when clock and impact are
+   constructed near-collinear, returns null with no within-run variance,
+   excludes walk-gait and undefined-surface segments, and excludes the
+   hard-work basis specifically when `cumulativeHardWorkJPerKgAtStart` is
+   null.
 
-   **Surface: robust, and now a real usable number Stage 3 couldn't
-   produce.** The surface coefficients are close to identical across
-   *all twelve* clock/impact combinations, with low VIF (1.1–1.4,
-   nowhere near the collinearity concern threshold) — gravel ≈ −0.050,
-   dirt ≈ −0.046, compacted ≈ −0.053 to −0.057, path ≈ −0.22 log-GAP
-   (≈ e^−0.22 ≈ 0.80× pace, a ~20% grade-adjusted slowdown vs. paved).
-   Unlike Stage 3's device-power attempt, this isn't blind to surface —
-   pace visibly responds, and it responds the same way no matter which
-   fatigue terms ride alongside it. **Caveat, the same one Stage 3
-   flagged for HR:** this is pace, not directly metabolic cost — it
+   **Real-data run, grade-controlled** (`scripts/fitJointSlowdownModel.ts`,
+   offline, reuses `.surface-cache/`): all 3 aerobic-clock × 4 impact-basis
+   combinations (12 total), 8824 segments / 203 runs / 6400 rows surviving
+   the running-gait + known-surface filter. Adding grade/grade² moved
+   within-run R² from 0.03 to **0.67–0.68** — confirming the suspicion
+   directly: grade alone explains the large majority of within-run pace
+   variance that the raw Minetti-ratio outcome wasn't fully capturing.
+
+   **Surface: still robust, real, and low-VIF — but roughly HALVED once
+   grade is properly controlled for.** Stable across all twelve
+   combinations again (VIF 1.1–1.4, same as before), but smaller: gravel
+   ≈ −0.019 (was −0.050), dirt ≈ −0.027 (was −0.046), compacted ≈ −0.027
+   to −0.029 (was −0.053 to −0.057), path ≈ −0.10 log-GAP (was −0.22,
+   ≈ e^−0.10 ≈ 0.90× pace — a ~10% grade-adjusted slowdown vs. paved, not
+   ~20%). The ordering survives (path largest, then compacted/dirt, then
+   gravel smallest) and the magnitude is now much closer to Stage 3's
+   within-run HR finding (path +8.3bpm, the others roughly half that) —
+   which is exactly what should happen once a spurious grade-driven
+   inflation is removed, some corroboration that the corrected number,
+   not the original one, is closer to real. **Caveat unchanged from
+   before, still real:** this is pace, not directly metabolic cost — it
    cannot distinguish "the terrain costs more" from "the athlete
    deliberately runs more cautiously on technical footing," the same
    cost-vs-choice ambiguity every pace-based measure in this project
    carries. For a *pacing predictor* that ambiguity doesn't matter (the
    solver only needs to predict pace, not explain why it changes) — but
    it means this number should be described as "how much slower this
-   athlete actually runs on X terrain," not "X terrain's metabolic cost."
+   athlete actually runs on X terrain," not "X terrain's metabolic cost,"
+   and it should be read as a candidate magnitude carried into Stage 6,
+   not a settled multiplier.
 
    **Aerobic-fade clock vs. impact: the collinearity risk materialized,
    mostly.** VIF on the clock/impact pair ranges from a well-separated
@@ -2293,15 +2322,17 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    ~1–2×10⁻⁶ against every impact basis, indistinguishable from zero —
    clean because both terms are genuinely uncorrelated *and* both are
    close to no-effect in this data, not clean because a real signal
-   survived. Within-run R² contributed by clock+impact+surface together
-   is only 0.028–0.036 throughout. **Net: more segments (8824 vs. Stage
-   4's 16 run-level points) sharpened the surface estimate exactly as
-   the user expected, but did not resolve the clock-vs-impact
-   identification problem** — that problem is structural (both
-   accumulate ~monotonically within a run) and isn't fixed by segment
-   count, confirming the advisor's distinction between "3 terms segment-
-   rich, 1 still run-count-limited" rather than reversing Stage 4's
-   conclusion.
+   survived. These VIFs and near-zero coefficients are essentially
+   unchanged by adding the grade control (e.g. `hardWork`+`descentMeters`
+   was VIF≈1.01 before and after) — the grade confound was specific to
+   the surface term, not the clock/impact identification problem. **Net:
+   more segments (8824 vs. Stage 4's 16 run-level points) sharpened the
+   surface estimate exactly as the user expected, but did not resolve the
+   clock-vs-impact identification problem** — that problem is structural
+   (both accumulate ~monotonically within a run) and isn't fixed by
+   segment count or by controlling for grade, confirming the advisor's
+   distinction between "3 terms segment-rich, 1 still run-count-limited"
+   rather than reversing Stage 4's conclusion.
 
    **What this does and doesn't license:** a candidate, well-cross-
    validated surface multiplier now exists, ready to carry into Stage 6's
@@ -2325,6 +2356,14 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    *fit* on the training fold rather than requiring in-sample
    significance first — the backtest is the significance test that works
    at a sample size too small to separate candidates any other way.
+   **Must NOT run all twelve Stage 5 combinations through the backtest and
+   pick the best held-out performer** — that overfits the arbiter itself,
+   the exact failure this step exists to prevent. The primary contrast is
+   baseline vs. baseline+surface (the one live, low-VIF, cross-validated
+   candidate from Stage 5); at most one VIF-clean fatigue combination
+   (`hardWork`+`descentImpactSquared`, VIF≈1.0–2.0 throughout) can ride
+   along as a single secondary comparison, chosen *before* seeing backtest
+   results, not selected by them.
 
 ### Open questions
 

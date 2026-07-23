@@ -4,18 +4,16 @@ import type { SurfaceCategory } from "../gpx/pipeline";
 import type { TaggedMonotonicSegment } from "./segmentLibrary";
 import { fitJointSlowdownModel } from "./jointSlowdownFit";
 
-const FLAT_GRADE = 0;
-const FLAT_COST = costOfRunning(FLAT_GRADE);
-
-/** Builds one flat-grade, running-gait segment whose avgSpeedMs is derived
- * from a target log-GAP value -- i.e. reverse-engineers the speed a
- * particular injected linear-combination model would produce, so recovering
- * that model's coefficients from the built segments is a real test of
- * fitJointSlowdownModel's wiring, not a tautology. */
+/** Builds one running-gait segment whose avgSpeedMs is derived from a
+ * target log-GAP value at the segment's own gradient -- i.e. reverse-
+ * engineers the speed a particular injected linear-combination model would
+ * produce, so recovering that model's coefficients from the built segments
+ * is a real test of fitJointSlowdownModel's wiring, not a tautology. */
 function segmentFromTargetLogGap(params: {
   runId: string;
   index: number;
   targetLogGap: number;
+  avgGradient?: number;
   surfaceCategory?: SurfaceCategory;
   gaitMode?: "run" | "walk";
   clockElapsedHours?: number;
@@ -24,7 +22,8 @@ function segmentFromTargetLogGap(params: {
   impactDescentM?: number;
 }): TaggedMonotonicSegment {
   const timeS = 60;
-  const speed = Math.exp(params.targetLogGap) / FLAT_COST;
+  const avgGradient = params.avgGradient ?? 0;
+  const speed = Math.exp(params.targetLogGap) / costOfRunning(avgGradient);
   return {
     runId: params.runId,
     startIndex: params.index,
@@ -32,7 +31,7 @@ function segmentFromTargetLogGap(params: {
     distance3D: speed * timeS,
     timeS,
     avgSpeedMs: speed,
-    avgGradient: FLAT_GRADE,
+    avgGradient,
     gradeSign: 0,
     surfaceCategory: params.surfaceCategory ?? "paved",
     gaitMode: params.gaitMode ?? "run",
@@ -52,20 +51,27 @@ function segmentFromTargetLogGap(params: {
 
 /**
  * Builds RUN_COUNT runs of SEGMENTS_PER_RUN segments each, alternating
- * surface category (uncorrelated with elapsed-hours/descent trends, which
- * both ramp linearly with segment index) so every column has genuine
- * within-run variance -- otherwise a column with zero within-run variance
- * would demean to all zeros and make the design singular.
+ * surface category and varying grade in a pattern decorrelated from
+ * surface/elapsed-hours/descent (all of which vary with segment index too)
+ * so every column -- including the grade control columns -- has genuine
+ * within-run variance uncorrelated with the others, unless a test's own
+ * targetLogGap callback deliberately builds in a correlation to test for.
  */
 function buildLibrary(
   runCount: number,
   segmentsPerRun: number,
-  targetLogGap: (opts: { surfaceCategory: SurfaceCategory; clockElapsedHours: number; impactDescentM: number }) => number,
+  targetLogGap: (opts: {
+    surfaceCategory: SurfaceCategory;
+    avgGradient: number;
+    clockElapsedHours: number;
+    impactDescentM: number;
+  }) => number,
 ): TaggedMonotonicSegment[] {
   const library: TaggedMonotonicSegment[] = [];
   for (let r = 0; r < runCount; r++) {
     for (let i = 0; i < segmentsPerRun; i++) {
       const surfaceCategory: SurfaceCategory = i % 2 === 0 ? "paved" : "gravel";
+      const avgGradient = ((i % 7) - 3) * 0.03;
       const clockElapsedHours = i * 0.05;
       // Deliberately NOT a scalar multiple of clockElapsedHours -- otherwise
       // clock and impact would be exactly collinear in every test using
@@ -75,8 +81,9 @@ function buildLibrary(
         segmentFromTargetLogGap({
           runId: `run-${r}`,
           index: i,
-          targetLogGap: targetLogGap({ surfaceCategory, clockElapsedHours, impactDescentM }),
+          targetLogGap: targetLogGap({ surfaceCategory, avgGradient, clockElapsedHours, impactDescentM }),
           surfaceCategory,
+          avgGradient,
           clockElapsedHours,
           impactDescentM,
         }),
@@ -93,7 +100,7 @@ function coefficientFor(result: NonNullable<ReturnType<typeof fitJointSlowdownMo
 }
 
 describe("fitJointSlowdownModel", () => {
-  it("recovers an injected surface offset with clock/impact near zero", () => {
+  it("recovers an injected surface offset with grade/clock/impact near zero", () => {
     const base = Math.log(3);
     const gravelOffset = -0.15;
     const library = buildLibrary(8, 20, ({ surfaceCategory }) => base + (surfaceCategory === "gravel" ? gravelOffset : 0));
@@ -101,12 +108,14 @@ describe("fitJointSlowdownModel", () => {
     const result = fitJointSlowdownModel(library, { aerobicClockBasis: "elapsedHours", impactBasis: "descentMeters" });
     expect(result).not.toBeNull();
     expect(coefficientFor(result!, "gravel")).toBeCloseTo(gravelOffset, 3);
+    expect(coefficientFor(result!, "grade")).toBeCloseTo(0, 3);
+    expect(coefficientFor(result!, "gradeSquared")).toBeCloseTo(0, 3);
     expect(coefficientFor(result!, "aerobicClock")).toBeCloseTo(0, 3);
     expect(coefficientFor(result!, "impact")).toBeCloseTo(0, 3);
     expect(result!.rSquaredWithinRun).toBeGreaterThan(0.99);
   });
 
-  it("recovers an injected aerobic-fade clock coefficient with surface/impact near zero", () => {
+  it("recovers an injected aerobic-fade clock coefficient with grade/surface/impact near zero", () => {
     const base = Math.log(3);
     const clockCoeff = -0.02;
     const library = buildLibrary(8, 20, ({ clockElapsedHours }) => base + clockCoeff * clockElapsedHours);
@@ -118,7 +127,7 @@ describe("fitJointSlowdownModel", () => {
     expect(coefficientFor(result!, "impact")).toBeCloseTo(0, 3);
   });
 
-  it("recovers an injected impact coefficient with surface/clock near zero", () => {
+  it("recovers an injected impact coefficient with grade/surface/clock near zero", () => {
     const base = Math.log(3);
     const impactCoeff = -0.01;
     const library = buildLibrary(8, 20, ({ impactDescentM }) => base + impactCoeff * impactDescentM);
@@ -130,11 +139,55 @@ describe("fitJointSlowdownModel", () => {
     expect(coefficientFor(result!, "aerobicClock")).toBeCloseTo(0, 3);
   });
 
+  it("attributes a grade-correlated slowdown to the grade control, not to surface, when surface and grade are correlated", () => {
+    // Mirrors the real bug this test guards against (PLAN.md §14 stage 5):
+    // gravel segments run steeper than paved ones (correlated, not just
+    // coincidentally varying), and the TRUE slowdown is a grade^2 effect
+    // (standing in for "Minetti's own curve isn't quite exact for this
+    // athlete at steep grades") with only a SMALL genuine surface offset.
+    // Without a grade control, the grade^2-driven slowdown would leak into
+    // the gravel dummy since gravel is disproportionately the steep
+    // segments; with it, gravel's own coefficient should stay close to the
+    // small true value.
+    const base = Math.log(3);
+    const trueGravelOffset = -0.01;
+    const trueGradeSquaredCoeff = -0.8;
+    const library: TaggedMonotonicSegment[] = [];
+    for (let r = 0; r < 10; r++) {
+      for (let i = 0; i < 30; i++) {
+        const surfaceCategory: SurfaceCategory = i % 2 === 0 ? "paved" : "gravel";
+        // Gravel runs steeper than paved -- the confound.
+        const avgGradient = (surfaceCategory === "gravel" ? 0.18 : 0.02) + ((i % 5) - 2) * 0.005;
+        const clockElapsedHours = i * 0.05;
+        const impactDescentM = ((i * 13) % 17) * 1.5;
+        const targetLogGap =
+          base + trueGradeSquaredCoeff * avgGradient * avgGradient + (surfaceCategory === "gravel" ? trueGravelOffset : 0);
+        library.push(
+          segmentFromTargetLogGap({
+            runId: `run-${r}`,
+            index: i,
+            targetLogGap,
+            surfaceCategory,
+            avgGradient,
+            clockElapsedHours,
+            impactDescentM,
+          }),
+        );
+      }
+    }
+
+    const result = fitJointSlowdownModel(library, { aerobicClockBasis: "elapsedHours", impactBasis: "descentMeters" });
+    expect(result).not.toBeNull();
+    expect(coefficientFor(result!, "gradeSquared")).toBeCloseTo(trueGradeSquaredCoeff, 2);
+    expect(coefficientFor(result!, "gravel")).toBeCloseTo(trueGravelOffset, 2);
+  });
+
   it("reports a high VIF for clock and impact when they're near-collinear within runs", () => {
     const library: TaggedMonotonicSegment[] = [];
     for (let r = 0; r < 8; r++) {
       for (let i = 0; i < 20; i++) {
         const surfaceCategory: SurfaceCategory = i % 2 === 0 ? "paved" : "gravel";
+        const avgGradient = ((i % 7) - 3) * 0.03;
         const clockElapsedHours = i * 0.05;
         // Near-exact linear function of clock (a small deterministic
         // perturbation, not exact, so the design stays solvable but the two
@@ -147,6 +200,7 @@ describe("fitJointSlowdownModel", () => {
             index: i,
             targetLogGap: Math.log(3),
             surfaceCategory,
+            avgGradient,
             clockElapsedHours,
             impactDescentM,
           }),
