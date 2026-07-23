@@ -2200,10 +2200,116 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    This does not mean none of these mechanisms are real — it means a
    within-run correlation at this sample size cannot arbitrate between
    them, the same conclusion Stage 3 reached for the surface cost
-   multiplier's exact magnitude. Stage 5's held-out finish-time backtest,
+   multiplier's exact magnitude. Stage 6's held-out finish-time backtest,
    not this table, decides whether any of these six candidates earns a
    place in `ceiling.ts` in place of (or alongside) tau.
-5. **Held-out backtest** — same arbiter every other mechanism in this file
+5. **The genuine linear-combination fit — done (2026-07-23).** Asked the
+   user directly what a real "Stage 5" should test, since running the
+   three untested Stage-4 candidates through the existing single-basis
+   `durabilityDriftPerDescentUnit` backtest one at a time would only
+   extend a bolt-on-correction pattern already used for the three descent
+   bases, never actually deliver the linear-combination-of-slowdown-
+   factors fit Plan B was originally scoped around. The user asked for
+   exactly that, scoped down to one term per category at a time (one
+   aerobic-fade clock, one impact/muscular-fade term, plus surface),
+   fit *jointly* rather than sequentially, and pointed out the segment
+   library (8824 segments, not 16 runs) should give this real degrees of
+   freedom.
+
+   **One design correction before writing any code, courtesy of a second
+   opinion:** the natural-seeming choice was to make heart rate the
+   dependent variable, reusing Stage 3's one validated non-blind
+   instrument. Wrong call, caught before building — Stage 3's instrument-
+   blindness problem was specific to a *power-residual* framing (device/
+   GPS power is nearly tautological with speed+grade), not a property of
+   pace itself. Pace is exactly what the solver predicts and exactly what
+   a held-out finish-time backtest scores, "athlete slows on gravel" is
+   directly observable in speed without needing HR as a proxy, and fitting
+   HR would have forced converting coefficients back through
+   `hrCalibration.ts`'s own weak R²=0.24 map before they meant anything in
+   pace/cost units. Outcome is grade-adjusted pace instead: log(speed) +
+   log(Minetti running cost at that segment's own grade) -- a GAP-style
+   quantity, Stage-0-validated, with no instrument-blindness detour
+   needed. HR remains an optional validation aside, not a dependent
+   variable, anywhere in this fit.
+
+   Built `src/model/linearSolve.ts` (this project's first general dense
+   linear-algebra primitive — Gauss-Jordan solve, weighted least squares,
+   and per-column Variance Inflation Factors; 11 synthetic tests) and
+   `src/model/jointSlowdownFit.ts` on top of it: surface category (one
+   dummy per category actually present in the data, vs. a paved
+   reference — a category absent from a given slice, e.g. no "other"
+   segments, must NOT get an all-zero dummy column, or the design goes
+   singular for a reason that has nothing to do with real collinearity;
+   caught by a failing synthetic test before it could bite on a smaller
+   real-data slice), one chosen aerobic-fade-clock term, and one chosen
+   impact term — all fit **jointly**, not sequentially, via WITHIN-RUN
+   fixed effects (each run's own segments de-meaned before pooling,
+   restricted to running gait so voluntary walk breaks don't get absorbed
+   into the fatigue-clock coefficient — same "compare a run to itself"
+   discipline as Stage 3/4, and specifically the fix for the bolt-on
+   pattern's blind spot: a run that's simultaneously hard-early and
+   descending-fast-early no longer lets one term's coefficient silently
+   absorb variance that belongs to the other). 8 synthetic tests: recovers
+   an injected surface offset / clock coefficient / impact coefficient in
+   isolation, flags a high VIF when clock and impact are constructed
+   near-collinear, returns null with no within-run variance, excludes
+   walk-gait and undefined-surface segments, and excludes the hard-work
+   basis specifically when `cumulativeHardWorkJPerKgAtStart` is null.
+
+   **Real-data run** (`scripts/fitJointSlowdownModel.ts`, offline, reuses
+   `.surface-cache/`): all 3 aerobic-clock × 4 impact-basis combinations
+   (12 total), 8824 segments / 203 runs / 6400 rows surviving the running-
+   gait + known-surface filter. Two very different stories in the same
+   table:
+
+   **Surface: robust, and now a real usable number Stage 3 couldn't
+   produce.** The surface coefficients are close to identical across
+   *all twelve* clock/impact combinations, with low VIF (1.1–1.4,
+   nowhere near the collinearity concern threshold) — gravel ≈ −0.050,
+   dirt ≈ −0.046, compacted ≈ −0.053 to −0.057, path ≈ −0.22 log-GAP
+   (≈ e^−0.22 ≈ 0.80× pace, a ~20% grade-adjusted slowdown vs. paved).
+   Unlike Stage 3's device-power attempt, this isn't blind to surface —
+   pace visibly responds, and it responds the same way no matter which
+   fatigue terms ride alongside it. **Caveat, the same one Stage 3
+   flagged for HR:** this is pace, not directly metabolic cost — it
+   cannot distinguish "the terrain costs more" from "the athlete
+   deliberately runs more cautiously on technical footing," the same
+   cost-vs-choice ambiguity every pace-based measure in this project
+   carries. For a *pacing predictor* that ambiguity doesn't matter (the
+   solver only needs to predict pace, not explain why it changes) — but
+   it means this number should be described as "how much slower this
+   athlete actually runs on X terrain," not "X terrain's metabolic cost."
+
+   **Aerobic-fade clock vs. impact: the collinearity risk materialized,
+   mostly.** VIF on the clock/impact pair ranges from a well-separated
+   ~1.0–2.0 (every `hardWork` combination, and the three
+   `descentImpactSquared` combinations) up to ~9 (`elapsedHours`/`netWork`
+   against the three descent bases) to a completely unusable 44–408
+   (`elapsedHours`+`runningImpact`, `netWork`+`runningImpact` — these two
+   terms are essentially measuring the same thing within a run and can't
+   be separated at all). Where VIF is low enough to trust a coefficient,
+   the coefficient itself is negligible: `hardWork`'s own coefficient is
+   ~1–2×10⁻⁶ against every impact basis, indistinguishable from zero —
+   clean because both terms are genuinely uncorrelated *and* both are
+   close to no-effect in this data, not clean because a real signal
+   survived. Within-run R² contributed by clock+impact+surface together
+   is only 0.028–0.036 throughout. **Net: more segments (8824 vs. Stage
+   4's 16 run-level points) sharpened the surface estimate exactly as
+   the user expected, but did not resolve the clock-vs-impact
+   identification problem** — that problem is structural (both
+   accumulate ~monotonically within a run) and isn't fixed by segment
+   count, confirming the advisor's distinction between "3 terms segment-
+   rich, 1 still run-count-limited" rather than reversing Stage 4's
+   conclusion.
+
+   **What this does and doesn't license:** a candidate, well-cross-
+   validated surface multiplier now exists, ready to carry into Stage 6's
+   held-out backtest as a real ceiling/cost term. The aerobic-fade and
+   impact channels still have no candidate coefficient worth trusting —
+   this in-sample joint fit, like every one before it in this project, is
+   not the arbiter of that; Stage 6 is.
+6. **Held-out backtest** — same arbiter every other mechanism in this file
    answers to: refit on a training subset of races, predict a held-out
    race's finish time through the *existing* solver with the new
    ceiling/cost terms wired in, compare against actual. A good in-sample
@@ -2211,7 +2317,14 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    "in-sample fit is close to guaranteed by construction" caveat applies
    here too) — only this step decides whether Plan B's fitted terms replace
    tau/f0/fInf in `ceiling.ts`, or whether the honest result is "the old
-   curve was fine, this didn't beat it."
+   curve was fine, this didn't beat it." Should verify the real backtest
+   population directly (likely closer to §12's own ~47-race figure than
+   Stage 4's n=16 — that gate was specific to the within-race diagnostic,
+   not a ceiling on how many races have a known finish time to predict)
+   before scoping it, and should let each candidate's coefficients be
+   *fit* on the training fold rather than requiring in-sample
+   significance first — the backtest is the significance test that works
+   at a sample size too small to separate candidates any other way.
 
 ### Open questions
 
