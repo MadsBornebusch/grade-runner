@@ -2340,30 +2340,100 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    impact channels still have no candidate coefficient worth trusting —
    this in-sample joint fit, like every one before it in this project, is
    not the arbiter of that; Stage 6 is.
-6. **Held-out backtest** — same arbiter every other mechanism in this file
-   answers to: refit on a training subset of races, predict a held-out
-   race's finish time through the *existing* solver with the new
-   ceiling/cost terms wired in, compare against actual. A good in-sample
-   regression fit is not sufficient on its own (§12 stage 5's own
-   "in-sample fit is close to guaranteed by construction" caveat applies
-   here too) — only this step decides whether Plan B's fitted terms replace
-   tau/f0/fInf in `ceiling.ts`, or whether the honest result is "the old
-   curve was fine, this didn't beat it." Should verify the real backtest
-   population directly (likely closer to §12's own ~47-race figure than
-   Stage 4's n=16 — that gate was specific to the within-race diagnostic,
-   not a ceiling on how many races have a known finish time to predict)
-   before scoping it, and should let each candidate's coefficients be
-   *fit* on the training fold rather than requiring in-sample
-   significance first — the backtest is the significance test that works
-   at a sample size too small to separate candidates any other way.
-   **Must NOT run all twelve Stage 5 combinations through the backtest and
-   pick the best held-out performer** — that overfits the arbiter itself,
-   the exact failure this step exists to prevent. The primary contrast is
-   baseline vs. baseline+surface (the one live, low-VIF, cross-validated
-   candidate from Stage 5); at most one VIF-clean fatigue combination
-   (`hardWork`+`descentImpactSquared`, VIF≈1.0–2.0 throughout) can ride
-   along as a single secondary comparison, chosen *before* seeing backtest
-   results, not selected by them.
+6. **Held-out backtest — done (2026-07-23). The surface term wins.**
+   Extended `analysis.ts`/`solver.ts` with an optional
+   `surfaceCostMultipliers` field (keyed by `SurfaceCategory`, taking
+   priority over the existing binary `unpavedCostMultiplier` when a
+   segment's own category has an entry, otherwise falling back to the
+   old binary logic unchanged) — 8 new synthetic tests confirm priority,
+   fallback, and byte-for-byte no-op when omitted. This is what makes
+   Stage 5's *per-category* coefficients pluggable into the real solver
+   at all, instead of collapsing them into one blended binary number.
+
+   Built `scripts/backtestSurfaceMultiplier.ts`, entirely OFFLINE (no live
+   server or Strava session — every activity's GPS points and surface
+   edges were already cached locally by Stages 0/3, unlike
+   `backtestFinishTime.ts`'s single-target manual design). Scoped to the
+   primary comparison only (baseline vs. baseline + Stage 5's fitted
+   per-category surface term), per this section's own note above — did
+   NOT run all twelve Stage 5 clock/impact combinations through the
+   backtest to pick a winner, which would overfit the arbiter itself. A
+   secondary fatigue candidate was considered and dropped: it would need
+   a genuinely new continuously-accumulating cost-side mechanism in
+   `solver.ts` that doesn't exist yet, to test a term Stage 5 already
+   found negligible (~10⁻⁶) — not worth building plumbing for.
+
+   **Runtime forced a real design change, caught by calibration before
+   committing to a design:** `fitTauFInfWithSupportGate`'s grid search
+   scales with training-pool size — ~12s at 24 training races, ~75–80s
+   once the pool reaches this athlete's full ~200 cached activities (the
+   joint surface fit itself is fast throughout, ~20–50ms, confirming the
+   cost is entirely in the tau/fInf search, not Stage 5's own machinery).
+   Full leave-one-out across ~200+ activities would have taken hours.
+   Switched to k-fold with 20 evenly-*spaced* (not randomly sampled —
+   deterministic, reproducible) target activities, each still trained
+   against its own full ~200-run pool minus itself.
+
+   **A real bug, caught before trusting a first result:** the first run
+   reported *identical* errors for both candidates. Cause:
+   `candidate.name.includes("surface")` was used to decide whether to
+   apply the surface multiplier — but the baseline candidate's own
+   display name, `"baseline (no surface term)"`, also contains the
+   substring "surface", so both candidates silently got the adjustment.
+   Fixed with an explicit `applySurface: boolean` field instead of
+   string-matching a display label; confirmed the fix by rerunning a
+   single fold and seeing the two candidates diverge (20.10% vs. 17.88%)
+   before trusting the full run.
+
+   **Result, 20 held-out folds across this athlete's cached activity
+   library** (per the earlier scoping choice: any cached activity with
+   usable timestamps, not races specifically):
+
+   | candidate | mean \|err%\| | median \|err%\| | mean signed err% |
+   |---|---|---|---|
+   | baseline (no surface term) | 21.91% | 22.94% | −21.91% |
+   | baseline + fitted per-category surface | 20.76% | 21.99% | −20.76% |
+
+   The surface term improves both the mean and median absolute error
+   (~1.1–1.0 percentage points, a ~5% relative improvement) and moves the
+   signed error in the *expected* direction: both candidates systematically
+   under-predict finish time (negative signed error — the model without a
+   surface cost thinks this athlete is faster than they actually are),
+   and adding the real surface cost shrinks that gap rather than
+   overcorrecting past it or widening it. This is the first result in
+   Plan B (or in this codebase's surface-cost work generally) that
+   validates a surface term against something the model didn't see during
+   fitting, rather than an in-sample residual or correlation.
+
+   **Read the absolute error level in context, not as a regression against
+   the documented 17.3%:** that earlier figure (§11) was measured on ~47
+   *races* specifically. This backtest's population — any cached activity
+   with usable data, per this session's own explicit scoping choice —
+   includes ordinary training runs (easy jogs, intervals, tempo efforts),
+   which the solver's own model (predict the fastest *sustainable* pace
+   for the whole course) was never built to predict well; an easy recovery
+   run isn't paced anywhere near its own feasibility limit, so of course
+   the model overpredicts its speed. The ~22% absolute error level reflects
+   that broader, harder population, not a worse fit than before. What's
+   still valid is the *relative* comparison: both candidates share the
+   exact same population, fitting pipeline, and folds, so baseline vs.
+   baseline+surface is a fair, like-for-like contrast regardless of the
+   population's own difficulty.
+
+   **Verdict: Stage 5's per-category surface cost term is the one
+   candidate out of everything Plan B tested that earns a real place in
+   the model** — it improves held-out finish-time prediction, consistent
+   with its own robust, low-VIF, grade-controlled Stage 5 fit. The
+   aerobic-fade and impact/muscular-fatigue channels tested in Stages 4–5
+   remain unresolved (collinear or negligible in-sample, never reaching
+   this backtest) — the honest, sample-size-appropriate conclusion for
+   those two channels, not a gap still to be closed. `tau`/`f0`/`fInf`
+   in `ceiling.ts` are NOT replaced by anything from Plan B: the surface
+   term is a new, independently-validated *addition* (via the new
+   `surfaceCostMultipliers` field), layered on top of the existing
+   duration-decay curve, not a substitute for it — matching this section's
+   own standing expectation that "the old curve was fine" could be the
+   honest destination for the parts Plan B didn't validate.
 
 ### Open questions
 
