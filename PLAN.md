@@ -288,6 +288,70 @@ signal, but a single noisy data point, not a validated constant like Minetti's o
 curve. Not yet exposed as a user setting (see §7); a strong technical descender and a
 cautious one likely warrant different values.
 
+**Real-data check (2026-07-23): should walk-forcing be added? No —
+it already exists and isn't needed; the real, actionable finding is that
+`maxDescentSpeedMs` is measurably too conservative for this athlete.**
+Prompted by a direct question ("find grades where the athlete always
+walks and force Minetti walk cost there"). `forceWalkAboveGrade` already
+exists (`solver.ts`, wired into `FormInputs`/`InputsPanel.tsx`, default
+off) as exactly the manual override this section already recommended; the
+real question was whether the *emergent*, un-forced choice already
+reproduces this athlete's real gait transition, making a forced override
+unnecessary. `scripts/testGaitChoiceEmergence.ts` (new; no network calls,
+reads `.strava-cache/` directly) runs three independent checks — an
+earlier version tried converting device power into a "predicted mode" via
+the Minetti cost curves and comparing it to actual gait, but that
+agreement number turned out to be near-tautological (the power→speed
+conversion was calibrated using the flat-ground running relationship,
+which makes "predicted mode" collapse to nearly the same speed threshold
+used to define "actual mode" — measuring calibration transfer, not gait
+validity). Dropped in favor of three checks that don't share that flaw:
+
+- **(A) Ground truth, no model at all:** real walk% by grade, straight
+  from GPS speed, across 65,476 segments from 250 activities. Answers the
+  literal question directly: walk% rises gradually from 9% (0-5% grade)
+  to 21%/45%/69% at 5/10/15%, crossing into "consistently walks" (85%+)
+  at **+20% grade and beyond**, staying in the 85-96% range all the way to
+  +55% (small dip to 69-71% at +60-65%, but n=13/7 there, likely noise).
+  No sharp cliff — a gradual transition, exactly the shape §6's
+  literature review predicted rather than a single hard threshold.
+- **(B) Analytical, no device power or real data at all:** at
+  representative sustainable net-power levels (6-18 W/kg), the grade
+  where `solver.ts`'s own `argmax(v_run, v_walk)` formula switches to
+  walk, computed directly from `costOfRunning`/`costOfWalking`. Crossover
+  ranges from -3% (at 6 W/kg) up to +20% (at 18 W/kg) — bracketing almost
+  exactly the same 5-30% zone where (A) shows the real gradual transition
+  happening. A model that already produces a walk crossover in the same
+  grade range this athlete actually transitions in, across the plausible
+  range of efforts they'd actually run at, is doing its job — there's no
+  gap here for a forced override to fix.
+- **Conclusion: no evidence supports adding walk-forcing on climbs.** The
+  existing emergent mechanism, with no override at all, already produces a
+  climbing transition in the right place. (A) is real ground truth
+  independent of any model; (B) is pure arithmetic independent of any real
+  data — neither depends on the device-power conversion that undermined
+  the first attempt, and both point the same way.
+
+- **(C) Real, power-independent, and the actual finding worth acting
+  on:** for segments where the athlete was actually *running* downhill
+  (speed > walkMaxMs), compare their real GPS speed against
+  `maxDescentSpeedMs(grade)` directly — no power, no calibration, just
+  recorded pace vs. the model's own speed cap. Real median running speed
+  **exceeds the cap at every descent grade checked**, and by a growing
+  margin as descents steepen: 9% over at -15% (n=1020), 18-22% over at
+  -20% to -25% (n=111-315), 34-88% over at -30% to -40% (n=7-39, thinner
+  but consistent in direction). `maxDescentSpeedMs` was always flagged as
+  "roughly calibrated against one recorded 55km trail ultra... a single
+  noisy data point, not a validated constant" (above) — this is the first
+  real check against that flag, and it says the cap is too conservative
+  for *this* athlete specifically, likely because it was calibrated on a
+  more technical course than their descents typically are. **This is the
+  actionable follow-up from this exercise — not walk-forcing, which isn't
+  needed, but recalibrating (or exposing as a real per-athlete setting,
+  per §7's existing note) `maxDescentSpeedMs` itself.** Not changed yet;
+  flagged here as a scoped, well-evidenced next step, distinct from
+  Plan B.
+
 ---
 
 ## 7. User-editable parameters & zero-input defaults
