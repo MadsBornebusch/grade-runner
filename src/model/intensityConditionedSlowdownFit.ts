@@ -17,17 +17,28 @@
 // Three intensity bases, not one -- because none of the three candidate
 // intensity readings is a free, non-circular measurement of effort:
 //
-// - "modelledPower" (avgMinettiGrossPowerWPerKg) is a DETERMINISTIC function
-//   of this same segment's own grade and speed (netToGross(cost(grade) *
-//   speed), see workAccumulation.ts). Regressing log(speed) on grade AND a
-//   near-invertible function of (grade, speed) leaves almost no residual
-//   variance for surface/clock/impact to explain -- expect R^2 -> ~1 and
-//   every slowdown coefficient -> ~0. That collapse IS the finding (a
-//   circularity fingerprint, not evidence terrain doesn't matter), and
-//   intensityConditionedSlowdownFit.test.ts locks in exactly that shape so
-//   it stays a demonstrated property, not a rediscovered surprise. It is
-//   also not new information: Stage 5's own log-GAP outcome is already
-//   equivalent to this quantity up to netToGross's additive resting term.
+// - "modelledPower" (avgMinettiGrossPowerWPerKg) is, PER UNDERLYING POINT, a
+//   DETERMINISTIC function of that point's own grade and speed
+//   (netToGross(cost(grade) * speed), see workAccumulation.ts).
+//   intensityConditionedSlowdownFit.test.ts locks in exactly that point-
+//   level fingerprint synthetically (R^2 -> 1, intensity's own VIF blown
+//   out -- unidentifiable, not "correctly near zero"; which of {intensity,
+//   the true cause} the solver credits is a numerical tie-break artifact of
+//   a noiseless setup, not something to trust). It is also not new
+//   information at the point level: Stage 5's own log-GAP outcome is
+//   already equivalent to this quantity up to netToGross's additive
+//   resting term.
+//   BUT at real MONOTONIC-SEGMENT granularity this attenuates a lot more
+//   than the point-level math suggests: avgMinettiGrossPowerWPerKg is the
+//   average of per-point power across every point in the run (monotonic
+//   only in grade SIGN, not grade value -- see monotonicSegments.ts's own
+//   comment on why this isn't computed from the segment's own averaged
+//   grade/speed), so it's a different, nonlinearly-averaged view of the
+//   same underlying data than avgGradient/avgSpeedMs are. Real-data run
+//   (PLAN.md §14 stage 7): within-run R^2 came out 0.44, not ~1, and the
+//   intensity column's VIF was 1.15, not blown out. Treat the synthetic
+//   test as accurate for the underlying formula, not as a literal
+//   prediction of what a real multi-point segment produces.
 //
 // - "measuredPower" (avgMeasuredPowerWPerKg, device/footpod power) looked
 //   like the non-circular option, but Stage 3's own real-data check

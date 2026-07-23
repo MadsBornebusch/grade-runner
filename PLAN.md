@@ -2567,6 +2567,120 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    all** — a finding about the *method*'s current limits, not a verdict
    on surface, and a materially harder fix than the one first suspected.
 
+7. **Intensity-conditioned slowdown fit — done (2026-07-23).** The user
+   raised a methodological objection to everything above stages 5/6 share:
+   both assume every segment is run at a roughly constant (if unknown)
+   effort — Stage 5 only via the within-run fixed effect, Stage 6's whole
+   backtest via `findSustainableTheta`'s sustained-effort ceiling — so any
+   pace difference at matched grade gets attributed entirely to surface/
+   clock/impact. Real segments aren't all run at the same effort: a
+   recovery jog, an aid-station approach, or a fatigue-driven pace drop all
+   change how hard the athlete is trying *within* the same run, not just
+   across runs. The user's ask: predict pace from an EXPLICIT, measured
+   intensity (power or heart rate) plus slowdown factors, and build three
+   parallel versions — pulse only, Minetti-modelled power, and measured
+   device power — to compare.
+
+   **Built `intensityConditionedSlowdownFit.ts`**: same within-run-fixed-
+   effects/WLS/VIF machinery as Stage 5, but the outcome is raw
+   `log(speed)` (not log-GAP) and the design gets an explicit `intensity`
+   column alongside grade/grade²/surface/clock/impact — one of
+   `avgHeartRateBpm`, `avgMinettiGrossPowerWPerKg`, or
+   `avgMeasuredPowerWPerKg` per arm. Needed a new field first:
+   `avgHeartRateBpm`/`heartRateCoverage` on `MonotonicSegment` (mirroring
+   `avgMeasuredPowerWPerKg`'s existing pattern exactly) — heart rate wasn't
+   previously exposed at this granularity.
+
+   **Why three arms, not one — none of the three is a free, non-circular
+   effort reading:**
+   - *modelledPower* is, per point, a deterministic function of that same
+     point's own grade+speed (`netToGross(cost(grade)*speed)`,
+     `workAccumulation.ts`). Conditioning on it plus grade should leave
+     almost nothing for surface/clock/impact to explain.
+   - *measuredPower* looked like the non-circular option, but Stage 3's own
+     `testStrydSurfaceSensitivity.ts` already found device power is nearly
+     blind to surface at matched speed+grade (1.01-1.03x across
+     categories) — conditioning on it risks absorbing the very slowdown
+     this fit is trying to measure, same mechanism as modelledPower, just
+     less completely.
+   - *pulse* doesn't move in lockstep with pace — internal effort doesn't
+     drop just because rough terrain slows the athlete down — so a real
+     surface-driven pace loss should stay visible at matched pulse+grade.
+     Same mechanism Stage 3's original within-run HR check found (HR
+     survived the same test device power failed), now generalized into a
+     joint regression with clock/impact alongside it.
+
+   **A locked-in synthetic test demonstrates the point-level circularity
+   exactly**: a segment built with `avgMinettiGrossPowerWPerKg` computed
+   consistently from its own (single-point-equivalent) grade+speed, fit
+   against a true injected surface effect, collapses to within-run
+   R²=1.000 with the intensity column's own VIF blown out (>190) —
+   unidentifiable, not "correctly near zero" (which of {intensity, surface}
+   the solver credits turned out to be a numerical tie-break artifact of a
+   noiseless synthetic setup, not something to trust; the honest, robust
+   claim is the VIF blowup, not which column wins). The same construction
+   fit with pulse instead recovers the true injected surface offset
+   cleanly. See `intensityConditionedSlowdownFit.test.ts`.
+
+   **Real-data run (203 cached activities, 8824 monotonic segments, this
+   athlete's bodyMassKg=85) surfaced something the synthetic test didn't
+   predict: real modelledPower is NOT anywhere near the point-level
+   circularity signature.** Restricted to the 6400 running/known-surface
+   segments (which, in this athlete's data, ALL carry both HR and device
+   power — the intersection-vs-native-sample distinction the fair-
+   comparison design worried about turned out to be moot here):
+
+   | intensity basis | within-run R² | gravel | dirt | compacted | path |
+   |---|---|---|---|---|---|
+   | pulse | 0.127 | −1.94% | −2.80% | −3.03% | −10.17% |
+   | modelledPower | 0.441 | −1.02% | −1.72% | −2.02% | −7.91% |
+   | measuredPower | 0.137 | −1.01% | −1.86% | −2.27% | −7.65% |
+
+   modelledPower's R²=0.44 is well above pulse's 0.127, but nowhere near
+   the ~1.0 the point-level math predicts, and its intensity column's VIF
+   sits at 1.15 (not blown out at all) — the opposite of the synthetic
+   fingerprint. **Reason, traced to `monotonicSegments.ts`'s own documented
+   design**: `avgMinettiGrossPowerWPerKg` is the average of *per-underlying-
+   point* Minetti power across a monotonic run, not
+   `netToGross(cost(avgGradient)*avgSpeedMs)` computed from the run's own
+   averaged grade/speed — "not computed from the segment's own averaged
+   gradient/speed, since the cost curve is nonlinear," per that module's
+   own comment. A monotonic segment spans many points with real within-
+   segment grade variation (it only requires constant grade *sign*, not a
+   constant grade value), so nonlinearly-averaged point power and
+   linearly-averaged grade/speed are two different views of the same
+   underlying data — the exact point-level tautology partially washes out
+   under this aggregation. The synthetic test's single-point-equivalent
+   construction is accurate for the underlying formula but not
+   representative of what a real multi-point monotonic segment produces —
+   worth a follow-up synthetic test with genuine within-segment grade
+   heterogeneity if this distinction needs to be pinned down further.
+
+   **What still replicates cleanly despite that surprise: both power-based
+   arms under-read the surface slowdown relative to pulse, on every
+   category, by a similar margin (roughly half pulse's magnitude on
+   gravel/dirt/compacted, about 22-25% smaller on path)** — directionally
+   exactly the "power absorbs some of the true slowdown instead of letting
+   it land on the surface term" story, just partial rather than complete.
+   modelledPower and measuredPower track each other closely (path −7.91%
+   vs −7.65%), while pulse alone shows the largest, and per Stage 3's own
+   instrument-independence argument, most trustworthy magnitude (path
+   −10.17%). `aerobicClock`/`impact` VIFs sit at ~9.1-9.2 in all three arms
+   — the same clock-vs-impact near-collinearity Stage 5 already found,
+   unaffected by which intensity basis is used.
+
+   **Verdict:** pulse's surface coefficients are the ones to trust, same
+   conclusion Stage 3 reached and now confirmed inside a joint regression
+   that also controls for clock/impact — and they're LARGER than Stage 5's
+   own log-GAP-based ones (path −10.17% here vs Stage 5's ~10% — close,
+   reassuringly, since Stage 5's within-run-demeaned effort proxy and an
+   explicit pulse term are two different ways of trying to hold effort
+   constant). Still in-sample, same caveat as every other mechanism in this
+   file — Stage 6's held-out backtest is the eventual arbiter, once it has
+   a fitted pacing-margin term to be sensitive to a modest effect at all
+   (stage 6's own standing conclusion). `scripts/fitIntensityConditionedSlowdownModel.ts`
+   runs all three arms plus pulse-on-its-native-sample side by side.
+
 ### Open questions
 
 **Resolved with the user (2026-07-23):** segmentation also breaks on a
