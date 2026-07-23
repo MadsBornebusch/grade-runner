@@ -2505,25 +2505,67 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    this stage already caught once (declaring a true effect from a
    confounded win) — just pointed the other direction.
 
+   **Tested the uncalibrated-baseline hypothesis directly, with this
+   athlete's real numbers (VO2max=54, bodyMassKg=85) instead of
+   `DEFAULT_FORM_INPUTS`'s generic 50/70 — and it didn't fix the bias. If
+   anything, it got worse.** Also fixed a real gap the swap surfaced:
+   `--bodyMassKg` had only ever been wired into `buildSegmentLibrary`'s
+   `avgMeasuredPowerWPerKg` (a field `jointSlowdownFit`'s own outcome
+   variable never uses), not into `commonInputs.bodyMassKg`, the field
+   that actually feeds `analyzeRun`/`findSustainableTheta` — fixed so the
+   CLI flag does what it claims. Sustained-effort subset, same 9 runs:
+
+   | candidate | mean \|err%\| | median \|err%\| | mean signed err% |
+   |---|---|---|---|
+   | baseline (VO2max=54, mass=85kg) | 25.66% | 29.31% | −25.66% |
+   | baseline + fitted per-category surface | 23.66% | 26.82% | −23.66% |
+   | baseline + surface-blind uniform multiplier (control) | 23.64% | 26.63% | −23.64% |
+
+   Worse than the generic-default run (−23.47% → −25.66%), not better, and
+   the per-category-vs-blind tie is unchanged (23.66% vs. 23.64%). This
+   makes complete mechanical sense once traced through: raising VO2max
+   raises `maxAerobicPower`/`ceilingPower` directly, which raises the
+   predicted sustainable pace at any given theta — i.e. predicts an even
+   *faster*, even further from actual, finish time. The direction here
+   isn't a bug; it's confirmation that VO2max is doing exactly what it
+   should in the model, while also ruling out "wrong VO2max/mass" as the
+   uniform bias's actual cause.
+
+   **Revises last update's leading hypothesis: the uniform under-
+   prediction is not primarily an uncalibrated-physiology artifact.**
+   Correcting VO2max/mass toward this athlete's real (higher) values moved
+   predictions further from actual, not closer — so whatever's producing
+   the ~23-26% gap isn't "the ceiling is calibrated too low." The other
+   mechanism flagged earlier — `findSustainableTheta` predicts the
+   *theoretical* fastest sustainable pace, and any real athlete, racing or
+   training, executes with some margin below that theoretical limit for
+   reasons the model has no term for (conservative pacing, fueling
+   stops, technical caution, motivation) — is now the better-supported
+   explanation, since it would produce exactly this kind of large,
+   parameter-insensitive, uniformly-one-directional gap. Fixing *that*
+   isn't a matter of plugging in better physiological constants; it would
+   need a separate, explicitly-fit "pacing margin" term (e.g. a habitual
+   theta ceiling below 1.0, calibrated per athlete from their own history)
+   before this backtest could center near zero error and become sensitive
+   to a modest cost term like surface at all.
+
    **Verdict, stated at the grain the evidence actually supports:**
    Stage 5's in-sample surface finding (robust, grade-controlled, low-VIF
    across all 12 clock/impact combinations) **stands on its own evidence,
    uncontradicted** — this backtest could not confirm it, but could not
-   refute it either, and the reason is now identified (an uncalibrated
-   baseline dominating the signal) rather than left as an unexplained
-   null. The aerobic-fade and impact/muscular-fatigue channels are a
-   genuinely different, weaker case: those never produced a coefficient
-   trustworthy enough in-sample to even reach this backtest (Stage 4's
-   n=16 diagnostic and Stage 5's VIF/collinearity results, independent of
-   any baseline-calibration issue) — "no trustworthy candidate produced,"
-   not "produced but the arbiter couldn't adjudicate it." `tau`/`f0`/`fInf`
-   in `ceiling.ts` are unchanged either way. **The load-bearing finding
-   for any future attempt to validate a cost term this way: this arbiter
-   needs a per-athlete-calibrated baseline (real VO2max and body mass,
-   not generic defaults) before it can center near zero error and become
-   sensitive to a modest term at all** — a finding about the *method*'s
-   current limits, not a verdict on surface, and worth fixing before
-   trying this kind of backtest again rather than re-running it as-is.
+   refute it either, on either physiology setting tried. The aerobic-fade
+   and impact/muscular-fatigue channels are a genuinely different, weaker
+   case: those never produced a coefficient trustworthy enough in-sample
+   to even reach this backtest (Stage 4's n=16 diagnostic and Stage 5's
+   VIF/collinearity results, independent of anything tested here) — "no
+   trustworthy candidate produced," not "produced but the arbiter
+   couldn't adjudicate it." `tau`/`f0`/`fInf` in `ceiling.ts` are
+   unchanged either way. **The load-bearing finding for any future
+   attempt to validate a cost term this way: this arbiter needs a fitted
+   pacing-margin term, not just accurate physiological constants, before
+   it can center near zero error and become sensitive to a modest term at
+   all** — a finding about the *method*'s current limits, not a verdict
+   on surface, and a materially harder fix than the one first suspected.
 
 ### Open questions
 

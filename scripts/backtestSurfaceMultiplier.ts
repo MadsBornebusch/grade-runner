@@ -50,7 +50,7 @@
 // of O(N^2).
 //
 // Usage:
-//   npx tsx scripts/backtestSurfaceMultiplier.ts [--bodyMassKg=70] [--maxActivities=250] [--maxFolds=20] [--raceOnly=true]
+//   npx tsx scripts/backtestSurfaceMultiplier.ts [--bodyMassKg=70] [--vo2Max=50] [--maxActivities=250] [--maxFolds=20] [--raceOnly=true]
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -67,6 +67,12 @@ import { DEFAULT_FORM_INPUTS, resolveCeilingParams, resolveGlycogenStoreG } from
 import { arg } from "./stravaScriptHelpers.ts";
 
 const BODY_MASS_KG = parseFloat(arg("bodyMassKg", "70"));
+// DEFAULT_FORM_INPUTS.vo2MaxHistory's own generic 50 -- fitTauFInfWithSupportGate
+// never fits this per fold (only fInf/tauMin), so an athlete's real VO2max
+// has to come in here or not at all. See PLAN.md §14 stage 6's own finding:
+// this was the leading suspect for the uniform under-prediction bias that
+// made the surface-vs-blind-control comparison inconclusive.
+const VO2_MAX = parseFloat(arg("vo2Max", "50"));
 const MAX_ACTIVITIES = parseInt(arg("maxActivities", "250"), 10);
 // fitTauFInfWithSupportGate's grid search cost scales with the training
 // pool size -- confirmed empirically: ~75-80s per fold once the training
@@ -125,11 +131,18 @@ interface RunRecord {
 function main() {
   const files = readdirSync(CACHE_DIR).filter((f) => f.startsWith("activity-") && f.endsWith(".json"));
   const formInputs = DEFAULT_FORM_INPUTS;
-  const baseCeilingParams: CeilingParams = resolveCeilingParams(formInputs);
+  // Both overrides matter for the solver's own predicted pace, not just
+  // bookkeeping: VO2_MAX scales maxAerobicPower/ceilingPower directly, and
+  // bodyMassKg was previously only wired into buildSegmentLibrary's
+  // avgMeasuredPowerWPerKg (unused by jointSlowdownFit's own outcome
+  // variable) -- NOT into commonInputs.bodyMassKg, the field that actually
+  // feeds analyzeRun/findSustainableTheta. Fixed here so --bodyMassKg
+  // actually changes what the solver predicts.
+  const baseCeilingParams: CeilingParams = { ...resolveCeilingParams(formInputs), vo2MaxMlPerKgPerMin: VO2_MAX };
   const commonInputs = {
-    bodyMassKg: formInputs.bodyMassKg,
+    bodyMassKg: BODY_MASS_KG,
     fueling: { intakeGPerH: formInputs.intakeGPerH },
-    glycogenStoreG: resolveGlycogenStoreG(formInputs),
+    glycogenStoreG: resolveGlycogenStoreG({ ...formInputs, bodyMassKg: BODY_MASS_KG }),
     walkMaxMs: formInputs.walkMaxMs,
     forceWalkAboveGrade: formInputs.forceWalkAboveGrade ?? undefined,
     altitudeAdjustment: formInputs.altitudeAdjustment,
