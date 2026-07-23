@@ -2340,7 +2340,8 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    impact channels still have no candidate coefficient worth trusting —
    this in-sample joint fit, like every one before it in this project, is
    not the arbiter of that; Stage 6 is.
-6. **Held-out backtest — done (2026-07-23). The surface term wins.**
+6. **Held-out backtest — done (2026-07-23). First pass looked like a win;
+   a negative control caught that it wasn't one.**
    Extended `analysis.ts`/`solver.ts` with an optional
    `surfaceCostMultipliers` field (keyed by `SurfaceCategory`, taking
    priority over the existing binary `unpavedCostMultiplier` when a
@@ -2394,46 +2395,84 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    | baseline (no surface term) | 21.91% | 22.94% | −21.91% |
    | baseline + fitted per-category surface | 20.76% | 21.99% | −20.76% |
 
-   The surface term improves both the mean and median absolute error
-   (~1.1–1.0 percentage points, a ~5% relative improvement) and moves the
+   The surface term improved both the mean and median absolute error
+   (~1.1–1.0 percentage points, a ~5% relative improvement) and moved the
    signed error in the *expected* direction: both candidates systematically
    under-predict finish time (negative signed error — the model without a
-   surface cost thinks this athlete is faster than they actually are),
-   and adding the real surface cost shrinks that gap rather than
-   overcorrecting past it or widening it. This is the first result in
-   Plan B (or in this codebase's surface-cost work generally) that
-   validates a surface term against something the model didn't see during
+   surface cost thinks this athlete is faster than they actually are), and
+   adding the surface cost shrank that gap rather than overcorrecting past
+   it or widening it. Read in isolation, this looked like the first result
+   in Plan B (or in this codebase's surface-cost work generally) to
+   validate a surface term against something the model didn't see during
    fitting, rather than an in-sample residual or correlation.
 
-   **Read the absolute error level in context, not as a regression against
-   the documented 17.3%:** that earlier figure (§11) was measured on ~47
-   *races* specifically. This backtest's population — any cached activity
-   with usable data, per this session's own explicit scoping choice —
-   includes ordinary training runs (easy jogs, intervals, tempo efforts),
-   which the solver's own model (predict the fastest *sustainable* pace
-   for the whole course) was never built to predict well; an easy recovery
-   run isn't paced anywhere near its own feasibility limit, so of course
-   the model overpredicts its speed. The ~22% absolute error level reflects
-   that broader, harder population, not a worse fit than before. What's
-   still valid is the *relative* comparison: both candidates share the
-   exact same population, fitting pipeline, and folds, so baseline vs.
-   baseline+surface is a fair, like-for-like contrast regardless of the
-   population's own difficulty.
+   **It wasn't — caught by a second opinion before the claim was
+   trusted.** The tell was hiding in the numbers already reported:
+   mean\|err%\| and \|mean signed err%\| were IDENTICAL to two decimal
+   places for both candidates (21.91/−21.91 and 20.76/−20.76). That
+   equality is only possible if every single fold erred in the same
+   direction — this athlete's finish time was under-predicted in all 20
+   folds, with no exceptions. Since every fitted surface multiplier is
+   >1 (uniformly slows predictions down), pushing predictions slower
+   against a population that is *always* too fast will improve the mean-
+   error metric regardless of whether the slowdown is aimed at the right
+   terrain. "Surface improved held-out error" was consistent with two
+   very different explanations — a real, terrain-specific cost, or "any
+   uniform slowdown would have done the same" — and the backtest as first
+   run could not tell them apart.
 
-   **Verdict: Stage 5's per-category surface cost term is the one
-   candidate out of everything Plan B tested that earns a real place in
-   the model** — it improves held-out finish-time prediction, consistent
-   with its own robust, low-VIF, grade-controlled Stage 5 fit. The
-   aerobic-fade and impact/muscular-fatigue channels tested in Stages 4–5
-   remain unresolved (collinear or negligible in-sample, never reaching
-   this backtest) — the honest, sample-size-appropriate conclusion for
-   those two channels, not a gap still to be closed. `tau`/`f0`/`fInf`
-   in `ceiling.ts` are NOT replaced by anything from Plan B: the surface
-   term is a new, independently-validated *addition* (via the new
-   `surfaceCostMultipliers` field), layered on top of the existing
-   duration-decay curve, not a substitute for it — matching this section's
-   own standing expectation that "the old curve was fine" could be the
-   honest destination for the parts Plan B didn't validate.
+   **The discriminating check: a surface-blind negative control.** Added
+   a third candidate — the same aggregate slowdown magnitude as the real
+   per-category fit (the distance-weighted average of that fold's fitted
+   multipliers over the target's own segments), but applied UNIFORMLY to
+   every segment regardless of which terrain it's actually on. If the
+   real per-category term is doing more than a blind nudge, it should beat
+   this control. Result, same 20 folds:
+
+   | candidate | mean \|err%\| | median \|err%\| | mean signed err% |
+   |---|---|---|---|
+   | baseline (no surface term) | 21.91% | 22.94% | −21.91% |
+   | baseline + fitted per-category surface | 20.76% | 21.99% | −20.76% |
+   | baseline + surface-blind uniform multiplier (control) | 20.78% | 22.00% | −20.78% |
+
+   The per-category term and the blind control are indistinguishable
+   (20.76% vs. 20.78% mean, 21.99% vs. 22.00% median — a 0.02-point gap,
+   noise). **The entire "surface improves prediction" result is explained
+   by this population being uniformly too-fast-predicted, not by the
+   per-category targeting actually being correct.** A surface-blind nudge
+   of the same size does exactly as well.
+
+   **Read the absolute error level in context, and read that context as
+   the reason the control was necessary, not just a footnote:** this
+   backtest's population — any cached activity with usable data, per this
+   session's own explicit scoping choice — includes ordinary training
+   runs (easy jogs, intervals, tempo efforts), which the solver's own
+   model (predict the fastest *sustainable* pace for the whole course)
+   was never built to predict well; an easy recovery run isn't paced
+   anywhere near its own feasibility limit, so the model overpredicts its
+   speed almost by construction. That's exactly the uniform bias that
+   makes ANY slowdown look like an improvement, and exactly why a blind
+   control was the load-bearing check here, not an optional extra. A
+   race-only backtest population would likely not carry the same uniform
+   bias (races, unlike training runs, ARE typically paced near the
+   model's own sustainable-effort assumption) and would be the more
+   discriminating version of this test — flagged as a concrete follow-up,
+   not attempted here (this codebase has no first-class "race" flag to
+   cut on without inventing a new, debatable heuristic).
+
+   **Verdict: Plan B has not produced a single candidate — surface,
+   aerobic-fade clock, or impact/muscular-fatigue term — that clears its
+   own held-out bar.** The surface term's Stage 5 in-sample fit remains
+   real, robust, grade-controlled, and low-VIF; nothing here disproves a
+   genuine terrain-cost effect exists. But this backtest, on this
+   population, cannot distinguish that real effect from a same-sized
+   blind nudge, so it does not license shipping `surfaceCostMultipliers`
+   as a validated per-athlete correction yet. `tau`/`f0`/`fInf` in
+   `ceiling.ts` are unchanged and untouched by anything Plan B built —
+   "the old curve was fine" (this section's own standing alternative
+   outcome) is the honest destination for all three channels this
+   session investigated, pending the race-only backtest re-run flagged
+   above as the one concrete step that could still flip this verdict.
 
 ### Open questions
 

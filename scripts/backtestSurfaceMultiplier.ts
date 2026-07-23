@@ -9,10 +9,17 @@
 // evenly-spaced target activities with usable timestamps and cached
 // surface data: for each target race, fit tau/fInf AND Stage 5's joint
 // surface model on every OTHER activity, then predict the target's finish
-// time through the real solver (findSustainableTheta) two ways -- baseline
-// (no surface term) vs. baseline + Stage 5's fitted per-category
-// surfaceCostMultipliers -- and compare both to the target's actual
-// recorded moving time.
+// time through the real solver (findSustainableTheta) three ways: baseline
+// (no surface term), baseline + Stage 5's fitted per-category
+// surfaceCostMultipliers, and a THIRD "uniformBlind" negative control
+// (same aggregate slowdown magnitude, applied uniformly regardless of
+// terrain) -- comparing all three against the target's actual recorded
+// moving time. The control isn't optional decoration: PLAN.md §14 stage 6
+// documents that the first (two-candidate) version of this backtest looked
+// like a win purely because every fold under-predicts finish time, so ANY
+// uniform slowdown improves the metric regardless of whether it's aimed at
+// the right terrain -- the control is what actually distinguishes "the
+// per-category fit is real" from "any nudge in this direction helps."
 //
 // Scoped to the PRIMARY comparison only (baseline vs. baseline + Stage 5's
 // surface term) -- deliberately NOT running all twelve Stage 5 clock/impact
@@ -146,16 +153,26 @@ function main() {
     { bodyMassKg: BODY_MASS_KG, ceilingParams: {} },
   );
 
+  type Mode = "none" | "perCategory" | "uniformBlind";
   interface CandidateAgg {
     name: string;
-    applySurface: boolean;
+    mode: Mode;
     absPctErrors: number[];
     signedPctErrors: number[];
     foldsSkipped: number;
   }
+  // "uniformBlind" is the negative control this stage's own result needs:
+  // if EVERY held-out fold under-predicts (see below), any downward nudge
+  // to predicted speed improves the mean-error metric regardless of
+  // whether it's aimed at the right terrain. Applies the SAME average
+  // magnitude as the real per-category fit (distance-weighted over this
+  // target's own segments) but spread uniformly across every segment,
+  // blind to which terrain it's on -- isolates "does surface-specificity
+  // matter" from "does any slowdown help this uniformly-biased population."
   const candidates: CandidateAgg[] = [
-    { name: "baseline (no surface term)", applySurface: false, absPctErrors: [], signedPctErrors: [], foldsSkipped: 0 },
-    { name: "baseline + fitted per-category surface", applySurface: true, absPctErrors: [], signedPctErrors: [], foldsSkipped: 0 },
+    { name: "baseline (no surface term)", mode: "none", absPctErrors: [], signedPctErrors: [], foldsSkipped: 0 },
+    { name: "baseline + fitted per-category surface", mode: "perCategory", absPctErrors: [], signedPctErrors: [], foldsSkipped: 0 },
+    { name: "baseline + surface-blind uniform multiplier (control)", mode: "uniformBlind", absPctErrors: [], signedPctErrors: [], foldsSkipped: 0 },
   ];
 
   // Evenly-spaced target indices across the whole pool (deterministic, not
@@ -197,13 +214,32 @@ function main() {
       }
     }
 
+    // Distance-weighted average of the per-category multipliers over THIS
+    // target's own segments (only those with known surfaceCategory, so
+    // undefined-category segments are excluded from both this control and
+    // the real per-category candidate identically) -- the uniformBlind
+    // control's single flat value, same aggregate magnitude, no per-terrain
+    // targeting.
+    let weightedSum = 0;
+    let weightedDistance = 0;
+    for (const seg of target.segments) {
+      if (seg.surfaceCategory === undefined) continue;
+      weightedSum += (surfaceCostMultipliers[seg.surfaceCategory] ?? 1) * seg.distance3D;
+      weightedDistance += seg.distance3D;
+    }
+    const uniformMultiplier = weightedDistance > 0 ? weightedSum / weightedDistance : 1;
+    const uniformBlindMultipliers = Object.fromEntries(
+      [...new Set(target.segments.map((s) => s.surfaceCategory).filter((c) => c !== undefined))].map((c) => [c, uniformMultiplier]),
+    );
+
     foldsRun++;
     for (const candidate of candidates) {
       const solverInputs: SolverInputs = {
         segments: target.segments,
         ...commonInputs,
         ceilingParams: fittedCeilingParams,
-        ...(candidate.applySurface ? { surfaceCostMultipliers } : {}),
+        ...(candidate.mode === "perCategory" ? { surfaceCostMultipliers } : {}),
+        ...(candidate.mode === "uniformBlind" ? { surfaceCostMultipliers: uniformBlindMultipliers } : {}),
       };
       const { result } = findSustainableTheta(solverInputs);
       if (!result.feasible) {
