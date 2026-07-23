@@ -1767,9 +1767,12 @@ resampled to `segmentLengthM`) where:
   — this is the same noise-vs-signal tension §5 already resolved once for
   `smoothingWindowM`/`segmentLengthM`, not a new problem;
 - `surfaceUnpaved` (or the finer Valhalla category, see below) stays constant;
-- not paused, and (open question) probably not spanning a walk/run gait
-  change either, since that's itself a pacing decision this model already
-  represents separately.
+- not paused, and **(confirmed with the user) also breaks on a walk/run
+  gait change** (speed crossing `walkMaxMs`, same convention as
+  everywhere else in this codebase) even if grade and surface don't
+  change — gait is its own pacing decision, already modeled separately
+  (§6), and a segment spanning a mid-climb run→walk transition would mix
+  two different cost regimes into one averaged speed/power reading.
 
 Each resulting segment carries: total distance, total time (→ average
 speed), average recorded device power where available (else Minetti-implied
@@ -1780,23 +1783,26 @@ features below evaluated at the segment's start (matching
 `EffortTrendPoint`'s existing "value at the start of this segment"
 convention).
 
-A minimum segment length/duration floor is needed (very short monotonic
-runs are mostly noise, and Plan B's per-segment power/speed averages need
-enough points to mean anything) — no default chosen yet, worth checking
-empirically against the real segment-length distribution once this is
-built rather than guessing.
+**Minimum segment length/duration floor (confirmed with the user): ~100m
+or ~30s, whichever binds first.** Roughly 2x the pipeline's own 50m
+resample spacing, so a qualifying segment always spans several underlying
+fixed-length points (a stable speed/power average, not 1-2 noisy points)
+without discarding most short rollers on typical rolling/trail terrain the
+way a stricter floor (e.g. ~250m/60s) would. Still worth checking against
+the real segment-length distribution once built — this is a starting
+point, not a number derived from data yet.
 
-**Surface granularity — plan to re-test, not assume the prior answer
-carries over.** §12 stage 6 found the full Valhalla vocabulary
-(gravel/dirt/compacted/path) didn't beat binary paved/unpaved *under the
-finish-time-backtest objective*. Plan B's objective is different (directly
-explaining segment-level pace variance, not a downstream finish-time
+**Surface granularity (confirmed with the user): start with the full
+Valhalla vocabulary (paved/gravel/dirt/compacted/path), not binary.** §12
+stage 6 found the full vocabulary didn't beat binary paved/unpaved *under
+the finish-time-backtest objective* — but that's a different objective
+from Plan B's (segment-level pace variance, not downstream finish-time
 prediction), and the same section's real-device-power check already found
 a genuine, non-circular, granularity-specific signal (path 9-31% slower
 than paved at fixed power+gradient; gravel/dirt/compacted showed no
-consistent pattern) — so start with the full category set here rather than
-collapsing to binary early, and let the regression's own fit quality decide
-whether the extra categories earn their keep for *this* objective.
+consistent pattern). Start fine-grained and let the regression's own fit
+quality decide whether categories collapse for this objective, rather than
+re-importing an answer from a different one.
 
 ### Internal fatigue proxy: candidates to test, not one to assume
 
@@ -1930,13 +1936,16 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
 
 ### Open questions
 
-- Segmentation definition above (same-signed run with hysteresis, vs. a
-  stricter reading of "monotonic") — flag if the assumption is wrong.
-- Whether a walk/run gait change should also break a segment — assumed yes
-  above (gait is already a separate pacing decision in this model), open to
-  correction.
-- No default chosen yet for the minimum segment length/duration floor —
-  needs the real segment-length distribution once built, not a guess now.
+**Resolved with the user (2026-07-23):** segmentation also breaks on a
+walk/run gait change (not just grade-sign/surface); surface starts at the
+full Valhalla vocabulary, not binary; minimum segment floor starts at
+~100m/~30s, whichever binds first. All three folded into the sections
+above.
+
+Still open:
+
+- Segmentation's same-signed-run-with-hysteresis reading of "monotonic in
+  grade" — flag if a stricter definition was actually meant.
 - Whether `E_hard`/W′-balance's own extra parameters (LT2 power for the
   clamp, W′-balance's recovery time constant) get fit jointly with the
   slowdown regression or fixed from the athlete's already-configured
