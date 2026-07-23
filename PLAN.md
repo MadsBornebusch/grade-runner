@@ -1279,6 +1279,58 @@ Sources: [TrainingPeaks, Performance Manager](https://www.trainingpeaks.com/lear
    parameter doesn't earn its keep for that specific objective. Binary
    paved/unpaved remains the shipped granularity.
 
+   **Third attempt: derive the path multiplier from real device power
+   instead of the solver's own effort fraction. Bug found in the second
+   attempt's scratch harness; still negative once fixed.** The user
+   pushed further: instead of comparing whole-run/whole-race averages
+   (confounded by each run's own pacing intensity, and circular if
+   "power" is derived from the model's own Minetti cost curve — at fixed
+   gradient, model-power *is* speed, so bucketing by it and looking at
+   speed can't show a surface effect by construction), bucket small
+   segments by *real device power* (Stryd, recorded independently of any
+   cost model — 109 cached runs have both) and gradient, then compare
+   achieved speed across surface types within each cell. Result: a real,
+   consistent, non-circular signal -- "path" is 9-31% slower than paved at
+   the same real power and same gradient, holding across all 20
+   independent (gradient × power) cells tested (dozens of runs and
+   hundreds-to-thousands of segments per cell), worsening on steeper
+   climbs and at higher effort. Gravel/dirt/compacted showed no consistent
+   pattern. Converting the weighted-mean speed ratio to an implied cost
+   multiplier (cost_path/cost_paved = v_paved/v_path at fixed power and
+   gradient) gave a candidate of **1.164x**.
+
+   Backtesting that fixed candidate against the held-out races surfaced a
+   real bug in the second attempt's scratch categorization code: it
+   classified each segment by what *fraction of the whole course up to
+   that point* was path/other-unpaved (a cumulative running average), not
+   by the surface at that specific point. Since path rarely exceeds 50% of
+   a course's cumulative distance, "path" was essentially never assigned
+   anywhere -- which is exactly why that attempt found path's own
+   multiplier parked at its search boundary (1.00x, no effect) with all
+   cost pushed into "other": there was effectively no "path" category to
+   fit. Fixed with the same point-level lookup already used for the
+   effort-fraction pass (binary search on Valhalla edge boundaries, no
+   cumulative averaging).
+
+   With that fixed, the real-power-derived 1.164x candidate was backtested
+   the same way as every other mechanism here -- LOO across the 7 marquee
+   races, tau/fInf refit per fold, all three variants computed in the same
+   harness for a fair comparison: baseline (no terrain effect) 25.3% →
+   **24.3%** with the fixed 1.164x path-only multiplier, vs. **7.7%** for
+   the shipped single flat paved/unpaved multiplier (refit per fold, lands
+   around 1.8-1.9x) -- confirming the harness now reproduces the
+   previously-documented ~8.1% once both the categorization bug and the
+   duration-filter bug (§12 stage 1) are fixed. The real-power signal is
+   genuine but far too small: 1.164x barely moves the needle, nowhere
+   close to the ~1.8x the finish-time objective actually needs. Most
+   likely explanation: the momentary power-vs-speed relationship measured
+   on ordinary daily training runs (fresh legs, familiar local trails)
+   doesn't capture what a 15-25 hour technical ultra actually costs on
+   unpaved terrain -- fatigue, night navigation, and accumulated caution on
+   technical footing compound in a way a single power/speed snapshot
+   can't see. Real, informative, and negative a third time: binary
+   paved/unpaved remains the shipped, best-validated mechanism.
+
 Stages 1-6 are now built. Stages 1-4 (plus the avgIntensity/within-race
 fixes folded into stage 4 above) are well-supported by existing literature
 and directly extend code that already existed; stage 5 is explicitly
