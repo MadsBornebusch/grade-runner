@@ -33,6 +33,16 @@ export interface PipelineOptions {
   pauseSpeedThresholdMs?: number;
 }
 
+/**
+ * Finer surface vocabulary than CourseSegment.surfaceUnpaved's binary split
+ * -- see src/model/surfaceExposure.ts's attachSurfaceData, which sets both
+ * fields from the same underlying Valhalla lookup in one pass. "other"
+ * covers the raw Valhalla values PLAN.md §12 stage 6 found no consistent
+ * pattern for (ground/grass/wood_chips/bare "unpaved"), grouped rather than
+ * given their own rarely-populated bins.
+ */
+export type SurfaceCategory = "paved" | "gravel" | "dirt" | "compacted" | "path" | "other";
+
 export interface CourseSegment {
   index: number;
   /** Cumulative along-slope distance (m) at the end of this segment. */
@@ -66,6 +76,15 @@ export interface CourseSegment {
    * term entirely, not silently assume 0% unpaved.
    */
   surfaceUnpaved?: boolean;
+  /**
+   * Finer companion to surfaceUnpaved above -- same "undefined means no
+   * data" contract, set by the same attachSurfaceData call. PLAN.md §14
+   * Plan B bins on this directly (starting at the full vocabulary rather
+   * than collapsing to surfaceUnpaved, per that section's own reasoning);
+   * surfaceUnpaved is untouched and still what solver.ts/analysis.ts's
+   * shipped unpavedCostMultiplier reads.
+   */
+  surfaceCategory?: SurfaceCategory;
 }
 
 export interface PipelineResult {

@@ -1909,13 +1909,69 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    with raw Minetti as Stage 2's fixed baseline; a grade-dependent
    correction is at most a candidate regressor to test later, not a
    correction applied up front.
-2. **Segmentation + feature extraction** — build the monotonic-run splitter
-   and per-segment feature builder (surface category, all fatigue-proxy
-   candidates evaluated at segment start, device/Minetti power, speed) as a
-   pure function over an existing `CourseSegment[]`, verified with a
-   synthetic course (known grade/surface pattern → known segment
-   boundaries) before running on real data, same discipline as every other
-   mechanism in this file.
+2. **Segmentation + feature extraction — done (2026-07-23).**
+   `src/model/monotonicSegments.ts`'s `buildMonotonicSegments` splits a
+   course's fixed-length `CourseSegment[]` into monotonic-grade
+   (hysteresis-banded sign, per the confirmed design)/constant-surface/
+   constant-gait runs, always breaking (and excluding) at a paused or
+   untimed segment. Per run: distance, time, avg speed/gradient, surface
+   category, gait, average measured (device) and Minetti-implied power/kg,
+   and — evaluated *before* the run's own contribution, matching
+   `EffortTrendPoint`'s convention — cumulative elapsed hours, cumulative
+   distance, cumulative Minetti net work, and cumulative supra-LT2 "hard"
+   work (opt-in via `ceilingParams`; W′-balance deliberately deferred, per
+   §14's own note that it needs its own recovery-time-constant fit).
+   `surfaceExposure.ts`'s `attachSurfaceData` was extended in the same pass
+   to also set the new `CourseSegment.surfaceCategory` (the full Valhalla
+   vocabulary — paved/gravel/dirt/compacted/path/other — confirmed above),
+   alongside the existing binary `surfaceUnpaved` it already fed
+   `unpavedCostMultiplier`; both fields now come from one lookup, so they
+   can never disagree with each other. Verified with 13 synthetic-course
+   tests (`monotonicSegments.test.ts`) before touching real data — grade/
+   surface/gait boundary triggers, pause/untimed exclusion, the floor's
+   OR-logic in both directions, cumulative-at-start correctness, and the
+   `ceilingParams`/`bodyMassKg` opt-in gating.
+
+   **Real-data sanity check** (`scripts/buildSegmentLibrarySample.ts`,
+   offline — reuses Stage 0's `.surface-cache/`, no new Valhalla calls):
+   203 activities → **8824 monotonic segments** (avg 43.5/activity).
+   Distance p10/p50/p90 = 82/149/540m, duration p10/p50/p90 = 36/69/208s —
+   comfortably above the 100m/30s floor at the median, not a pile-up of
+   marginal segments. The floor itself drops **34.3%** of raw candidate
+   runs (13,423 → 8,824) — a real, meaningful filter, not a no-op, but not
+   so aggressive it's discarding most of the library either. All 5 surface
+   categories are well-populated (gravel 42%, paved 27%, dirt 14%,
+   compacted 11%, path 7% — even the smallest, path, has 619 segments).
+   Gait split 72.5% run / 27.5% walk.
+
+   **Two things carried forward, not fixed now:**
+   - **Segment output has no run-of-origin field.** `MonotonicSegment` only
+     carries `startIndex`/`endIndex` *within* the activity it was built
+     from; assembling a cross-run library (Stage 3/4) must tag each
+     segment with its source run's id at that assembly step — needed
+     specifically for this session's own clustering landmine (treat *run*
+     as the clustering unit for cluster-robust SEs / per-run aggregation),
+     which is impossible to retrofit onto an already-flattened segment
+     list. Do this first when Stage 3/4 assembles the real library, not
+     as an afterthought.
+   - **The real-data check's "100% measured-power coverage" is a selection
+     artifact, not a population statistic, and it cannot yet answer the
+     two-channel question Stage 0 raised.** `.surface-cache/` only holds
+     activities Stage 0 already pre-filtered to `hasPower && hasTime`, so
+     this sample is selection-biased toward power-having, generally
+     shorter activities. The number that actually matters for Stage 0's
+     "is the two-channel split realizable?" question — device-power
+     coverage on the duration-filtered *long* runs specifically, at
+     segment granularity — is still unmeasured; don't read this 100% as
+     evidence either way.
+   - **Nit, intentional, worth remembering:** `gradeSignWithHysteresis`
+     carries the previous sign through the dead zone, so a genuine
+     sustained flat plateau immediately following a climb (with no gait or
+     surface change to force a break) merges into that climb, blending its
+     `avgGradient`. This is the confirmed, plain reading of "monotonic in
+     grade" and the tests lock it in on purpose — flagged here so a future
+     grade-bin residual oddity gets recognized rather than re-debugged from
+     scratch.
 3. **Surface regression across the full library** — the well-motivated half
    (real, non-circular signal already found in §12 stage 6's real-power
    check); fit first since it doesn't need the duration filter stage 4
