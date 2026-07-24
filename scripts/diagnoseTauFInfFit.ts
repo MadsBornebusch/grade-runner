@@ -28,7 +28,7 @@ import { arg } from "./stravaScriptHelpers.ts";
 const BODY_MASS_KG = parseFloat(arg("bodyMassKg", "85"));
 const VO2_MAX = parseFloat(arg("vo2Max", "54"));
 const MAX_ACTIVITIES = parseInt(arg("maxActivities", "250"), 10);
-const EXCLUDE_ID = arg("excludeId", "18726525125"); // Soria Moria, same fold as the backtest
+const EXCLUDE_IDS = arg("excludeId", "18726525125").split(","); // Soria Moria, same fold as the backtest
 
 const CACHE_DIR = fileURLToPath(new URL("../.strava-cache/", import.meta.url));
 const SURFACE_CACHE_DIR = fileURLToPath(new URL("../.surface-cache/", import.meta.url));
@@ -92,8 +92,8 @@ function main() {
 
   console.log(`Loaded ${runs.length} activities\n`);
 
-  const training = runs.filter((r) => r.id !== EXCLUDE_ID);
-  console.log(`Training pool (excluding ${EXCLUDE_ID}): ${training.length} races\n`);
+  const training = runs.filter((r) => !EXCLUDE_IDS.includes(r.id));
+  console.log(`Training pool (excluding ${EXCLUDE_IDS.join(",")}): ${training.length} races\n`);
 
   // Duration distribution
   const durations = training.map((r) => r.durationH).sort((a, b) => a - b);

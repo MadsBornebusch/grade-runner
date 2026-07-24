@@ -2974,6 +2974,121 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    separately investigate why the joint tau/fInf fit is this sensitive to
    which race is excluded.
 
+   **Follow-up: fixed the tau/fInf fit being swamped by short training
+   runs, then investigated why the fixed fit's fInf still looks high.**
+   (`pacingFit.ts`'s `poolIndicesInformativeAtReference`,
+   `scripts/diagnoseTauFInfFit.ts`, `scripts/compareHrVsModelledPower.ts`,
+   `scripts/predictHrAtFInf.ts`.)
+
+   **The bug.** `fitTauAcrossRaces`/`fitFInfAndTauAcrossRaces` pool every
+   supplied race's squared within-race slope into one unweighted sum, and
+   the existing `unresponsive`/`informativeRaceCount` report is evaluated
+   at the FINAL fitted tau — circular, since a small enough candidate tau
+   makes almost any race look "responsive" (its ceiling saturates within
+   a couple tau's regardless of the race's own duration). On this
+   athlete's real 203-activity library (100 races under 1h, 82 between
+   1-2h, only 2-3 genuine multi-hour races), that let the short training
+   runs outvote the real ultras purely by count: the joint fit collapsed
+   to tau=22min/fInf=0.777, reporting 158-199 of ~202 races as
+   "informative" — nowhere near true, and nowhere near the tau=250min/
+   fInf=0.38 calibration defaults.
+
+   **First attempt, rejected.** Anchoring the search range's lower bound
+   to the longest race instead of the shortest (mirroring how the upper
+   bound already works) fixed the real-data case cleanly, but broke an
+   existing synthetic recovery test (races spanning 1-18h with a true
+   tau~300 pooled together — 0.3× the 18h race's own duration excluded
+   the true value from the search range entirely) and would fail on any
+   fold that kept a genuinely long race in the training pool. A wide
+   search range can never exclude the true value; narrowing it was the
+   wrong lever.
+
+   **The fix.** Restrict which races vote in the pooled objective, using
+   a non-circular test evaluated at the INCOMING reference tau (whatever
+   is already configured/defaulted, not the tau this search is trying to
+   produce): a race only counts if its own trimmed duration is at least
+   as long as that reference, since a race needs to span roughly one
+   time constant to show the decay's actual shape, not just a slice of a
+   smooth curve's local slope. The search range itself is untouched.
+   Verified on real data against both a Soria-Moria-excluded and a
+   Soria-Moria-included fold: tau lands at 317-412min and stays stable
+   (within a few minutes) across every duration floor tested from 0h to
+   4h, correctly identifying only the 2-3 genuinely long races
+   (Ecotrail 80, Ås Backyard Ultra, and Soria Moria when present) as
+   informative. Two new regression tests lock this in (many short races
+   pooled with a couple of long ones, for both `fitTauAcrossRaces` and
+   `fitFInfAndTauAcrossRaces`); all 58 pre-existing tests in this file
+   pass unchanged.
+
+   **Why is the fixed fit's fInf (~0.70-0.74) still so much higher than
+   the 0.38 default?** Investigated three candidates:
+   1. *VO2max too low, fInf absorbing the error* — ruled out, and not
+      just empirically: refit at VO2max=54/58/62/66 gave the exact same
+      fInf=0.737 every time. This fitting method minimizes the SLOPE of
+      (power/ceiling) over time, and VO2max only ever rescales that
+      whole series by one constant, identically for every candidate
+      (fInf, tau) — a uniform rescaling can't change which candidate
+      minimizes a slope. The fit is mathematically invariant to VO2max;
+      it can never detect or correct a VO2max error in either direction.
+   2. *Ås Backyard Ultra's lap-format pacing (paced to a lap time budget,
+      not to fatigue) inflating fInf* — tested by excluding it and
+      refitting on Ecotrail+Soria Moria alone: fInf moved from 0.696 to
+      0.678, barely. Not the primary driver.
+   3. *Modelled power is pace-derived and misses real fatigue that heart
+      rate would show* (this session's own earlier finding: pulse vs.
+      modelled power R²=0.007) — checked directly by binning Ecotrail 80
+      and Soria Moria into 30-minute windows and comparing heart rate's
+      own trend to modelled power's. If power were hiding real fatigue,
+      HR should rise while power stayed flat (cardiac drift at constant
+      output). Instead **HR and modelled power decline together in both
+      races** — Ecotrail's HR is flat (+0.03 bpm/hour) alongside a mild
+      power decline; Soria Moria's HR drops ~20bpm (132→112) over 26.5h
+      right alongside a declining power trend. This is the signature of
+      normal self-regulated pacing (slow down, heart rate drops with the
+      reduced output), not hidden fatigue the power model can't see.
+
+   **A concrete plausibility check.** Converted fInf into a predicted
+   heart rate using the existing `hrCalibration.ts` machinery
+   (`fitHrToEffortCalibrationAcrossRaces` + `predictHeartRateFromEffortFraction`,
+   pooled across all 203 activities with HR data):
+
+   | fInf | predicted HR | calibration R² |
+   |---|---|---|
+   | 0.38 (old default) | 71 bpm | 0.044 |
+   | 0.65 | 134 bpm | 0.100 |
+   | 0.70 | 142 bpm | 0.105 |
+   | 0.737 (fitted) | 147 bpm | 0.108 |
+   | 0.85 (LT2 cap) | 162 bpm | 0.115 |
+
+   147 bpm sits right inside this athlete's own observed sustained-race
+   HR (138-151 bpm through most of Ecotrail, ~130-137 bpm through the
+   early-mid hours of Soria Moria) — a real, physiologically ordinary
+   number. The OLD default (0.38) predicts 71 bpm, essentially resting
+   heart rate — implausible for a multi-hour race, and a number this
+   athlete's data flatly contradicts. Read this as "not obviously wrong,"
+   not as independent proof: the calibration's own R² is low (0.04-0.11,
+   markedly lower than the ~0.31-0.43 this same mechanism is documented
+   elsewhere in this file as achieving — likely a different
+   VO2max/fInf/tau configuration or race subset, not re-derived here),
+   and the check is partly self-referential (the candidate fInf feeds
+   into computing the effort-fraction that gets regressed against HR).
+
+   **Verdict:** the fixed fit's high fInf is not an artifact of the
+   swamping bug, VO2max miscalibration, the backyard-ultra format, or
+   modelled power hiding real HR-visible fatigue — every one of those
+   was checked and ruled out or found not to be the primary driver. It
+   looks like a genuine, athlete-specific signal: this athlete's own
+   heart rate and pace-derived power both decline only modestly over
+   8-26 hour efforts. Still resting on thin support (only 2-3 races ever
+   qualify as informative, durationDiversityRatio~3, barely above the
+   2x trust minimum) — worth more long-duration race data before treating
+   ~0.7 as a new calibration default, but no longer a number to dismiss
+   as a bug. One residual limitation in the fix itself: it gates voting
+   on duration ≥ the reference tau (250min by default), so it can confirm
+   tau is at least roughly reference-sized but is structurally blind to a
+   genuinely SMALLER true tau — self-consistent here (317-412min,
+   comfortably above 250) but not an unbiased estimator in general.
+
 ### Open questions
 
 **Resolved with the user (2026-07-23):** segmentation also breaks on a
