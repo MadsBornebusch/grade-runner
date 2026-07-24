@@ -173,7 +173,6 @@ export function RunLibraryPanel({
   const [backfilling, setBackfilling] = useState(false);
   const [backfillProgress, setBackfillProgress] = useState<string | null>(null);
 
-  const [deselectedSuggestionIds, setDeselectedSuggestionIds] = useState<Set<string>>(new Set());
   const [fetchingSuggestions, setFetchingSuggestions] = useState(false);
 
   const refresh = useCallback(() => {
@@ -609,42 +608,42 @@ export function RunLibraryPanel({
   );
 
   const suggestions = useMemo(() => suggestRunsForFit(dedupedRuns), [dedupedRuns]);
-  const approvedSuggestions = useMemo(() => {
-    // A run can appear in more than one bucket (e.g. the single longest run
-    // is both a durability and a duration-spread candidate) -- dedupe by id
-    // before fetching, so it isn't counted or fetched twice.
-    const byId = new Map(
-      [...suggestions.vo2max, ...suggestions.durability, ...suggestions.durationSpread]
-        .filter((r) => !deselectedSuggestionIds.has(r.id))
-        .map((r) => [r.id, r]),
-    );
+  // A run can appear in more than one bucket (e.g. the single longest run is
+  // both a durability and a duration-spread candidate) -- dedupe by id so it
+  // isn't counted or fetched twice.
+  const suggestedRuns = useMemo(() => {
+    const byId = new Map([...suggestions.vo2max, ...suggestions.durability, ...suggestions.durationSpread].map((r) => [r.id, r]));
     return [...byId.values()];
-  }, [suggestions, deselectedSuggestionIds]);
+  }, [suggestions]);
+  const pendingSuggestedRuns = useMemo(() => suggestedRuns.filter((r) => r.points === null), [suggestedRuns]);
 
-  const fetchApprovedSuggestions = async () => {
-    setFetchingSuggestions(true);
-    setError(null);
-    try {
-      for (const run of approvedSuggestions) {
-        await ensurePoints(run);
+  // Auto-fetches full data for every suggested run -- no manual approve/
+  // exclude step. Only re-runs when the pending set actually changes (which
+  // only happens once refresh() below updates `runs` post-fetch), so this
+  // settles once every suggestion has full data, rather than looping.
+  useEffect(() => {
+    if (pendingSuggestedRuns.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      setFetchingSuggestions(true);
+      setError(null);
+      try {
+        for (const run of pendingSuggestedRuns) {
+          if (cancelled) return;
+          await ensurePoints(run);
+        }
+        if (!cancelled) refresh();
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to fetch suggested runs.");
+      } finally {
+        if (!cancelled) setFetchingSuggestions(false);
       }
-      setDeselectedSuggestionIds(new Set());
-      refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch suggested runs.");
-    } finally {
-      setFetchingSuggestions(false);
-    }
-  };
-
-  const toggleSuggestion = (id: string) => {
-    setDeselectedSuggestionIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSuggestedRuns]);
 
   const readyCount = dedupedRuns.filter((r) => r.points !== null).length;
 
@@ -702,94 +701,8 @@ export function RunLibraryPanel({
 
       {error && <p className="gpx-upload__error">{error}</p>}
 
-      {(suggestions.vo2max.length > 0 ||
-        suggestions.durability.length > 0 ||
-        suggestions.durationSpread.length > 0) && (
-        <div className="run-library__suggestions">
-          <p className="field-group-help">
-            Suggested from the summaries above -- short, high-intensity runs are what actually constrains VO2max;
-            your longest runs are what the fatigue-fade fit (and stage 5's diagnostic) need; a few runs spanning a
-            wide duration range prep for a future joint fit (see PLAN.md §12). Uncheck any you don't want, then
-            fetch full data for the rest.
-          </p>
-          {suggestions.vo2max.length > 0 && (
-            <>
-              <p className="field-group-note">Likely hard efforts (VO2max):</p>
-              <div className="fatox-rows">
-                {suggestions.vo2max.map((run) => (
-                  <label key={run.id} className="run-library-row">
-                    <input
-                      type="checkbox"
-                      checked={!deselectedSuggestionIds.has(run.id)}
-                      onChange={() => toggleSuggestion(run.id)}
-                    />
-                    <span className="run-library-row__label">
-                      {run.name} &middot; {(run.distanceKm ?? 0).toFixed(1)} km &middot;{" "}
-                      {((run.durationS ?? 0) / 60).toFixed(0)} min
-                      {run.avgWatts ? ` · ${run.avgWatts.toFixed(0)} W avg` : ""}
-                      {!run.avgWatts && run.avgHeartRate ? ` · ${run.avgHeartRate.toFixed(0)} bpm avg` : ""}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </>
-          )}
-          {suggestions.durability.length > 0 && (
-            <>
-              <p className="field-group-note">Longest runs (durability + stage-5 diagnostic):</p>
-              <div className="fatox-rows">
-                {suggestions.durability.map((run) => (
-                  <label key={run.id} className="run-library-row">
-                    <input
-                      type="checkbox"
-                      checked={!deselectedSuggestionIds.has(run.id)}
-                      onChange={() => toggleSuggestion(run.id)}
-                    />
-                    <span className="run-library-row__label">
-                      {run.name} &middot; {(run.distanceKm ?? 0).toFixed(1)} km &middot;{" "}
-                      {((run.durationS ?? 0) / 3600).toFixed(1)} h
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </>
-          )}
-          {suggestions.durationSpread.length > 0 && (
-            <>
-              <p className="field-group-note">Duration spread (prep for a future joint f0/fInf/tau fit):</p>
-              <p className="field-group-help">
-                That fit isn't buildable yet -- it also needs a level-anchor term this app doesn't have (PLAN.md
-                §11) -- but it'll need races spanning a wide duration range once it exists, so it's worth having
-                these on hand already.
-              </p>
-              <div className="fatox-rows">
-                {suggestions.durationSpread.map((run) => (
-                  <label key={run.id} className="run-library-row">
-                    <input
-                      type="checkbox"
-                      checked={!deselectedSuggestionIds.has(run.id)}
-                      onChange={() => toggleSuggestion(run.id)}
-                    />
-                    <span className="run-library-row__label">
-                      {run.name} &middot; {(run.distanceKm ?? 0).toFixed(1)} km &middot;{" "}
-                      {((run.durationS ?? 0) / 3600).toFixed(1)} h
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </>
-          )}
-          <button
-            type="button"
-            className="fatox-add"
-            onClick={() => void fetchApprovedSuggestions()}
-            disabled={fetchingSuggestions || approvedSuggestions.length === 0}
-          >
-            {fetchingSuggestions
-              ? "Fetching…"
-              : `Fetch ${approvedSuggestions.length} approved run${approvedSuggestions.length === 1 ? "" : "s"}`}
-          </button>
-        </div>
+      {fetchingSuggestions && (
+        <p className="field-group-note">Fetching full data for recommended runs (hard efforts, longest runs, duration spread)…</p>
       )}
 
       {duplicateGroups.length > 0 && (
@@ -842,8 +755,7 @@ export function RunLibraryPanel({
 
       {fitRan && !fitResult && (
         <p className="warning">
-          Not enough moving time across the selected runs to fit a trend -- select longer recordings, or more of
-          them.
+          Not enough moving time across your stored runs to fit a trend -- add longer recordings, or more of them.
         </p>
       )}
 
@@ -854,24 +766,13 @@ export function RunLibraryPanel({
           </p>
           {fitResult.informativeRaceCount < MIN_INFORMATIVE_RACES && (
             <p className="warning">
-              Only {fitResult.informativeRaceCount} of {fitResult.perRace.length} selected runs actually constrained
-              this fit (see the unresponsive ones marked below) -- with fewer than {MIN_INFORMATIVE_RACES}, this isn't
-              really a pooled result, it's effectively one run's own pacing labeled as a fit across many. Treat this
-              tau with real caution, or select more runs of a genuinely different duration before applying it.
+              Only {fitResult.informativeRaceCount} of {fitResult.perRace.length} runs actually constrained this fit
+              (too short or too long relative to the fitted tau for their modeled ceiling to move) -- with fewer than{" "}
+              {MIN_INFORMATIVE_RACES}, this isn't really a pooled result, it's effectively one run's own pacing
+              labeled as a fit across many. Treat this tau with real caution -- more stored runs of a genuinely
+              different duration would help.
             </p>
           )}
-          <ul className="run-library__fit-notes">
-            {fitResult.perRace.map((race, i) => (
-              <li key={i} className={race.unresponsive ? "warning" : "field-group-note"}>
-                Run {i + 1}: {race.trendAtCurrentPctPerHour >= 0 ? "+" : ""}
-                {race.trendAtCurrentPctPerHour.toFixed(1)}%/hour &rarr;{" "}
-                {race.trendAtFitPctPerHour >= 0 ? "+" : ""}
-                {race.trendAtFitPctPerHour.toFixed(1)}%/hour at the fitted tau.
-                {race.unresponsive &&
-                  " This run's own duration is too short (or too long) relative to the fitted tau for its modeled ceiling to move at all -- it had no real say in this result. Consider unchecking it and re-fitting."}
-              </li>
-            ))}
-          </ul>
           <button type="button" className="fatox-add" onClick={() => onApplyTau(fitResult.tauMin)}>
             Apply tau = {fitResult.tauMin} min
           </button>
@@ -919,14 +820,14 @@ export function RunLibraryPanel({
         <div className="run-library__experimental-fit">
           <p className="field-group-note">Experimental: joint fInf/tau fit (PLAN.md §11)</p>
           <p className="field-group-help">
-            Fits fInf and tau together from the same selected runs above, holding VO2max and f0 fixed -- fixing f0 is
+            Fits fInf and tau together from the same runs above, holding VO2max and f0 fixed -- fixing f0 is
             what makes this well-posed rather than an unbounded search (verified with a synthetic recovery test, not
             just assumed). This does <strong>not</strong> independently verify VO2max or f0: fInf comes out relative
             to whatever those currently are, and absorbs error in both. Treat this as "the fit is runnable," not "fInf
             is now a trustworthy, independently-measured number."
           </p>
           <p className={fInfFitResult.durationDiversityRatio < 2 ? "warning" : "field-group-note"}>
-            Duration range across selected races: {fInfFitResult.durationDiversityRatio.toFixed(1)}x (longest ÷
+            Duration range across these races: {fInfFitResult.durationDiversityRatio.toFixed(1)}x (longest ÷
             shortest).{" "}
             {fInfFitResult.durationDiversityRatio < 2
               ? "PLAN.md recommends at least ~2x for fInf to be separable from tau -- treat this result as a rough guess, not a firm number."
@@ -938,23 +839,12 @@ export function RunLibraryPanel({
           </p>
           {fInfFitResult.informativeRaceCount < MIN_INFORMATIVE_RACES && (
             <p className="warning">
-              Only {fInfFitResult.informativeRaceCount} of {fInfFitResult.perRace.length} selected runs actually
-              constrained this fit -- with fewer than {MIN_INFORMATIVE_RACES}, "fInf {fInfFitResult.fInf.toFixed(2)},
-              tau {fInfFitResult.tauMin}min" is really just one run's own pacing, not a genuine multi-race result.
-              Select more runs of a different duration before applying either value.
+              Only {fInfFitResult.informativeRaceCount} of {fInfFitResult.perRace.length} runs actually constrained
+              this fit -- with fewer than {MIN_INFORMATIVE_RACES}, "fInf {fInfFitResult.fInf.toFixed(2)}, tau{" "}
+              {fInfFitResult.tauMin}min" is really just one run's own pacing, not a genuine multi-race result. More
+              stored runs of a different duration would help.
             </p>
           )}
-          <ul className="run-library__fit-notes">
-            {fInfFitResult.perRace.map((race, i) => (
-              <li key={i} className={race.unresponsive ? "warning" : "field-group-note"}>
-                Run {i + 1}: {race.trendAtCurrentPctPerHour >= 0 ? "+" : ""}
-                {race.trendAtCurrentPctPerHour.toFixed(1)}%/hour &rarr;{" "}
-                {race.trendAtFitPctPerHour >= 0 ? "+" : ""}
-                {race.trendAtFitPctPerHour.toFixed(1)}%/hour at the fitted (fInf, tau).
-                {race.unresponsive && " Too short (or too long) relative to the fit for its ceiling to move -- no real say in this result."}
-              </li>
-            ))}
-          </ul>
           <button type="button" className="fatox-add" onClick={() => onApplyFInf(fInfFitResult.fInf)}>
             Apply fInf = {fInfFitResult.fInf.toFixed(2)}
           </button>
@@ -1002,15 +892,6 @@ export function RunLibraryPanel({
               {MIN_INFORMATIVE_RACES}, treat this multiplier with real caution.
             </p>
           )}
-          <ul className="run-library__fit-notes">
-            {unpavedCostMultiplierFitResult.perRace.map((race, i) => (
-              <li key={i} className={race.unresponsive ? "warning" : "field-group-note"}>
-                Run {i + 1}: {race.baselineErrPct.toFixed(1)}% finish-time error with no multiplier &rarr;{" "}
-                {race.fitErrPct.toFixed(1)}% at the fitted multiplier.
-                {race.unresponsive && " No unpaved terrain on this run -- no real say in this result."}
-              </li>
-            ))}
-          </ul>
           <button
             type="button"
             className="fatox-add"
