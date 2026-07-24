@@ -145,6 +145,27 @@ describe("fitHrToEffortCalibrationAcrossRaces", () => {
     expect(result!.slope).toBeLessThan(trueSlope * 3);
     expect(result!.rSquared).toBeGreaterThan(0.3); // would be near 0 without smoothing at this noise level
   });
+
+  it("does not let numerous short races pull the calibration away from what a couple of long races show (regression test: real held-out data found the unrestricted pool under-predicts heart rate on long races by 4-10+ bpm, fixed by reusing pacingFit.ts's poolIndicesInformativeAtReference)", () => {
+    const trueSlope = 0.01;
+    const trueIntercept = -1.0;
+    const misleadingSlope = 0.03;
+    const misleadingIntercept = -3.5;
+    // Long races (>= baseParams.tauMin=250min=4.17h) carry the TRUE
+    // relationship; many short (1h) races carry a deliberately different
+    // one -- mirrors the real bug (hundreds of short training runs sitting
+    // at low effort fractions swamping a pooled fit that should reflect
+    // the athlete's genuine long-race HR-effort relationship).
+    const longRaceA = makeHrRace(5, trueSlope, trueIntercept, { targetEffortFraction: 0.55, noise: (i) => 0.1 * Math.sin(i / 3) });
+    const longRaceB = makeHrRace(6, trueSlope, trueIntercept, { targetEffortFraction: 0.6, noise: (i) => 0.1 * Math.cos(i / 4) });
+    const manyShortRaces = Array.from({ length: 100 }, (_, i) =>
+      makeHrRace(1, misleadingSlope, misleadingIntercept, { targetEffortFraction: 0.4, noise: (j) => 0.05 * Math.sin((i + j) / 2) }),
+    );
+    const result = fitHrToEffortCalibrationAcrossRaces([longRaceA, longRaceB, ...manyShortRaces], baseParams);
+    expect(result).not.toBeNull();
+    expect(result!.slope).toBeCloseTo(trueSlope, 2);
+    expect(result!.raceCount).toBe(2);
+  });
 });
 
 describe("predictEffortFractionFromHr", () => {

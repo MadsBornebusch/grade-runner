@@ -517,45 +517,57 @@ function ceilingDropFraction(race: EffortTrendPoint[], params: CeilingParams): n
 /** ceiling.ts's own DEFAULTS.tauMin -- not exported from there, so
  * restated here as the fallback reference when a caller's ceilingParams
  * doesn't set one (mirrors DEFAULT_LT2_FRACTION's own doc just below). */
-const DEFAULT_TAU_MIN_REFERENCE = 250;
+export const DEFAULT_TAU_MIN_REFERENCE = 250;
 
 /**
- * Which race indices are allowed to vote in the pooled search objective --
- * a race qualifies if its own trimmed duration is at least as long as the
- * INCOMING/reference tau (whatever's already configured or defaulted,
- * e.g. ceiling.ts's own 250min), not the tau this search is trying to
- * produce. This is the fix for a real bug found pooling 202 real
- * activities (mostly 0.5-2h training runs) with a handful of genuine
- * multi-hour races down to tau=22min (vs. this fix's ~300-400min on the
- * same real data -- see PLAN.md §14).
+ * Which race indices are long enough to genuinely inform a fit keyed to
+ * the INCOMING/reference tau (whatever's already configured or defaulted,
+ * e.g. ceiling.ts's own 250min) -- a race qualifies if its own trimmed
+ * duration is at least that long. Originally built to gate
+ * fitTauAcrossRaces/fitFInfAndTauAcrossRaces's pooled search objective
+ * (the fix for a real bug found pooling 202 real activities, mostly
+ * 0.5-2h training runs, with a handful of genuine multi-hour races down
+ * to tau=22min -- vs. this fix's ~300-400min on the same real data -- see
+ * PLAN.md §14), also reused by hrCalibration.ts's own pooled HR-to-effort
+ * fit for the same reason: races too short to reach a meaningfully
+ * fatigued effort fraction only ever sample the LOW end of the HR-effort
+ * relationship, so a calibration pooling hundreds of them extrapolates
+ * unreliably to the higher effort fractions a long race actually reaches
+ * (confirmed on real held-out long races: restricting to long-only
+ * training cut heart-rate MAE by 20-24% and nearly eliminated a
+ * systematic under-prediction bias -- see PLAN.md §14).
  *
  * An earlier version of this filter used ceilingDropFraction (the same
- * measure the post-hoc "unresponsive" report below uses) at the reference
- * params instead of a duration ratio -- rejected after real-data testing:
- * at a 250min reference, the LT2 cap only holds for the first ~40
- * minutes, so almost any race past that point shows *some* nonzero drop
- * (a 90min run already clears a 3% threshold) without lasting anywhere
- * near long enough to show the decay's actual SHAPE. A race needs to
- * *span* something comparable to the candidate time constant to
- * meaningfully inform it, not just register a small slice of a smooth
- * curve's local slope -- which is exactly what judging "at the final
- * fitted tau" (the circularity this whole function exists to avoid) was
- * doing wrong in the first place: a small enough candidate tau makes
- * almost any race look like it spans enough of the decay, regardless of
- * the race's actual duration.
+ * measure pacingFit.ts's post-hoc "unresponsive" report uses) at the
+ * reference params instead of a duration ratio -- rejected after
+ * real-data testing: at a 250min reference, the LT2 cap only holds for
+ * the first ~40 minutes, so almost any race past that point shows *some*
+ * nonzero drop (a 90min run already clears a 3% threshold) without
+ * lasting anywhere near long enough to show the decay's actual SHAPE. A
+ * race needs to *span* something comparable to the candidate time
+ * constant to meaningfully inform it, not just register a small slice of
+ * a smooth curve's local slope -- which is exactly what judging "at the
+ * final fitted tau" (the circularity this whole function exists to
+ * avoid) was doing wrong in the first place: a small enough candidate
+ * tau makes almost any race look like it spans enough of the decay,
+ * regardless of the race's actual duration.
  *
- * Falls back to every race if fewer than MIN_INFORMATIVE_RACES clear this
- * pre-filter, rather than starving the search entirely -- the existing
- * MIN_INFORMATIVE_RACES/hitSearchBoundary gates downstream
- * (fitTauFInfWithSupportGate) still catch a genuinely under-supported
- * fit. Deliberately does NOT narrow the search range itself (lo/hi stay
- * computed from every race, same as before) -- a wide range can never
- * exclude the true value; only the objective needed fixing.
+ * Falls back to every race if fewer than minInformativeRaces clear this
+ * pre-filter, rather than starving the fit entirely -- callers'
+ * downstream gates (fitTauFInfWithSupportGate's own
+ * MIN_INFORMATIVE_RACES/hitSearchBoundary checks) still catch a
+ * genuinely under-supported fit. Deliberately does NOT narrow any search
+ * range derived separately from these races -- a wide range can never
+ * exclude the true value; only which races vote needed fixing.
  */
-function poolIndicesInformativeAtReference(totalMinPerRace: number[], referenceParams: CeilingParams): number[] {
+export function poolIndicesInformativeAtReference(
+  totalMinPerRace: number[],
+  referenceParams: CeilingParams,
+  minInformativeRaces: number = MIN_INFORMATIVE_RACES,
+): number[] {
   const referenceTauMin = referenceParams.tauMin ?? DEFAULT_TAU_MIN_REFERENCE;
   const eligible = totalMinPerRace.map((d, i) => (d >= referenceTauMin ? i : -1)).filter((i) => i >= 0);
-  return eligible.length >= MIN_INFORMATIVE_RACES ? eligible : totalMinPerRace.map((_, i) => i);
+  return eligible.length >= minInformativeRaces ? eligible : totalMinPerRace.map((_, i) => i);
 }
 
 export function fitTauAcrossRaces(

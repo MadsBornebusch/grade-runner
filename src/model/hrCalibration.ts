@@ -35,7 +35,7 @@
 
 import type { CeilingParams } from "./ceiling";
 import { ceilingPower } from "./ceiling";
-import { type EffortTrendPoint, MIN_FIT_POINTS } from "./pacingFit";
+import { type EffortTrendPoint, MIN_FIT_POINTS, poolIndicesInformativeAtReference } from "./pacingFit";
 
 /** Fraction of each race's own duration considered "early enough" to trust
  * HR as an effort proxy -- PLAN.md's own cardiac-drift research puts
@@ -112,6 +112,16 @@ function effortFractionForHrPoint(p: EffortTrendPoint, smoothedPowerWPerKg: numb
  * fits). Returns null if fewer than MIN_FIT_POINTS points qualify, or if
  * pooled HR shows no variance to regress against (a flat HR reading can't
  * identify a slope).
+ *
+ * Restricted to races at least as long as the incoming reference tau (see
+ * `poolIndicesInformativeAtReference`'s own doc), falling back to every
+ * race if too few clear that bar -- a real held-out check on this
+ * athlete's own data found the unrestricted pool (dominated by short,
+ * easy training runs sitting at low effort fractions) extrapolates
+ * unreliably to the higher effort fractions a long race actually reaches,
+ * under-predicting heart rate on genuinely long races by 4-10+ bpm;
+ * restricting to long-only training cut that error by 20-24% and nearly
+ * eliminated the bias (see PLAN.md §14).
  */
 export function fitHrToEffortCalibrationAcrossRaces(
   races: EffortTrendPoint[][],
@@ -120,6 +130,9 @@ export function fitHrToEffortCalibrationAcrossRaces(
 ): HrEffortCalibration | null {
   const halfLifeDays = opts.halfLifeDays ?? DEFAULT_RECENCY_HALF_LIFE_DAYS;
   const now = opts.now ?? new Date();
+
+  const totalMinPerRace = races.map((race) => (race.length > 0 ? Math.max(...race.map((p) => p.tHours + p.dtS / 3600)) * 60 : 0));
+  const longEnoughIndices = new Set(poolIndicesInformativeAtReference(totalMinPerRace, ceilingParams));
 
   interface Sample {
     hr: number;
@@ -131,6 +144,7 @@ export function fitHrToEffortCalibrationAcrossRaces(
 
   races.forEach((race, raceIndex) => {
     if (race.length === 0) return;
+    if (!longEnoughIndices.has(raceIndex)) return;
     const raceDurationHours = Math.max(...race.map((p) => p.tHours + p.dtS / 3600));
     if (!(raceDurationHours > 0)) return;
     const earlyCutoffHours = raceDurationHours * EARLY_WINDOW_FRACTION;

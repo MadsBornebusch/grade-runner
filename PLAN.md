@@ -3089,6 +3089,67 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    genuinely SMALLER true tau — self-consistent here (317-412min,
    comfortably above 250) but not an unbiased estimator in general.
 
+   **Follow-up: improving the shipped "Estimated HR" feature.**
+   (`hrCalibration.ts`'s `fitHrToEffortCalibrationAcrossRaces`,
+   `scripts/diagnoseHrCalibration.ts`, `scripts/evaluateHrPrediction.ts`.)
+   Since the app already surfaces a per-split estimated heart rate (added
+   earlier — commit `1f35970`), and heart rate is a number athletes relate
+   to directly, this checked whether that estimate could be made more
+   accurate. Re-running the calibration's own documented real-data check
+   (R²=0.31 raw → ~0.43 smoothed) against this athlete's full 203-activity
+   library gave only R²≈0.11 — a big gap, because that documented number
+   came from 3 curated real ultras, not a library that's 90% ordinary
+   training runs. Sweeping a minimum-duration floor on the pool recovered
+   R² up to ~0.37 at a 4-8h floor (n=3 races) — the same short-run-
+   swamping shape as the tau/fInf bug above.
+
+   **R² isn't the metric that matters here, though — predicted bpm error
+   is.** Measured directly: for Ecotrail 80 and Soria Moria (leave-one-out,
+   excluding each from its own calibration), predicted heart rate per
+   30-minute bin vs. actual mean HR, before any fix:
+
+   | race | MAE | bias |
+   |---|---|---|
+   | Ecotrail 80 (8.4h) | 7.82 bpm | −4.17 bpm |
+   | Soria Moria (24.6h) | 12.60 bpm | −10.59 bpm |
+
+   Both races show a real, systematic under-prediction, growing with race
+   length. Mechanism: the pool is dominated by short, easy training runs
+   sitting at low effort fractions, so the fitted line is only really
+   anchored at the low end — predicting heart rate for a long race's much
+   higher effort fractions means extrapolating well past where the line
+   was actually constrained, in a consistent direction (under-predicting).
+
+   **Fix:** reused `pacingFit.ts`'s `poolIndicesInformativeAtReference`
+   (exported for this purpose) to restrict `fitHrToEffortCalibrationAcrossRaces`
+   to races at least as long as the incoming reference tau, same
+   fallback-to-everyone safety net as the tau/fInf fix. Verified on the
+   metric that matters, not just R²: re-running the same held-out MAE
+   check with the fix in place —
+
+   | race | MAE (fixed) | bias (fixed) |
+   |---|---|---|
+   | Ecotrail 80 | 6.09 bpm (−22%) | −0.78 bpm |
+   | Soria Moria | 9.82 bpm (−22%) | −3.52 bpm |
+
+   A real, meaningful improvement on genuinely held-out long races, not
+   just a tighter in-sample R² — confirmed before touching production
+   code, per the standing lesson that pooled-R² can look better after
+   filtering without the actual output changing (predicted HR barely
+   moved, 147-150bpm, across every floor tested in the R²-only sweep,
+   which is what raised the "is this cosmetic" question in the first
+   place). One regression test locks in the fix (many short races with a
+   deliberately different HR-effort relationship pooled alongside two
+   long races with the true one — the fit recovers the long races'
+   relationship); all 11 pre-existing tests in this file pass unchanged.
+
+   Same caveat as fInf: only 2 races ever qualify as long enough in this
+   library, so this calibration is fragile and will keep shifting as more
+   long races accumulate — and predicting a future run's absolute bpm has
+   a hard ceiling this can't remove regardless of data volume, since
+   day-to-day baseline scatter (heat, sleep, hydration) shifts heart rate
+   at a given effort independently of anything this fit can see.
+
 ### Open questions
 
 **Resolved with the user (2026-07-23):** segmentation also breaks on a
