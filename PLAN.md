@@ -3150,6 +3150,61 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    day-to-day baseline scatter (heat, sleep, hydration) shifts heart rate
    at a given effort independently of anything this fit can see.
 
+   **Follow-up: the "long races only" explanation above was wrong — a
+   lag/warm-up check found the real mechanism, and a complementary fix.**
+   (`scripts/diagnoseHrLag.ts`, `scripts/evaluateHrStartTrim.ts`.) Asked
+   directly: why require long races at all, instead of finding a better
+   lag or smoothing the signals so short races correlate too? Tested
+   both parts of that question on real data, since the original
+   "short races sit at low effort fractions" explanation turned out to
+   be checkable and wrong:
+   - Sweeping smoothing window × explicit lag offset per race found
+     short races often correlate WITHIN themselves just as well as, or
+     better than, the long ones (several short races hit r=0.65-0.83 at
+     their own best window/lag; Ecotrail only reached r=0.25, Ås
+     Backyard a bare r=0.02).
+   - Comparing the effort-fraction range each duration bucket actually
+     covers found short races reach effort fractions AS HIGH OR HIGHER
+     than long races (<1h bucket's 90th percentile was 0.99; the ≥4h
+     bucket's was only 0.75) — the opposite of the original "low effort
+     fraction" story.
+
+   **The real mechanism:** `fitHrToEffortCalibrationAcrossRaces` had no
+   start-of-race trim at all — every race's first few minutes (heart
+   rate still settling from resting toward a new steady workload, a
+   genuine physiological transient, not the same ~60-90s VO2-kinetics lag
+   the existing power smoothing already handles) were included
+   unfiltered. That's a negligible fraction of a many-hour race's usable
+   window but can dominate a short one, biasing the pooled intercept
+   toward "lower HR for a given effort" — matching the observed
+   under-prediction bias directly.
+
+   Tested head-to-head against the duration gate, on the same held-out
+   MAE metric (Ecotrail 80, Soria Moria, leave-one-out): trimming the
+   first 10-20 minutes of every race, using the FULL 202-race pool (no
+   duration gate at all), cut MAE from 8.67→7.64bpm (Ecotrail) and
+   12.95→10.14bpm (Soria Moria) — meaningful, using far more data than
+   the 2-race duration-gated fit. But it still didn't beat the duration
+   gate alone (6.87/10.34bpm on this script's own reimplementation).
+   **Combining both — the start trim on top of the duration gate — beat
+   either alone**: 6.66-6.73bpm (Ecotrail) and 9.87-9.93bpm (Soria Moria)
+   at a 15-20 minute trim. Implemented as `START_TRIM_MINUTES=15` in
+   `hrCalibration.ts`, applied alongside the existing duration gate, not
+   instead of it — the two fixes address different problems (a
+   transient at the start of every race vs. too little effort-fraction
+   coverage across the whole race in short easy efforts) and are
+   complementary, not redundant. One new regression test (mirrors the
+   existing late-drift-cutoff test, but at the start); all 412 tests in
+   the project pass.
+
+   Worth remembering: this doesn't fully resolve the "why do we even need
+   long races" question — the duration gate is still doing real,
+   separate work (confirmed by the combined result beating start-trim
+   alone) — but it's no longer explained by short races being noisier or
+   narrower-range, and the corrected mechanism (start-of-race transient)
+   is a genuinely different, useful finding the original explanation
+   missed.
+
 ### Open questions
 
 **Resolved with the user (2026-07-23):** segmentation also breaks on a

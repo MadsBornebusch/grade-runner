@@ -49,6 +49,27 @@ const EARLY_WINDOW_FRACTION = 0.65;
  * 75 is the midpoint, not independently tuned past that). */
 const POWER_SMOOTHING_WINDOW_S = 75;
 
+/**
+ * Minutes excluded from the START of every race, on top of the existing
+ * EARLY_WINDOW_FRACTION cutoff at the end -- a distinct, much longer
+ * phenomenon from POWER_SMOOTHING_WINDOW_S's ~60-90s VO2-kinetics lag:
+ * heart rate takes several minutes to fully settle to a new steady
+ * submaximal workload (a genuine physiological onset transient, not
+ * something a short trailing-mean window corrects for), and this
+ * settling-in period was previously included in every race's fit
+ * unfiltered. That barely affects a many-hour race (a negligible fraction
+ * of its usable window) but can dominate a short one -- pulling the
+ * pooled intercept toward "lower HR for a given effort" and contributing
+ * to the same real-data under-prediction bias (4-10+ bpm on long races)
+ * poolIndicesInformativeAtReference's own duration gate was built to fix.
+ * Confirmed as a genuinely separate, complementary improvement on real
+ * held-out data (Ecotrail 80, Soria Moria, leave-one-out): combining this
+ * trim with the duration gate beat either alone (see PLAN.md §14). 15-20
+ * minutes was the empirical sweet spot in that check; 15 is used here as
+ * the more conservative (less data-discarding) of the two.
+ */
+const START_TRIM_MINUTES = 15;
+
 const DEFAULT_RECENCY_HALF_LIFE_DAYS = 75;
 
 function daysAgo(date: Date, now: Date): number {
@@ -115,13 +136,20 @@ function effortFractionForHrPoint(p: EffortTrendPoint, smoothedPowerWPerKg: numb
  *
  * Restricted to races at least as long as the incoming reference tau (see
  * `poolIndicesInformativeAtReference`'s own doc), falling back to every
- * race if too few clear that bar -- a real held-out check on this
- * athlete's own data found the unrestricted pool (dominated by short,
- * easy training runs sitting at low effort fractions) extrapolates
- * unreliably to the higher effort fractions a long race actually reaches,
- * under-predicting heart rate on genuinely long races by 4-10+ bpm;
- * restricting to long-only training cut that error by 20-24% and nearly
- * eliminated the bias (see PLAN.md §14).
+ * race if too few clear that bar, and to points past START_TRIM_MINUTES
+ * into each race. A real held-out check on this athlete's own data found
+ * the unrestricted pool under-predicted heart rate on genuinely long
+ * races by 4-10+ bpm -- NOT because short races correlate worse or sit at
+ * lower effort fractions (checked directly: they don't, some short races
+ * correlate better within themselves than the long ones, and short races
+ * reach effort fractions as high or higher). The real driver looks like
+ * every race's own un-trimmed start-of-run transient (HR still settling
+ * to a new steady workload) being a much larger fraction of a short
+ * race's usable window than a long one's, biasing the pooled intercept
+ * toward "lower HR for a given effort." Restricting to long-only training
+ * alone cut that error by 20-24%; adding the start trim on top improved
+ * it further in both held-out races tested (see PLAN.md §14) -- the two
+ * fixes are complementary, not redundant.
  */
 export function fitHrToEffortCalibrationAcrossRaces(
   races: EffortTrendPoint[][],
@@ -148,11 +176,13 @@ export function fitHrToEffortCalibrationAcrossRaces(
     const raceDurationHours = Math.max(...race.map((p) => p.tHours + p.dtS / 3600));
     if (!(raceDurationHours > 0)) return;
     const earlyCutoffHours = raceDurationHours * EARLY_WINDOW_FRACTION;
+    const startCutoffHours = START_TRIM_MINUTES / 60;
     const date = opts.raceDates?.[raceIndex] ?? null;
     const recencyWeight = date ? Math.exp((-Math.LN2 * daysAgo(date, now)) / halfLifeDays) : 1;
     const smoothedPower = trailingMeanPower(race, POWER_SMOOTHING_WINDOW_S);
 
     race.forEach((p, i) => {
+      if (p.tHours < startCutoffHours) return;
       if (p.tHours >= earlyCutoffHours) return;
       const effortFraction = effortFractionForHrPoint(p, smoothedPower[i], ceilingParams);
       if (effortFraction === null) return;

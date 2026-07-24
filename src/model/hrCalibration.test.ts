@@ -109,6 +109,23 @@ describe("fitHrToEffortCalibrationAcrossRaces", () => {
     expect(result!.slope).toBeCloseTo(trueSlope, 2);
   });
 
+  it("drops points from the start-of-race trim window (warm-up transient), same discipline as the late-race drift cutoff", () => {
+    // Build a race where the FIRST ~15 minutes deliberately follow a very
+    // different (wrong) relationship, as a settling-in transient would --
+    // if the fit still recovers the rest of the race's true slope, the
+    // start-of-race trim is working.
+    const trueSlope = 0.01;
+    const trueIntercept = -1.0;
+    const race = makeHrRace(5, trueSlope, trueIntercept, { noise: (i) => 0.15 * Math.sin(i / 3) });
+    const startTrimPoints = Math.ceil(15 / 6); // 15min trim / 6min step
+    for (let i = 0; i < startTrimPoints; i++) {
+      race[i] = { ...race[i], heartRateBpm: (race[i].heartRateBpm ?? 0) - 40 }; // warm-up-depressed HR, same effort
+    }
+    const result = fitHrToEffortCalibrationAcrossRaces([race], baseParams);
+    expect(result).not.toBeNull();
+    expect(result!.slope).toBeCloseTo(trueSlope, 2);
+  });
+
   it("returns null when fewer than MIN_FIT_POINTS points have HR data", () => {
     const race = makeHrRace(0.3, 0.01, -1.0, { stepMinutes: 6 });
     expect(race.length).toBeLessThan(10);
