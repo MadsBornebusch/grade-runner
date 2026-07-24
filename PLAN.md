@@ -2861,6 +2861,74 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    pay off for modelled power, where the 180s cut already shows there's
    essentially nothing to recover.
 
+   **Follow-up: perfect/flat-pacing finish-time model, held-out
+   backtest.** (`findFlatPacedFinishTime()` in `solver.ts`,
+   `scripts/backtestFlatPacing.ts`.) Literature on sustainable effort by
+   race duration (psychobiological/central-governor pacing models,
+   Peronnet-Thibault aerobic decay timescales, measured ultra intensity as
+   a fraction of VO2max, Jeukendrup carb-oxidation ceilings matching this
+   app's own fueling defaults) supports the existing tau/f0/fInf decay
+   shape as a defensible functional form, though its specific numeric
+   defaults remain calibration values, not literature-derived ones. Given
+   that, added an alternative to the existing theta-based
+   (`findSustainableTheta`) time solver: `findFlatPacedFinishTime` assumes
+   the race is run at a single flat effort level matching the athlete's
+   own fitted tau/f0/fInf ceiling curve for the race's own duration — a
+   fixed-point solve (candidate total time T → simulate at flat effort for
+   T → does the resulting actual duration equal T?), coarse-scanned then
+   bisected, seeded off `findSustainableTheta`'s own estimate. Explicitly
+   NOT a replacement for the existing model — Plan B's standing
+   constraint — evaluated as a candidate addition only if the backtest
+   supports it.
+
+   Backtested against `findSustainableTheta` with `backtestSurfaceMultiplier.ts`'s
+   same k-fold discipline: per fold, fit `ceilingParams` via
+   `fitTauFInfWithSupportGate` on the training pool (target held out), run
+   both models against the SAME fitted params, compare each to the
+   target's own actual finish time. Two runs, calibrated physiology
+   (VO2max=54, bodyMassKg=85):
+
+   - **Default (evenly-spaced-by-index) target selection, 17/17 folds
+     completed** — all folds happened to land under 2.4h (this sampling
+     draws heavily from the numerically-dominant short training runs).
+     Overall mean signed error: theta −27.43%, flat −24.77%. Flat-paced
+     improved on theta in every one of the 17 folds, by 0.00-4.10
+     percentage points — small but completely one-directional.
+   - **`--targetSelection=longest` (sorts by actual finish time
+     descending, takes the top 20), 20/20 folds attempted, 17 feasible for
+     both models** — durations spanned 2.18h-24.55h in the candidate
+     pool, but the 3 infeasible folds were exactly the longest ones (the
+     model bonks/stalls under held-out-fitted ceiling params before
+     finishing), so the folds that actually completed still topped out at
+     4.3h — one bucket above the previous run, still well short of the
+     theorized 2-4×tau peak (tau≈4.2h, so 8.4-16.8h). Overall: theta
+     −26.19%, flat −24.52% (n=17). By bucket: 2-4h (n=16) theta −25.63%
+     vs flat −23.94%; 4-8h (n=1, not meaningful alone) theta −35.10% vs
+     flat −33.82%. By whether the old model was aerobically- vs
+     fuel-limited: aerobically-limited (n=16) theta −29.80% vs flat
+     −28.08%; the single fuel-limited fold moved the OPPOSITE direction
+     (theta +31.64% vs flat +32.36%, flat slightly worse) — exactly the
+     failure mode flagged as a real possibility before this was built,
+     though n=1 is nowhere near enough to act on.
+
+   **Read honestly: a real, consistent, but small (~1.3-1.9 percentage
+   point) improvement across every duration bucket reached so far, NOT
+   yet a test of the theory's actual core prediction** (that the
+   correction should be small at short durations and grow materially in
+   the multi-hour ultra range). Both backtest runs are stuck in the same
+   place for the same reason: the truly long runs in this athlete's own
+   library are infeasible for BOTH models once ceilingParams come from a
+   training pool that excludes them — the fitted tau/fInf curve without
+   the target's own data apparently can't sustain a finish at all for the
+   longest efforts. That's a real data/model limitation, not a bug to
+   route around by picking different folds. Until that's resolved (e.g. a
+   looser feasibility fallback for backtesting purposes only, or simply
+   accepting the multi-hour range may never be testable against this
+   particular athlete's own held-out data), this backtest can only speak
+   to short-to-mid-duration folds, where the flat-pacing correction reads
+   as a small, one-directional nudge rather than a duration-shaped effect
+   — consistent with, but not yet confirming, the underlying theory.
+
 ### Open questions
 
 **Resolved with the user (2026-07-23):** segmentation also breaks on a
