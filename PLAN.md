@@ -2816,6 +2816,51 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    which is the actual case for using pulse as an intensity term, not
    confirmation that modelled power was circular all along.
 
+   **Follow-up: is the near-zero modelled-power number an artifact of HR
+   lag, or real decoupling?** The previous paragraph flagged the absolute
+   near-zero as a lower bound contaminated by lack of smoothing/lag
+   correction. Cheapest way to check before building any smoothing
+   machinery: restrict the same fit to long segments only (`timeS ≥
+   180s`), where HR lag (~20-45s) contaminates a much smaller fraction of
+   the segment's own average. If the near-zero was mostly a lag artifact,
+   long segments should recover materially more R². If it doesn't move,
+   the decoupling is real.
+
+   Result, same 203-activity library, 1134/8824 segments (854/6400
+   running segments, 159/203 runs) survive the 180s floor — a real
+   survivor count, not noise:
+
+   | basis | full library R² | long-segments-only R² |
+   |---|---|---|
+   | modelled power | 0.0072 | 0.0010 |
+   | measured power | 0.1886 | 0.3632 |
+
+   **The two arms diverge sharply.** Modelled power doesn't move — if
+   anything it's slightly lower, both numbers indistinguishable from
+   noise. Restricting to segments long enough that lag can only
+   contaminate a small fraction of the average recovers nothing, which is
+   the signature of genuine decoupling, not an artifact fixable by
+   smoothing or lag-correction: grade-adjusted pace essentially doesn't
+   predict this athlete's within-run HR variation, at any segment length
+   tested. This is a meaningful, load-bearing result for the project's
+   architecture — it's the empirical case for treating pulse as carrying
+   information pace-derived power doesn't, which is what justifies
+   Stage 7 treating them as separate intensity arms rather than
+   redundant ones.
+
+   Measured power moves a lot — R² very nearly doubles. That's the
+   signature of real, lag/short-segment-attenuated signal: the
+   relationship exists and is partially masked at full-library
+   granularity by segments too short for HR to have caught up. If there's
+   a reason to want a tighter power-pulse relationship later (e.g. as a
+   cross-check on a device's own power reading, or a calibration input),
+   this is where an explicit lag/smoothing correction — adapting
+   `hrCalibration.ts`'s own `trailingMeanPower()` pattern to per-point
+   data before segment aggregation — would likely pay off further, since a
+   naive duration floor alone already recovered this much. It would not
+   pay off for modelled power, where the 180s cut already shows there's
+   essentially nothing to recover.
+
 ### Open questions
 
 **Resolved with the user (2026-07-23):** segmentation also breaks on a

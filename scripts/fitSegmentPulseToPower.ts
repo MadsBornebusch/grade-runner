@@ -6,7 +6,16 @@
 // they used pulse and power as separate, parallel predictors of pace.
 //
 // Usage:
-//   npx tsx scripts/fitSegmentPulseToPower.ts [--bodyMassKg=70] [--maxActivities=250]
+//   npx tsx scripts/fitSegmentPulseToPower.ts [--bodyMassKg=70] [--maxActivities=250] [--minDurationS=180]
+//
+// Also runs a long-segment-only cut (timeS >= minDurationS) as a diagnostic:
+// HR lag (~20-45s VO2/cardiac response) contaminates a short segment's whole
+// average far more than a long one's, so if the near-zero modelled-power R^2
+// found on the full library is mostly a lag artifact, restricting to long
+// segments should recover a materially higher R^2. If it doesn't move, that's
+// evidence the decoupling is real rather than an artifact of unsmoothed,
+// unlagged power -- see PLAN.md §14 before building any smoothing/lag-
+// correction machinery on the strength of the full-library number alone.
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -18,6 +27,7 @@ import { arg } from "./stravaScriptHelpers.ts";
 
 const BODY_MASS_KG = parseFloat(arg("bodyMassKg", "70"));
 const MAX_ACTIVITIES = parseInt(arg("maxActivities", "250"), 10);
+const MIN_DURATION_S = parseFloat(arg("minDurationS", "180"));
 
 const CACHE_DIR = fileURLToPath(new URL("../.strava-cache/", import.meta.url));
 const SURFACE_CACHE_DIR = fileURLToPath(new URL("../.surface-cache/", import.meta.url));
@@ -55,8 +65,22 @@ function main() {
   const library = buildSegmentLibrary(runs, { bodyMassKg: BODY_MASS_KG });
   console.log(`Segment library: ${library.length} monotonic segments across ${runs.length} runs\n`);
 
+  console.log(`-- Full library --`);
   for (const basis of ["modelled", "measured"] as const) {
     const result = fitSegmentPulseToPower(library, basis);
+    if (!result) {
+      console.log(`${basis} power -- no usable fit`);
+      continue;
+    }
+    console.log(
+      `${basis.padEnd(10)} power: runs=${result.runCount} segments=${result.segmentCount} slope=${result.slope.toFixed(3)} bpm per W/kg  within-run R^2=${result.rSquaredWithinRun.toFixed(4)}`,
+    );
+  }
+
+  const longLibrary = library.filter((s) => s.timeS >= MIN_DURATION_S);
+  console.log(`\n-- Long segments only (timeS >= ${MIN_DURATION_S}s): ${longLibrary.length} / ${library.length} segments survive --`);
+  for (const basis of ["modelled", "measured"] as const) {
+    const result = fitSegmentPulseToPower(longLibrary, basis);
     if (!result) {
       console.log(`${basis} power -- no usable fit`);
       continue;
@@ -70,7 +94,9 @@ function main() {
     "\nRead: this is a WITHIN-RUN (own-run baseline removed), monotonic-segment-granularity fit -- a\n" +
       "different design from hrCalibration.ts's own pooled, trailing-smoothed, early-window-restricted\n" +
       "whole-race fit (that module's own real-data check: R^2 0.31 raw -> ~0.43 with ~75s smoothing). Compare\n" +
-      "this R^2 to that range as context, not as a like-for-like replication.",
+      "this R^2 to that range as context, not as a like-for-like replication.\n" +
+      "The long-segment cut is a diagnostic for whether the full-library number is a lag artifact or real\n" +
+      "decoupling -- if it barely moves despite a real survivor count, the near-zero is probably genuine.",
   );
 }
 
