@@ -49,8 +49,20 @@
 // filtered from the shared pool, so this stays O(N) pipeline runs instead
 // of O(N^2).
 //
+// --surfaceFitBasis (default "logGap") selects which fit produces the
+// per-category surfaceCostMultipliers each fold: "logGap" is Stage 5's
+// original jointSlowdownFit.ts (grade-adjusted pace, effort left implicit
+// via the within-run fixed effect); "pulse" is Stage 7's
+// intensityConditionedSlowdownFit.ts with heart rate as the explicit
+// intensity term (PLAN.md §14 stage 7 -- the version that survives
+// conditioning on effort instead of assuming it constant). Both produce
+// the same shape of per-category log-speed coefficient, converted to a
+// solver.ts cost multiplier identically (see the conversion below) -- this
+// flag only changes which upstream fit generated the number, not how it's
+// consumed, so this is a fair like-for-like swap through the same arbiter.
+//
 // Usage:
-//   npx tsx scripts/backtestSurfaceMultiplier.ts [--bodyMassKg=70] [--vo2Max=50] [--maxActivities=250] [--maxFolds=20] [--raceOnly=true]
+//   npx tsx scripts/backtestSurfaceMultiplier.ts [--bodyMassKg=70] [--vo2Max=50] [--maxActivities=250] [--maxFolds=20] [--raceOnly=true] [--surfaceFitBasis=logGap|pulse]
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -60,11 +72,15 @@ import type { CeilingParams } from "../src/model/ceiling.ts";
 import { attachSurfaceData, type ValhallaSurfaceEdge } from "../src/model/surfaceExposure.ts";
 import { buildSegmentLibrary, type TaggedMonotonicSegment } from "../src/model/segmentLibrary.ts";
 import { fitJointSlowdownModel } from "../src/model/jointSlowdownFit.ts";
+import { fitIntensityConditionedSlowdownModel } from "../src/model/intensityConditionedSlowdownFit.ts";
 import { buildEffortTrendPoints, fitTauFInfWithSupportGate, type EffortTrendPoint } from "../src/model/pacingFit.ts";
 import { findSustainableTheta, type SolverInputs } from "../src/model/solver.ts";
 import { buildWithinRaceDiagnosticPoint } from "../src/model/withinRaceDescentDiagnostic.ts";
 import { DEFAULT_FORM_INPUTS, resolveCeilingParams, resolveGlycogenStoreG } from "../src/ui/formInputs.ts";
 import { arg } from "./stravaScriptHelpers.ts";
+
+type SurfaceFitBasis = "logGap" | "pulse";
+const SURFACE_FIT_BASIS = arg("surfaceFitBasis", "logGap") as SurfaceFitBasis;
 
 const BODY_MASS_KG = parseFloat(arg("bodyMassKg", "70"));
 // DEFAULT_FORM_INPUTS.vo2MaxHistory's own generic 50 -- fitTauFInfWithSupportGate
@@ -211,7 +227,7 @@ function main() {
   // matter" from "does any slowdown help this uniformly-biased population."
   const candidates: CandidateAgg[] = [
     { name: "baseline (no surface term)", mode: "none", absPctErrors: [], signedPctErrors: [], foldsSkipped: 0 },
-    { name: "baseline + fitted per-category surface", mode: "perCategory", absPctErrors: [], signedPctErrors: [], foldsSkipped: 0 },
+    { name: `baseline + fitted per-category surface (${SURFACE_FIT_BASIS})`, mode: "perCategory", absPctErrors: [], signedPctErrors: [], foldsSkipped: 0 },
     { name: "baseline + surface-blind uniform multiplier (control)", mode: "uniformBlind", absPctErrors: [], signedPctErrors: [], foldsSkipped: 0 },
   ];
 
@@ -246,19 +262,23 @@ function main() {
 
     const trainingLibrary = library.filter((s) => s.runId !== target.id);
 
-    const surfaceFit = fitJointSlowdownModel(trainingLibrary, { aerobicClockBasis: "elapsedHours", impactBasis: "descentMeters" });
+    // Both fits' surface columns are log-speed shifts relative to paved at
+    // fixed grade/clock/impact (and, for the pulse basis, fixed intensity
+    // too) -- same conversion to a solver.ts cost multiplier either way:
+    // multiplier = exp(-coefficient), since terrainMultiplier divides speed
+    // for a fixed target power (see jointSlowdownFit.ts's own doc).
+    const NON_SURFACE_COLUMNS = new Set(["grade", "gradeSquared", "aerobicClock", "impact", "intensity"]);
+    const surfaceFit =
+      SURFACE_FIT_BASIS === "pulse"
+        ? fitIntensityConditionedSlowdownModel(trainingLibrary, { intensityBasis: "pulse", aerobicClockBasis: "elapsedHours", impactBasis: "descentMeters" })
+        : fitJointSlowdownModel(trainingLibrary, { aerobicClockBasis: "elapsedHours", impactBasis: "descentMeters" });
     const t2 = Date.now();
     process.stderr.write(`tauFit=${t1 - t0}ms surfaceFit=${t2 - t1}ms `);
-    // Converts jointSlowdownFit.ts's log-GAP surface coefficients into
-    // solver.ts-style cost multipliers: log(speed) shifts by `coefficient`
-    // relative to paved at fixed grade/clock/impact (see
-    // jointSlowdownFit.ts's own doc), and solver.ts's terrainMultiplier
-    // divides speed for a fixed target power, so multiplier = exp(-coefficient).
     const surfaceCostMultipliers: Record<string, number> = {};
     if (surfaceFit) {
       for (let i = 0; i < surfaceFit.columns.length; i++) {
         const col = surfaceFit.columns[i];
-        if (col === "grade" || col === "gradeSquared" || col === "aerobicClock" || col === "impact") continue;
+        if (NON_SURFACE_COLUMNS.has(col)) continue;
         surfaceCostMultipliers[col] = Math.exp(-surfaceFit.coefficients[i]);
       }
     }
