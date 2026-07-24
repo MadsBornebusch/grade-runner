@@ -199,6 +199,21 @@ describe("fitTauAcrossRaces", () => {
     expect(result!.tauMin).toBeGreaterThan(1500);
   });
 
+  it("does not let numerous short races swamp the fit away from a few long races' true tau (regression test: 200 real short training runs pooled with 2-3 real ultras collapsed this to tau=22min before this fix)", () => {
+    const trueTau = 300;
+    const longRaceA = makeConstantEffortPoints({ ...baseParams, tauMin: trueTau }, 8);
+    const longRaceB = makeConstantEffortPoints({ ...baseParams, tauMin: trueTau }, 13);
+    // Many short (1h) races, each perfectly flat at a tiny tau=15 -- same
+    // shape as the real bug (100+ short training runs each attracting a
+    // trivially-small tau), just exaggerated for a clean synthetic signal.
+    const manyShortRaces = Array.from({ length: 150 }, () => makeConstantEffortPoints({ ...baseParams, tauMin: 15 }, 1));
+    const result = fitTauAcrossRaces([longRaceA, longRaceB, ...manyShortRaces], { ...baseParams, tauMin: 250 });
+    expect(result).not.toBeNull();
+    expect(result!.tauMin).toBeGreaterThan(200);
+    expect(result!.tauMin).toBeLessThan(400);
+    expect(result!.informativeRaceCount).toBe(2);
+  });
+
   describe("recency weighting", () => {
     const recentTau = 150;
     const staleTau = 600;
@@ -365,6 +380,18 @@ describe("fitFInfAndTauAcrossRaces", () => {
     expect(result!.perRace[0].unresponsive).toBe(true); // the 1h race can't leave the cap at tau~300
     expect(result!.informativeRaceCount).toBe(result!.perRace.filter((r) => !r.unresponsive).length);
     expect(result!.informativeRaceCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it("does not let numerous short races swamp the joint fit away from a few long races' true (fInf, tau) -- same regression as fitTauAcrossRaces' own version", () => {
+    const longRaceA = makeConstantEffortPoints(trueParams, 8);
+    const longRaceB = makeConstantEffortPoints(trueParams, 13);
+    const manyShortRaces = Array.from({ length: 150 }, () => makeConstantEffortPoints({ ...trueParams, fInf: 0.85, tauMin: 15 }, 1));
+    const result = fitFInfAndTauAcrossRaces([longRaceA, longRaceB, ...manyShortRaces], { ...trueParams, tauMin: 250 });
+    expect(result).not.toBeNull();
+    expect(result!.tauMin).toBeGreaterThan(250);
+    expect(result!.tauMin).toBeLessThan(350);
+    expect(result!.fInf).toBeCloseTo(0.55, 1);
+    expect(result!.informativeRaceCount).toBe(2);
   });
 });
 

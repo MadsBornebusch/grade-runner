@@ -500,6 +500,64 @@ function daysAgo(date: Date, now: Date): number {
  * than," so a recency weight there would just scale the whole objective by
  * a constant and never move the optimum.
  */
+/**
+ * Ceiling movement across a race's own trimmed window at a given set of
+ * ceilingParams -- shared by the per-race "unresponsive" report (evaluated
+ * at the FITTED params, after the search) and the pre-search pool filter
+ * below (evaluated at the INCOMING/reference params, before any fitting).
+ */
+function ceilingDropFraction(race: EffortTrendPoint[], params: CeilingParams): number {
+  const start = race[0];
+  const end = race[race.length - 1];
+  const ceilStart = ceilingPower({ tMin: start.tHours * 60, altitudeM: start.altitudeM, elapsedHours: start.tHours }, params);
+  const ceilEnd = ceilingPower({ tMin: end.tHours * 60, altitudeM: end.altitudeM, elapsedHours: end.tHours }, params);
+  return ceilStart > 0 ? (ceilStart - ceilEnd) / ceilStart : 0;
+}
+
+/** ceiling.ts's own DEFAULTS.tauMin -- not exported from there, so
+ * restated here as the fallback reference when a caller's ceilingParams
+ * doesn't set one (mirrors DEFAULT_LT2_FRACTION's own doc just below). */
+const DEFAULT_TAU_MIN_REFERENCE = 250;
+
+/**
+ * Which race indices are allowed to vote in the pooled search objective --
+ * a race qualifies if its own trimmed duration is at least as long as the
+ * INCOMING/reference tau (whatever's already configured or defaulted,
+ * e.g. ceiling.ts's own 250min), not the tau this search is trying to
+ * produce. This is the fix for a real bug found pooling 202 real
+ * activities (mostly 0.5-2h training runs) with a handful of genuine
+ * multi-hour races down to tau=22min (vs. this fix's ~300-400min on the
+ * same real data -- see PLAN.md §14).
+ *
+ * An earlier version of this filter used ceilingDropFraction (the same
+ * measure the post-hoc "unresponsive" report below uses) at the reference
+ * params instead of a duration ratio -- rejected after real-data testing:
+ * at a 250min reference, the LT2 cap only holds for the first ~40
+ * minutes, so almost any race past that point shows *some* nonzero drop
+ * (a 90min run already clears a 3% threshold) without lasting anywhere
+ * near long enough to show the decay's actual SHAPE. A race needs to
+ * *span* something comparable to the candidate time constant to
+ * meaningfully inform it, not just register a small slice of a smooth
+ * curve's local slope -- which is exactly what judging "at the final
+ * fitted tau" (the circularity this whole function exists to avoid) was
+ * doing wrong in the first place: a small enough candidate tau makes
+ * almost any race look like it spans enough of the decay, regardless of
+ * the race's actual duration.
+ *
+ * Falls back to every race if fewer than MIN_INFORMATIVE_RACES clear this
+ * pre-filter, rather than starving the search entirely -- the existing
+ * MIN_INFORMATIVE_RACES/hitSearchBoundary gates downstream
+ * (fitTauFInfWithSupportGate) still catch a genuinely under-supported
+ * fit. Deliberately does NOT narrow the search range itself (lo/hi stay
+ * computed from every race, same as before) -- a wide range can never
+ * exclude the true value; only the objective needed fixing.
+ */
+function poolIndicesInformativeAtReference(totalMinPerRace: number[], referenceParams: CeilingParams): number[] {
+  const referenceTauMin = referenceParams.tauMin ?? DEFAULT_TAU_MIN_REFERENCE;
+  const eligible = totalMinPerRace.map((d, i) => (d >= referenceTauMin ? i : -1)).filter((i) => i >= 0);
+  return eligible.length >= MIN_INFORMATIVE_RACES ? eligible : totalMinPerRace.map((_, i) => i);
+}
+
 export function fitTauAcrossRaces(
   races: EffortTrendPoint[][],
   ceilingParams: CeilingParams,
@@ -529,9 +587,11 @@ export function fitTauAcrossRaces(
   const lo = Math.max(20, Math.min(...totalMinPerRace) * 0.3);
   const hi = Math.min(ABSOLUTE_MAX_TAU_MIN, Math.max(...totalMinPerRace) * 2.5);
 
+  const poolIndices = poolIndicesInformativeAtReference(totalMinPerRace, ceilingParams);
+
   const pooledSquaredSlope = (tau: number) => {
     let sum = 0;
-    for (let i = 0; i < trimmed.length; i++) {
+    for (const i of poolIndices) {
       const trend = computeFadeTrend(trimmed[i], { ...ceilingParams, tauMin: tau });
       if (!trend) return Infinity;
       sum += recencyWeights[i] * trend.slopePerHour ** 2;
@@ -545,22 +605,10 @@ export function fitTauAcrossRaces(
 
   const hitSearchBoundary = tauMin <= lo + 1 ? "lower" : tauMin >= hi - 1 ? "upper" : null;
 
-  // Measures the saturation mechanism directly, at the fitted tau, on each
-  // race's own window -- rather than inferring it from how much the slope
-  // moves (which can look "responsive" far from tauMin while still being
-  // completely flat right where the search landed).
-  const ceilingDropFraction = (race: EffortTrendPoint[]) => {
-    const start = race[0];
-    const end = race[race.length - 1];
-    const ceilStart = ceilingPower({ tMin: start.tHours * 60, altitudeM: start.altitudeM, elapsedHours: start.tHours }, { ...ceilingParams, tauMin });
-    const ceilEnd = ceilingPower({ tMin: end.tHours * 60, altitudeM: end.altitudeM, elapsedHours: end.tHours }, { ...ceilingParams, tauMin });
-    return ceilStart > 0 ? (ceilStart - ceilEnd) / ceilStart : 0;
-  };
-
   const perRace = currentTrends.map((current, i) => ({
     trendAtCurrentPctPerHour: current!.slopePerHour * 100,
     trendAtFitPctPerHour: fittedTrends[i]!.slopePerHour * 100,
-    unresponsive: ceilingDropFraction(trimmed[i]) < MIN_CEILING_DROP_FRACTION,
+    unresponsive: ceilingDropFraction(trimmed[i], { ...ceilingParams, tauMin }) < MIN_CEILING_DROP_FRACTION,
   }));
 
   return {
@@ -660,9 +708,11 @@ export function fitFInfAndTauAcrossRaces(
   const fInfLo = MIN_FINF;
   const fInfHi = Math.max(fInfLo + 0.01, lt2Fraction - FINF_UPPER_MARGIN);
 
+  const poolIndices = poolIndicesInformativeAtReference(totalMinPerRace, ceilingParams);
+
   const pooledSquaredSlope = (fInf: number, tau: number) => {
     let sum = 0;
-    for (let i = 0; i < trimmed.length; i++) {
+    for (const i of poolIndices) {
       const trend = computeFadeTrend(trimmed[i], { ...ceilingParams, fInf, tauMin: tau });
       if (!trend) return Infinity;
       sum += recencyWeights[i] * trend.slopePerHour ** 2;
@@ -699,21 +749,10 @@ export function fitFInfAndTauAcrossRaces(
   const fittedTrends = trimmed.map((r) => computeFadeTrend(r, { ...ceilingParams, fInf, tauMin }));
   if (fittedTrends.some((t) => !t)) return null;
 
-  // Same saturation-at-the-fitted-params measurement fitTauAcrossRaces uses
-  // for its own unresponsive flag, just at (fInf, tau) instead of tau alone.
-  const ceilingDropFraction = (race: EffortTrendPoint[]) => {
-    const start = race[0];
-    const end = race[race.length - 1];
-    const params = { ...ceilingParams, fInf, tauMin };
-    const ceilStart = ceilingPower({ tMin: start.tHours * 60, altitudeM: start.altitudeM, elapsedHours: start.tHours }, params);
-    const ceilEnd = ceilingPower({ tMin: end.tHours * 60, altitudeM: end.altitudeM, elapsedHours: end.tHours }, params);
-    return ceilStart > 0 ? (ceilStart - ceilEnd) / ceilStart : 0;
-  };
-
   const perRace = currentTrends.map((current, i) => ({
     trendAtCurrentPctPerHour: current!.slopePerHour * 100,
     trendAtFitPctPerHour: fittedTrends[i]!.slopePerHour * 100,
-    unresponsive: ceilingDropFraction(trimmed[i]) < MIN_CEILING_DROP_FRACTION,
+    unresponsive: ceilingDropFraction(trimmed[i], { ...ceilingParams, fInf, tauMin }) < MIN_CEILING_DROP_FRACTION,
   }));
 
   return {
