@@ -156,6 +156,19 @@ function FatOxRow({ point, speedUnit, rateUnit, onChange, onRemove }: FatOxRowPr
         aria-label={`Carb oxidation, ${RATE_UNIT_LABELS[rateUnit]}`}
       />
       <span className="fatox-row__unit">{RATE_UNIT_LABELS[rateUnit]} carb</span>
+      <input
+        type="number"
+        step={1}
+        min={0}
+        placeholder="HR"
+        value={point.heartRateBpm ?? ""}
+        onChange={(e) => {
+          const raw = e.target.value;
+          onChange({ heartRateBpm: raw === "" ? undefined : Number(raw) });
+        }}
+        aria-label="Heart rate at this stage, bpm (optional -- lets this point feed the HR calibration)"
+      />
+      <span className="fatox-row__unit">bpm</span>
       <button type="button" className="fatox-row__remove" onClick={onRemove} aria-label="Remove point">
         &times;
       </button>

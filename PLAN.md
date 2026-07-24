@@ -3241,6 +3241,57 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    expected to be worse than it would be with more long races anchoring
    the fit.
 
+   **Follow-up: a lab-derived HR calibration, from LT1/LT2 and fat-ox
+   thresholds instead of pooled training-run data.** (`hrCalibration.ts`'s
+   `fitHrToEffortCalibrationFromThresholds`, wired into `RunLibraryPanel.tsx`.)
+   Prompted by the user asking directly why this needs long races at all,
+   given the app already captures `lt1HeartRateBpm`/`lt2HeartRateBpm` (until
+   now reference-only, never fed into any calculation) alongside
+   `lt1Fraction`/`lt2Fraction`. Those fractions are already expressed in the
+   exact %VO2max units `sustainableFraction()` operates in, so converting
+   them to the same effortFraction the HR calibration regresses against
+   needs no Minetti pace conversion, no altitude adjustment, no terrain/GPS
+   noise at all — none of the machinery (duration gates, start trims, lag
+   sweeps) the rest of this investigation needed: `effortFraction =
+   labFraction / sustainableFraction(0, ceilingParams)`. LT2's own
+   effortFraction comes out to exactly 1.0 whenever the entered lt2Fraction
+   matches `ceilingParams.lt2Fraction` — not a coincidence, a direct
+   consequence of LT2 already being defined elsewhere as the ceiling's own
+   fresh/undecayed cap.
+
+   Also added an optional `heartRateBpm` field to `FatOxPoint` (previously
+   `{paceMinPerKm, fatGPerMin, carbGPerMin}` only) so a fat-ox/metabolic-cart
+   test's own recorded heart rate — if the athlete has it — can contribute
+   more anchor points beyond just LT1/LT2's two. Fat-ox points need one extra
+   conversion step (pace → gross power via the same Minetti curve the rest
+   of the app uses, then power → %VO2max via `maxAerobicPower`) since
+   they're recorded in pace/oxidation-rate terms, reintroducing some Minetti
+   uncertainty LT1/LT2 avoid — still a controlled lab measurement, not
+   real-world GPS data.
+
+   With exactly 2 points (LT1+LT2 only), the fitted line passes through both
+   exactly by construction — R² reads 1.0, which is a property of having
+   only 2 points, not a confident fit; the UI explicitly calls this out
+   rather than displaying a misleadingly perfect-looking R².
+
+   **Shown as a genuinely separate, parallel calibration in
+   `RunLibraryPanel.tsx`'s Settings UI**, not merged into or replacing the
+   existing training-history-pooled one — each with its own "Apply" button,
+   so the athlete chooses which (if either) actually drives the app's
+   `estimatedHeartRateBpm`. Per the user's request to make the difference
+   between the two visible: a "Derived vs. entered heart rate" block shows,
+   for each LT1/LT2 anchor with an entered heart rate, what the
+   training-history calibration itself predicts at that same effort
+   fraction, alongside the entered value and their delta — a direct,
+   concrete check of whether training data and lab thresholds agree, using
+   both fitting mechanisms as cross-validation against each other rather
+   than picking one and hiding the other. Five new tests (for the new
+   fitting function, exercising the exact-2-point case, fat-ox inclusion/
+   exclusion by presence of heart rate, and the null "too few points"
+   cases); all 417 project tests pass. Not yet verified in a real browser —
+   no browser-automation tool was available this session, so this is
+   type-checked and unit-tested but not visually confirmed end-to-end.
+
 ### Open questions
 
 **Resolved with the user (2026-07-23):** segmentation also breaks on a

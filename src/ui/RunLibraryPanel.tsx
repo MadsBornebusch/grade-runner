@@ -21,7 +21,13 @@ import { DURABILITY_MIN_DURATION_S, suggestRunsForFit } from "../model/suggestRu
 import { dedupeStoredRuns } from "../model/dedupeRuns";
 import { attachSurfaceData } from "../model/surfaceExposure";
 import { splitAtTransitGaps } from "../gpx/transitGap";
-import { fitHrToEffortCalibrationAcrossRaces, type HrEffortCalibration } from "../model/hrCalibration";
+import {
+  fitHrToEffortCalibrationAcrossRaces,
+  fitHrToEffortCalibrationFromThresholds,
+  predictHeartRateFromEffortFraction,
+  type HrEffortCalibration,
+} from "../model/hrCalibration";
+import { sustainableFraction } from "../model/ceiling";
 import { filterRunsSinceDate, shouldFetchNextBackfillPage, toStoredRunSummaryInput, type BackfillPage } from "../model/stravaBackfill";
 import { computeTauDiagnostic, type RaceDiagnosticPoint } from "../model/tauDiagnostic";
 import { buildRaceDiagnosticPoint } from "../model/raceDiagnosticPoint";
@@ -41,7 +47,7 @@ import {
   upsertStoredRunSummary,
   type StoredRun,
 } from "../storage/runLibrary";
-import { resolveCeilingParams, resolveGlycogenStoreG, type FormInputs, type Vo2MaxEntry } from "./formInputs";
+import { resolveCeilingParams, resolveGlycogenStoreG, resolveLt1Lt2Fractions, type FormInputs, type Vo2MaxEntry } from "./formInputs";
 import { StravaImport } from "./StravaImport";
 import { fetchStravaActivity } from "./stravaClient";
 import { fetchSurfaceEdges } from "./surfaceLookup";
@@ -281,6 +287,37 @@ export function RunLibraryPanel({
   }, [backfillFrom, refresh]);
 
   const ceilingParams = resolveCeilingParams(formInputs);
+
+  // Lab-derived HR calibration -- from the athlete's own entered LT1/LT2
+  // heart rate and (optionally) fat-ox-curve heart rate, not from any
+  // imported training runs. Needs no fitting/import step, so this is
+  // computed eagerly from formInputs alone; the training-history calibration
+  // below still requires runs to have been fitted.
+  const thresholdHrCalibrationFitResult = useMemo(() => {
+    const { lt1Fraction, lt2Fraction } = resolveLt1Lt2Fractions(formInputs);
+    return fitHrToEffortCalibrationFromThresholds(
+      {
+        lt1Fraction,
+        lt2Fraction,
+        lt1HeartRateBpm: formInputs.lt1HeartRateBpm,
+        lt2HeartRateBpm: formInputs.lt2HeartRateBpm,
+        fatOxPoints: formInputs.fatOxPoints,
+        walkMaxMs: formInputs.walkMaxMs,
+      },
+      ceilingParams,
+    );
+  }, [
+    formInputs.lt1Fraction,
+    formInputs.lt2Fraction,
+    formInputs.lt1PaceMinPerKm,
+    formInputs.lt2PaceMinPerKm,
+    formInputs.lt1HeartRateBpm,
+    formInputs.lt2HeartRateBpm,
+    formInputs.fatOxPoints,
+    formInputs.walkMaxMs,
+    formInputs.vo2MaxHistory,
+    ceilingParams,
+  ]);
 
   // PLAN.md §12 stage 4 / §13: does descent load (or generic intensity)
   // actually predict this athlete's own tau? Only races with full points
@@ -997,7 +1034,7 @@ export function RunLibraryPanel({
 
       {hrCalibrationFitResult && (
         <div className="run-library__experimental-fit">
-          <p className="field-group-note">HR-effort calibration (PLAN.md §11)</p>
+          <p className="field-group-note">HR-effort calibration -- from your training history (PLAN.md §11)</p>
           <p className="field-group-help">
             A per-athlete mapping from heart rate to effort fraction, fit from the early (roughly first 65%) portion
             of each race where cardiac drift is smallest -- HR climbing at constant true output from rising core
@@ -1029,6 +1066,76 @@ export function RunLibraryPanel({
             {hrCalibrationFitResult.rSquared >= MIN_HR_CALIBRATION_R_SQUARED
               ? "Applied automatically -- R² cleared the bar for trusting HR as an effort proxy for this athlete."
               : "Not applied automatically -- see the note above; you can still apply it manually if you trust it."}
+          </p>
+        </div>
+      )}
+
+      {hrCalibrationFitResult &&
+        (() => {
+          const referenceCeilingFraction = sustainableFraction(0, ceilingParams);
+          const { lt1Fraction, lt2Fraction } = resolveLt1Lt2Fractions(formInputs);
+          const labAnchors: { label: string; enteredHr: number; effortFraction: number }[] = [];
+          if (formInputs.lt1HeartRateBpm !== null) {
+            labAnchors.push({ label: "LT1", enteredHr: formInputs.lt1HeartRateBpm, effortFraction: lt1Fraction / referenceCeilingFraction });
+          }
+          if (formInputs.lt2HeartRateBpm !== null) {
+            labAnchors.push({ label: "LT2", enteredHr: formInputs.lt2HeartRateBpm, effortFraction: lt2Fraction / referenceCeilingFraction });
+          }
+          if (labAnchors.length === 0) return null;
+          return (
+            <div className="run-library__experimental-fit">
+              <p className="field-group-note">Derived vs. entered heart rate</p>
+              <p className="field-group-help">
+                What the training-history calibration above predicts at your own LT1/LT2 effort levels, compared
+                against the heart rate you actually entered for them -- a direct check of whether your training data
+                and your lab thresholds agree.
+              </p>
+              <ul className="run-library__fit-notes">
+                {labAnchors.map((a) => {
+                  const derivedHr = predictHeartRateFromEffortFraction(a.effortFraction, hrCalibrationFitResult);
+                  const delta = derivedHr - a.enteredHr;
+                  return (
+                    <li key={a.label}>
+                      {a.label}: derived {derivedHr.toFixed(0)}bpm from training history vs. entered {a.enteredHr}bpm
+                      (Δ {delta >= 0 ? "+" : ""}
+                      {delta.toFixed(0)}bpm)
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          );
+        })()}
+
+      {thresholdHrCalibrationFitResult && (
+        <div className="run-library__experimental-fit">
+          <p className="field-group-note">HR-effort calibration -- from your LT1/LT2/fat-ox thresholds</p>
+          <p className="field-group-help">
+            Same effort fraction ≈ intercept + slope × heart-rate mapping as above, but fit directly from your own
+            lab-measured thresholds (LT1/LT2 heart rate, and any fat-ox curve points with heart rate entered above)
+            instead of pooled training-run data -- no terrain noise, no warm-up transient, no race-duration decay
+            confound, since these are controlled measurements rather than real-world GPS data.
+          </p>
+          <p className="field-group-note">
+            Best fit: effort fraction ≈ {thresholdHrCalibrationFitResult.intercept.toFixed(3)} +{" "}
+            {thresholdHrCalibrationFitResult.slope.toFixed(4)} × heart rate, from{" "}
+            {thresholdHrCalibrationFitResult.pointCount} lab point
+            {thresholdHrCalibrationFitResult.pointCount === 1 ? "" : "s"}
+            {thresholdHrCalibrationFitResult.pointCount <= 2
+              ? " (only 2 points -- the line passes through both exactly, so this isn't a fit with real slack in it)"
+              : `, R² = ${thresholdHrCalibrationFitResult.rSquared.toFixed(2)}`}
+            .
+          </p>
+          <button
+            type="button"
+            className="fatox-add"
+            onClick={() => onApplyHrCalibration(thresholdHrCalibrationFitResult.slope, thresholdHrCalibrationFitResult.intercept)}
+          >
+            Apply calibration
+          </button>
+          <p className="field-group-note">
+            Not applied automatically -- lab data is trustworthy but usually just a handful of points; compare it
+            against your training-history calibration above before choosing one to apply.
           </p>
         </div>
       )}

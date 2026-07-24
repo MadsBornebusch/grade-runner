@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { ceilingPower, type CeilingParams } from "./ceiling";
+import { ceilingPower, sustainableFraction, type CeilingParams } from "./ceiling";
 import type { EffortTrendPoint } from "./pacingFit";
 import { splitPower } from "./substrate";
-import { fitHrToEffortCalibrationAcrossRaces, predictEffortFractionFromHr, predictHeartRateFromEffortFraction } from "./hrCalibration";
+import {
+  fitHrToEffortCalibrationAcrossRaces,
+  fitHrToEffortCalibrationFromThresholds,
+  predictEffortFractionFromHr,
+  predictHeartRateFromEffortFraction,
+  type ThresholdCalibrationInputs,
+} from "./hrCalibration";
 
 const baseParams: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, f0: 0.94, fInf: 0.38, tauMin: 250 };
 
@@ -182,6 +188,74 @@ describe("fitHrToEffortCalibrationAcrossRaces", () => {
     expect(result).not.toBeNull();
     expect(result!.slope).toBeCloseTo(trueSlope, 2);
     expect(result!.raceCount).toBe(2);
+  });
+});
+
+describe("fitHrToEffortCalibrationFromThresholds", () => {
+  const emptyInputs: ThresholdCalibrationInputs = {
+    lt1Fraction: 0.65,
+    lt2Fraction: 0.85,
+    lt1HeartRateBpm: null,
+    lt2HeartRateBpm: null,
+    fatOxPoints: [],
+    walkMaxMs: 2.0,
+  };
+
+  it("fits an exact line through LT1 and LT2 when both have heart rate entered", () => {
+    const inputs: ThresholdCalibrationInputs = { ...emptyInputs, lt1HeartRateBpm: 150, lt2HeartRateBpm: 175 };
+    const result = fitHrToEffortCalibrationFromThresholds(inputs, baseParams);
+    expect(result).not.toBeNull();
+    expect(result!.pointCount).toBe(2);
+    // At tMin=0, sustainableFraction = min(f0, lt2Fraction) = lt2Fraction
+    // here (0.94 > 0.85) -- LT2's own effortFraction is exactly 1 by
+    // construction, LT1's is lt1Fraction/lt2Fraction.
+    const referenceFraction = sustainableFraction(0, baseParams);
+    expect(referenceFraction).toBeCloseTo(0.85, 10);
+    const lt1EffortFraction = 0.65 / referenceFraction;
+    const lt2EffortFraction = 1; // 0.85 / 0.85
+    const expectedSlope = (lt2EffortFraction - lt1EffortFraction) / (175 - 150);
+    expect(result!.slope).toBeCloseTo(expectedSlope, 6);
+    expect(predictEffortFractionFromHr(175, result!)).toBeCloseTo(lt2EffortFraction, 6);
+    expect(predictEffortFractionFromHr(150, result!)).toBeCloseTo(lt1EffortFraction, 6);
+    // Exactly 2 points -> the line passes through both exactly.
+    expect(result!.rSquared).toBeCloseTo(1, 10);
+  });
+
+  it("returns null with only one usable point (can't fit a slope)", () => {
+    const inputs: ThresholdCalibrationInputs = { ...emptyInputs, lt1HeartRateBpm: 150 };
+    expect(fitHrToEffortCalibrationFromThresholds(inputs, baseParams)).toBeNull();
+  });
+
+  it("returns null with no lab heart rate data at all", () => {
+    expect(fitHrToEffortCalibrationFromThresholds(emptyInputs, baseParams)).toBeNull();
+  });
+
+  it("includes fat-ox points that have heart rate, ignores ones that don't", () => {
+    const inputs: ThresholdCalibrationInputs = {
+      ...emptyInputs,
+      lt1HeartRateBpm: 150,
+      lt2HeartRateBpm: 175,
+      fatOxPoints: [
+        { paceMinPerKm: 5.5, heartRateBpm: 165 },
+        { paceMinPerKm: 6.5 }, // no heart rate -- must be skipped, not treated as 0
+      ],
+    };
+    const result = fitHrToEffortCalibrationFromThresholds(inputs, baseParams);
+    expect(result).not.toBeNull();
+    expect(result!.pointCount).toBe(3);
+    // With a genuine 3rd point, R^2 is no longer trivially 1 -- just check
+    // it's a real, finite number in range.
+    expect(result!.rSquared).toBeGreaterThanOrEqual(0);
+    expect(result!.rSquared).toBeLessThanOrEqual(1);
+  });
+
+  it("returns null when only a heart-rate-less fat-ox point is available", () => {
+    const inputs: ThresholdCalibrationInputs = {
+      ...emptyInputs,
+      lt1HeartRateBpm: 150,
+      fatOxPoints: [{ paceMinPerKm: 6 }],
+    };
+    expect(fitHrToEffortCalibrationFromThresholds(inputs, baseParams)).toBeNull();
   });
 });
 

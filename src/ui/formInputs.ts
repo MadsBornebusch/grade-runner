@@ -9,6 +9,12 @@ export interface FatOxPoint {
   paceMinPerKm: number;
   fatGPerMin: number;
   carbGPerMin: number;
+  /** Heart rate at this stage, if the metabolic-cart test recorded it --
+   * optional (undefined for existing points/curves without HR data), same
+   * "not fed into the ceiling/substrate model, purely a lab-quality anchor
+   * for hrCalibration.ts's threshold-based HR calibration" role as
+   * lt1HeartRateBpm/lt2HeartRateBpm below. */
+  heartRateBpm?: number;
 }
 
 /** Rough confidence ordering, most to least certain -- see PLAN.md §12. */

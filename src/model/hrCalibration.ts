@@ -34,8 +34,9 @@
 // check.
 
 import type { CeilingParams } from "./ceiling";
-import { ceilingPower } from "./ceiling";
+import { ceilingPower, maxAerobicPower, sustainableFraction } from "./ceiling";
 import { type EffortTrendPoint, MIN_FIT_POINTS, poolIndicesInformativeAtReference } from "./pacingFit";
+import { paceToGrossPowerWPerKg } from "./substrate";
 
 /** Fraction of each race's own duration considered "early enough" to trust
  * HR as an effort proxy -- PLAN.md's own cardiac-drift research puts
@@ -242,4 +243,105 @@ export function predictEffortFractionFromHr(heartRateBpm: number, calibration: H
  * long race, and this doesn't attempt to model that. */
 export function predictHeartRateFromEffortFraction(effortFraction: number, calibration: HrEffortCalibration): number {
   return (effortFraction - calibration.intercept) / calibration.slope;
+}
+
+/** Structural subset of formInputs.ts's FatOxPoint this module actually
+ * needs -- avoids importing a ui/ type into model/ (this file stays a leaf
+ * the UI depends on, not the other way around); any object shaped like this
+ * (including a real FatOxPoint) satisfies it. */
+export interface ThresholdFatOxPoint {
+  paceMinPerKm: number;
+  heartRateBpm?: number;
+}
+
+export interface ThresholdCalibrationInputs {
+  lt1Fraction: number;
+  lt2Fraction: number;
+  lt1HeartRateBpm: number | null;
+  lt2HeartRateBpm: number | null;
+  fatOxPoints: ThresholdFatOxPoint[];
+  walkMaxMs: number;
+}
+
+/**
+ * Fits the same effortFraction ≈ intercept + slope·heartRateBpm shape as
+ * fitHrToEffortCalibrationAcrossRaces, but from the athlete's own
+ * LAB-MEASURED thresholds/fat-ox test instead of pooled training-run data.
+ *
+ * LT1/LT2 fractions are already expressed in the exact %VO2max units
+ * sustainableFraction() operates in, so converting them to effortFraction
+ * needs no Minetti pace conversion, no altitude adjustment, no terrain/GPS
+ * noise at all -- none of the machinery the rest of this investigation
+ * needed to fight through (warm-up transients, walk breaks, race-duration
+ * decay confounds): effortFraction = labFraction / sustainableFraction(0,
+ * ceilingParams). LT2's own effortFraction comes out to exactly 1.0
+ * whenever the athlete's entered lt2Fraction matches ceilingParams'
+ * (the normal case), since LT2 *is* the ceiling's own fresh/undecayed cap
+ * by construction -- not a coincidence, a direct consequence of how LT2 is
+ * defined elsewhere in this app.
+ *
+ * Fat-ox points need one extra step, since they're recorded in pace/
+ * oxidation-rate terms rather than a %VO2max fraction directly: pace ->
+ * gross power via the same Minetti conversion the rest of this app uses
+ * (paceToGrossPowerWPerKg), then power -> %VO2max via maxAerobicPower. This
+ * reintroduces the Minetti-model uncertainty LT1/LT2 avoid, but it's still
+ * a controlled lab measurement, not real-world GPS/terrain data.
+ *
+ * Every qualifying point (only where heartRateBpm is actually present)
+ * counts equally -- unlike the race-pooled fit, there's no natural duration
+ * weight for a handful of controlled measurements. Returns null with fewer
+ * than 2 usable points (can't fit a line's slope from one), same "no data"
+ * convention as every other fit in this file. With exactly 2 points, the
+ * fitted line passes through both exactly (rSquared will read 1 by
+ * construction) -- that's a property of having only 2 points, not evidence
+ * of a confident fit; callers should treat rSquared as meaningful only once
+ * pointCount is 3 or more (e.g. a fat-ox curve contributing extra points
+ * alongside LT1/LT2).
+ */
+export function fitHrToEffortCalibrationFromThresholds(
+  inputs: ThresholdCalibrationInputs,
+  ceilingParams: CeilingParams,
+): HrEffortCalibration | null {
+  const referenceCeilingFraction = sustainableFraction(0, ceilingParams);
+  if (!(referenceCeilingFraction > 0)) return null;
+
+  const points: { hr: number; effortFraction: number }[] = [];
+  if (inputs.lt1HeartRateBpm !== null) {
+    points.push({ hr: inputs.lt1HeartRateBpm, effortFraction: inputs.lt1Fraction / referenceCeilingFraction });
+  }
+  if (inputs.lt2HeartRateBpm !== null) {
+    points.push({ hr: inputs.lt2HeartRateBpm, effortFraction: inputs.lt2Fraction / referenceCeilingFraction });
+  }
+  const maxAerobic = maxAerobicPower(0, ceilingParams);
+  if (maxAerobic > 0) {
+    for (const p of inputs.fatOxPoints) {
+      if (p.heartRateBpm === undefined) continue;
+      const grossPowerWPerKg = paceToGrossPowerWPerKg(p.paceMinPerKm, inputs.walkMaxMs);
+      const intensityFraction = grossPowerWPerKg / maxAerobic;
+      points.push({ hr: p.heartRateBpm, effortFraction: intensityFraction / referenceCeilingFraction });
+    }
+  }
+
+  if (points.length < 2) return null;
+
+  const n = points.length;
+  const meanHr = points.reduce((s, p) => s + p.hr, 0) / n;
+  const meanEffort = points.reduce((s, p) => s + p.effortFraction, 0) / n;
+  let sXY = 0;
+  let sXX = 0;
+  let sYY = 0;
+  for (const p of points) {
+    const dHr = p.hr - meanHr;
+    const dEffort = p.effortFraction - meanEffort;
+    sXY += dHr * dEffort;
+    sXX += dHr * dHr;
+    sYY += dEffort * dEffort;
+  }
+  if (!(sXX > 0)) return null;
+
+  const slope = sXY / sXX;
+  const intercept = meanEffort - slope * meanHr;
+  const rSquared = sYY > 0 ? (sXY * sXY) / (sXX * sYY) : 1;
+
+  return { slope, intercept, rSquared, pointCount: points.length, raceCount: points.length };
 }
