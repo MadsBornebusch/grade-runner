@@ -2745,6 +2745,62 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    thousands of segments, but not something that would visibly stand out
    run to run against ordinary pacing variability.
 
+   **Follow-up: wired the pulse-conditioned fit into Stage 6's actual
+   held-out finish-time backtest, to directly answer "does this beat the
+   old model."** Added `--surfaceFitBasis=logGap|pulse` to
+   `backtestSurfaceMultiplier.ts` (same k-fold harness, same coefficient-
+   to-multiplier conversion — this only changes which upstream fit
+   generates the per-category numbers). Full run, calibrated physiology
+   (VO2max=54, bodyMassKg=85), default 20-fold k-fold across the whole
+   203-activity pool:
+
+   | candidate | mean signed err% |
+   |---|---|
+   | baseline (no surface term) | −27.91% |
+   | baseline + fitted per-category surface (**pulse**) | −26.82% |
+   | baseline + surface-blind uniform control (pulse run) | −26.83% |
+   | baseline + fitted per-category surface (**logGap**) | −26.84% |
+   | baseline + surface-blind uniform control (logGap run) | −26.86% |
+
+   **Both fits tie with their own blind control again** (differences of
+   0.01-0.04 points, noise) — the SAME inconclusive result Stage 6 already
+   found for logGap, now shown to generalize to pulse too. This confirms
+   the arbiter's insensitivity isn't an artifact of Stage 5's estimation
+   method specifically — it's the ~28% uniform under-prediction bias
+   itself swamping any correctly-targeted, modest terrain effect,
+   regardless of which fit produced it. Reinforces, not contradicts,
+   Stage 6's own standing conclusion: a fitted pacing-margin term is the
+   prerequisite for this backtest to validate ANY surface-fitting method,
+   old or new — not yet built.
+
+   **Follow-up: does pulse actually track power at segment granularity?**
+   (`segmentPulsePowerFit.ts`, `scripts/fitSegmentPulseToPower.ts`.)
+   Stage 7's three intensity arms fit pulse and power as separate,
+   parallel predictors of pace — never against each other. Direct within-
+   run-demeaned bivariate check on the same 203-activity/6400-segment
+   library: **modelled power barely tracks pulse at all (R²=0.0072)**;
+   measured/device power tracks it somewhat better but still loosely
+   (R²=0.1886). Both are well below `hrCalibration.ts`'s own existing
+   pooled, cross-race, trailing-smoothed number (0.31 raw → ~0.43
+   smoothed) — expected, not a contradiction: that fit pools RAW/UNDEMEANED
+   pairs ACROSS whole races (so a harder day's simultaneously-higher power
+   AND higher HR contribute a cross-run correlation this fit deliberately
+   removes) and trailing-smooths power over ~75s first, where this fits
+   WITHIN-RUN, at monotonic-segment (not per-point) granularity, with no
+   smoothing.
+
+   **This is a meaningful, corroborating result, not just a null one: it's
+   direct quantitative confirmation of Stage 7's own founding premise** —
+   modelled power (essentially grade-adjusted pace) reflects momentary
+   terrain+speed, and is nearly decoupled from how hard the athlete's body
+   is actually working within a run, exactly why pulse and not modelled
+   power was designated the trustworthy intensity signal. It also sharpens
+   the earlier surprise that modelledPower's own segment-level pace-fit R²
+   came out 0.44, not ~1 (this stage's own earlier finding): part of that
+   gap is the averaging-washes-out-the-tautology mechanism already
+   documented, but part of it is now shown to be this — modelled power and
+   pulse are, within a run, measuring almost entirely different things.
+
 ### Open questions
 
 **Resolved with the user (2026-07-23):** segmentation also breaks on a
