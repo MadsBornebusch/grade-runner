@@ -3205,6 +3205,42 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    is a genuinely different, useful finding the original explanation
    missed.
 
+   **Follow-up: explicit lag, nonlinearity, and a residual plot.**
+   (`scripts/evaluateHrLagAndNonlinear.ts`, `scripts/dumpHrResiduals.ts`.)
+   Two more direct questions, both tested on held-out MAE rather than
+   assumed:
+
+   - **Does an explicit lag on top of the existing 75s trailing-mean
+     smoothing help?** No — monotonically worse in both races as the lag
+     grows (Ecotrail: 6.73→13.57bpm from 0s to 120s; Soria Moria:
+     9.93→12.05bpm). The trailing mean already biases toward the recent
+     past, which is doing the delay-correction job; an *additional*
+     explicit shift double-counts it.
+   - **Is the true HR-effort relationship nonlinear?** Fit a quadratic
+     term (weighted least squares, inverted via the quadratic formula)
+     against the same long-only + start-trimmed pool. Mixed and telling:
+     it *helped* Soria Moria (9.93→9.05bpm) but *hurt* Ecotrail
+     (6.73→9.20bpm), while R² barely moved either time (0.334→0.337,
+     0.430→0.443). That's the signature of a free parameter fitting
+     whichever single other race happens to be in that leave-one-out
+     training set, not genuine curvature — with only 1-2 races informing
+     each model, there's no way to distinguish real nonlinearity from
+     race-specific idiosyncrasy. Left as linear; adding this parameter
+     would be adding risk, not signal, on the current data.
+
+   **Residual-vs-actual-HR plot** (rendered as an artifact, held-out
+   error per 30-min bin vs. the bin's own actual mean HR): both races
+   show a clear negative slope — error trends from positive
+   (over-prediction) at lower actual HR toward negative
+   (under-prediction) at higher actual HR (Ecotrail: slope −0.94
+   bpm-error/bpm-actual; Soria Moria: −0.46). This is the textbook
+   signature of **regression to the mean** in a linear fit: predictions
+   for actual values far from the training pool's own mean HR get pulled
+   back toward it in both directions — not evidence of a missed
+   nonlinearity (consistent with the quadratic test just above), and
+   expected to be worse than it would be with more long races anchoring
+   the fit.
+
 ### Open questions
 
 **Resolved with the user (2026-07-23):** segmentation also breaks on a
