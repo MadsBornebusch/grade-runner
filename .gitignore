@@ -13,6 +13,7 @@ dist-ssr
 *.local
 .strava-cache/
 .surface-cache/
+.backtest-flatpacing-outcomes.jsonl
 
 # Editor directories and files
 .vscode/*
