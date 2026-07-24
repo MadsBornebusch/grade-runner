@@ -6,7 +6,7 @@
 import type { CourseSegment, SurfaceCategory } from "../gpx/pipeline";
 import { costOfRunning, costOfWalking, maxDescentSpeedMs } from "./minetti";
 import { grossToNet, netToGross } from "./energetics";
-import { type CeilingParams, ceilingPower, maxAerobicPower } from "./ceiling";
+import { type CeilingParams, ceilingPower, maxAerobicPower, sustainableFraction } from "./ceiling";
 import type { DescentExposureBasis } from "./pacingFit";
 import {
   type FuelingParams,
@@ -101,6 +101,23 @@ const DEFAULT_WALK_MAX_MS = 2.0;
  * purely so tests can exercise the floor mechanism directly. */
 const DEFAULT_RESERVE_G = 0;
 
+export interface SimulateOptions {
+  /**
+   * PLAN.md §14 Plan B, pacing-margin follow-up: when set, the aerobic
+   * ceiling's duration-decay term (ceilingPower's sustainableFraction) is
+   * evaluated at this FIXED value (minutes) instead of each segment's own
+   * running elapsed time -- i.e. "flat effort matched to a race of this
+   * total duration" instead of "effort that itself decays as elapsed time
+   * within THIS simulation grows". Altitude and any configured
+   * durabilityDriftPerHour/PerDescentUnit still use each segment's own
+   * REAL running elapsedHours/altitude/descentExposure unchanged -- only
+   * the time->fraction decay curve goes flat, not every duration-sensitive
+   * term. Undefined (the default) is byte-for-byte identical to before
+   * this option existed (see findFlatPacedFinishTime for how it's driven).
+   */
+  flatDurationMin?: number;
+}
+
 /**
  * Forward-simulates the course at a fixed effort fraction `theta` of the
  * (grade- & altitude-varying, duration-decaying) aerobic ceiling. Stops at
@@ -108,7 +125,7 @@ const DEFAULT_RESERVE_G = 0;
  * degraded state — sufficient to locate *where* a bonk would occur and to
  * drive the theta bisection below.
  */
-export function simulate(theta: number, inputs: SolverInputs): SimulationResult {
+export function simulate(theta: number, inputs: SolverInputs, opts: SimulateOptions = {}): SimulationResult {
   const reserveG = inputs.reserveG ?? DEFAULT_RESERVE_G;
   const walkMaxMs = inputs.walkMaxMs ?? DEFAULT_WALK_MAX_MS;
   const useAltitude = inputs.altitudeAdjustment ?? true;
@@ -151,7 +168,7 @@ export function simulate(theta: number, inputs: SolverInputs): SimulationResult 
 
     const ceilingGross = ceilingPower(
       {
-        tMin: elapsedMin,
+        tMin: opts.flatDurationMin ?? elapsedMin,
         altitudeM,
         elapsedHours,
         ...(descentExposure !== undefined ? { descentExposure } : {}),
@@ -322,4 +339,147 @@ export function findSustainableTheta(
     }
   }
   return { theta: lo, result: best };
+}
+
+export interface FlatPacingOptions {
+  /** Multiplicative range around the seed estimate (findSustainableTheta's
+   * own finish time) to scan for a self-consistent duration. Defaults
+   * 0.4x-3x -- wide enough to comfortably bracket the ~20-30% gap this
+   * mechanism is meant to close, without being so wide the coarse scan
+   * loses resolution. */
+  loMultiplier?: number;
+  hiMultiplier?: number;
+  scanSteps?: number;
+  iterations?: number;
+}
+
+export interface FlatPacedResult {
+  /** The self-consistent assumed-and-actual duration, minutes. */
+  totalDurationMin: number;
+  /** sustainableFraction(totalDurationMin, ceilingParams) -- the single flat
+   * effort fraction targeted for the whole race. */
+  targetFraction: number;
+  result: SimulationResult;
+  /** False if no self-consistent duration could be bracketed within the
+   * scanned range -- falls back to the furthest-progress estimate, same
+   * "report what we've got" discipline as findSustainableTheta's own
+   * total-failure fallback, rather than a meaningless arbitrary pick. */
+  selfConsistent: boolean;
+}
+
+/**
+ * PLAN.md §14 Plan B, pacing-margin follow-up: predicts finish time
+ * assuming PERFECT, EVEN pacing -- a single flat effort fraction held for
+ * the whole race, set to whatever sustainableFraction says is achievable
+ * for a race that takes exactly this long -- instead of findSustainableTheta's
+ * design (a constant theta multiplier on top of a ceiling that itself
+ * decays continuously with elapsed time WITHIN the simulated race, i.e. an
+ * implicitly front-loaded/declining effort trajectory).
+ *
+ * This is a genuine repurposing of the SAME fitted tau/f0/fInf curve, not a
+ * new one: that curve was fit as a within-race decay trajectory
+ * (pacingFit.ts's own tHours-vs-effortFraction fit), and is reused here as
+ * "the sustainable flat level for a race of this total length" -- a
+ * different but related reading of the same shape, consistent with (not
+ * proven by) the psychobiological pacing literature's view that well-paced
+ * endurance effort approximates even pacing rather than starting hot and
+ * declining (PLAN.md's own literature note on this).
+ *
+ * Solves a FIXED POINT, not a monotonic feasibility boundary: for a
+ * candidate total duration T (minutes), the flat target fraction is
+ * sustainableFraction(T); forward-simulating the whole course at that flat
+ * fraction gives an ACTUAL duration -- self-consistent exactly when that
+ * actual duration equals the assumed T. Bisects on e(T) = actualMinutes(T)
+ * - T (sign change from + at small/aggressive T to - at large/conservative
+ * T), with the same defensive coarse-scan-first discipline
+ * findSustainableTheta uses -- walk/run gait-mode switches put kinks in
+ * actualMinutes(T) the same way they do in theta's own feasibility
+ * boundary, so a plain bisection without a scan first isn't safe here
+ * either. A candidate T whose flat simulation bonks or stalls is treated as
+ * actualMinutes(T) = +Infinity (i.e. "too aggressive, need a larger/slower
+ * T"), folding fuel-feasibility into the same search rather than a second,
+ * separate check -- so a fuel-limited course's self-consistent answer ends
+ * up flat-at-whatever-the-glycogen-reservoir-allows, which is correct but
+ * means the "matches the duration curve exactly" property only holds in
+ * the aerobically-limited regime, not the fuel-limited one.
+ */
+export function findFlatPacedFinishTime(inputs: SolverInputs, opts: FlatPacingOptions = {}): FlatPacedResult {
+  const scanSteps = opts.scanSteps ?? 40;
+  const iterations = opts.iterations ?? 40;
+
+  const distanceReached = (result: SimulationResult): number =>
+    result.segments.length > 0 ? result.segments[result.segments.length - 1].cumulativeDistance3D : 0;
+
+  const actualMinutesFor = (candidateMin: number): { minutes: number; result: SimulationResult } => {
+    const result = simulate(1, inputs, { flatDurationMin: candidateMin });
+    return { minutes: result.feasible ? result.finishTimeS / 60 : Infinity, result };
+  };
+
+  // Seed the search range off the existing theta-based estimate -- already
+  // in the right ballpark (this mechanism is meant to close a ~20-30% gap,
+  // not an order of magnitude), and avoids a blind search across durations
+  // that could span minutes to days. Falls back to a wide absolute range
+  // if even that seed isn't feasible at all.
+  const seed = findSustainableTheta(inputs);
+  const seedMin = seed.result.feasible ? seed.result.finishTimeS / 60 : null;
+  const loMin = seedMin !== null ? seedMin * (opts.loMultiplier ?? 0.4) : 10;
+  const hiMin = seedMin !== null ? seedMin * (opts.hiMultiplier ?? 3) : 4000;
+
+  let prevT = loMin;
+  let prev = actualMinutesFor(prevT);
+  let prevE = prev.minutes - prevT;
+
+  let bestFallbackT = prevT;
+  let bestFallbackResult = prev.result;
+
+  let bracketLo: number | null = null;
+  let bracketHi: number | null = null;
+
+  for (let i = 1; i <= scanSteps; i++) {
+    const t = loMin + ((hiMin - loMin) * i) / scanSteps;
+    const cur = actualMinutesFor(t);
+    const curE = cur.minutes - t;
+
+    if (distanceReached(cur.result) > distanceReached(bestFallbackResult)) {
+      bestFallbackT = t;
+      bestFallbackResult = cur.result;
+    }
+
+    if (prevE > 0 && curE <= 0) {
+      bracketLo = prevT;
+      bracketHi = t;
+      break;
+    }
+    prevT = t;
+    prevE = curE;
+  }
+
+  if (bracketLo === null || bracketHi === null) {
+    return {
+      totalDurationMin: bestFallbackT,
+      targetFraction: sustainableFraction(bestFallbackT, inputs.ceilingParams),
+      result: bestFallbackResult,
+      selfConsistent: false,
+    };
+  }
+
+  let lo = bracketLo;
+  let hi = bracketHi;
+  for (let i = 0; i < iterations; i++) {
+    const mid = (lo + hi) / 2;
+    const midE = actualMinutesFor(mid).minutes - mid;
+    if (midE > 0) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+
+  const finalT = (lo + hi) / 2;
+  return {
+    totalDurationMin: finalT,
+    targetFraction: sustainableFraction(finalT, inputs.ceilingParams),
+    result: actualMinutesFor(finalT).result,
+    selfConsistent: true,
+  };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CourseSegment } from "../gpx/pipeline";
-import { findSustainableTheta, simulate, type SolverInputs } from "./solver";
+import { findFlatPacedFinishTime, findSustainableTheta, simulate, type SolverInputs } from "./solver";
 
 function makeSegments(n: number, segLenM: number, gradient: number): CourseSegment[] {
   const segments: CourseSegment[] = [];
@@ -186,6 +186,70 @@ describe("findSustainableTheta", () => {
     // At a theta well clear of the near-zero stall region, confirm the
     // failure is specifically an immediate bonk, not a stall.
     expect(simulate(0.3, impossible).bonkIndex).toBe(0);
+  });
+});
+
+describe("findFlatPacedFinishTime (pacing-margin follow-up)", () => {
+  it("simulate() is byte-for-byte unchanged when flatDurationMin is omitted", () => {
+    const course = baseInputs();
+    expect(simulate(0.6, course, {})).toEqual(simulate(0.6, course));
+  });
+
+  it("is self-consistent: the simulated finish time matches the assumed total duration", () => {
+    const course = baseInputs({ segments: makeSegments(3000, 50, 0), fueling: { intakeGPerH: 90 }, glycogenStoreG: 3000 });
+    const { totalDurationMin, result, selfConsistent, targetFraction } = findFlatPacedFinishTime(course);
+    expect(selfConsistent).toBe(true);
+    expect(result.feasible).toBe(true);
+    expect(result.finishTimeS / 60).toBeCloseTo(totalDurationMin, 0);
+    expect(targetFraction).toBeGreaterThan(0);
+    expect(targetFraction).toBeLessThanOrEqual(0.94); // f0 default ceiling
+  });
+
+  it("barely diverges from the theta-based model for a short race (duration well under tau)", () => {
+    // Default 10km flat course finishes in well under an hour -- tiny
+    // relative to tau's default 250min, so the duration-decay curve has
+    // barely moved and there's little room for the two designs to differ.
+    const short = baseInputs();
+    const thetaBased = findSustainableTheta(short);
+    const flat = findFlatPacedFinishTime(short);
+    expect(flat.result.feasible).toBe(true);
+    const pctDiff = Math.abs(flat.result.finishTimeS - thetaBased.result.finishTimeS) / thetaBased.result.finishTimeS;
+    expect(pctDiff).toBeLessThan(0.02);
+  });
+
+  it("predicts a meaningfully SLOWER finish time than the theta-based model for a long, aerobically-limited ultra", () => {
+    // 150km flat with generous fueling (aerobic ceiling is the limiter, not
+    // glycogen -- theta comes out at 1.0) lands well into the multi-tau
+    // range where the flat-vs-declining-effort difference should peak.
+    const ultra = baseInputs({ segments: makeSegments(3000, 50, 0), fueling: { intakeGPerH: 90 }, glycogenStoreG: 3000 });
+    const thetaBased = findSustainableTheta(ultra);
+    const flat = findFlatPacedFinishTime(ultra);
+    expect(thetaBased.theta).toBe(1);
+    expect(thetaBased.result.feasible).toBe(true);
+    expect(flat.result.feasible).toBe(true);
+    expect(flat.result.finishTimeS).toBeGreaterThan(thetaBased.result.finishTimeS);
+    const pctSlower = (flat.result.finishTimeS - thetaBased.result.finishTimeS) / thetaBased.result.finishTimeS;
+    expect(pctSlower).toBeGreaterThan(0.05);
+  });
+
+  it("still completes a fuel-limited course, settling on a slower self-consistent duration", () => {
+    const hilly = makeSegments(2000, 50, 0).map((s, i) => ({ ...s, gradient: Math.sin(i / 40) * 0.15 }));
+    const hillyInputs = baseInputs({ segments: hilly, fueling: { intakeGPerH: 30 }, glycogenStoreG: 390 });
+    const { result } = findFlatPacedFinishTime(hillyInputs);
+    expect(result.feasible).toBe(true);
+    expect(result.segments).toHaveLength(2000);
+  });
+
+  it("falls back to the furthest-progress estimate, not a meaningless pick, when no duration is feasible", () => {
+    const impossible = baseInputs({
+      segments: makeSegments(5000, 50, 0),
+      fueling: { intakeGPerH: 0 },
+      glycogenStoreG: 0,
+    });
+    const { result, selfConsistent } = findFlatPacedFinishTime(impossible);
+    expect(selfConsistent).toBe(false);
+    expect(result.feasible).toBe(false);
+    expect(result.segments.length).toBeGreaterThan(0);
   });
 });
 
