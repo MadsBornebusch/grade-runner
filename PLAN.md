@@ -2716,6 +2716,35 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    above, is currently identical to the intersection row, not a broader
    check).
 
+   **Follow-up: how much of the within-run pace variance does surface
+   explain, and what's the natural pace spread inside each category?**
+   (`scripts/surfaceExplainedVariance.ts`.) Isolated surface's own
+   contribution by re-fitting the pulse-arm model with every segment's
+   `surfaceCategory` forced to a single constant (so no surface dummy
+   survives) and comparing R²: full model 0.1270 vs. surface-forced-out
+   0.1128 — **surface adds ~0.014 of within-run R², about 11% of the full
+   model's total explained variance.** Modest in absolute terms, expected
+   given grade dominates raw pace variation far more than surface category
+   does — not evidence the effect is small or unreliable, just a reminder
+   that "R² share" and "coefficient is real and stable" are different
+   claims (the latter is what stages 5 and 7's coefficient table
+   established).
+
+   Raw (NOT grade-adjusted — descriptive context only) pace per category,
+   6400 segments: paved 5.92 min/km (n=1896, std 0.90), gravel 6.18
+   (n=2695, std 0.82), dirt 6.14 (n=874, std 0.80), compacted 6.17 (n=643,
+   std 0.91), path 6.73 (n=292, std 0.71). Two things worth noting: (1)
+   path's raw gap vs. paved (+13.7%) is bigger than its grade-controlled
+   fitted coefficient (−10.17%) — expected, since path segments run
+   steeper on average (Stage 3: ~10% vs paved's ~3%), so part of the raw
+   gap is grade, not surface, exactly the confound Stage 5's grade control
+   exists to remove; (2) the fitted surface effects are modest against the
+   natural within-category spread (std ~0.7-0.9 min/km, i.e. one path
+   segment to the next varies far more than the ~0.6 min/km the fitted
+   −10% coefficient implies) — real and consistent on average across
+   thousands of segments, but not something that would visibly stand out
+   run to run against ordinary pacing variability.
+
 ### Open questions
 
 **Resolved with the user (2026-07-23):** segmentation also breaks on a
