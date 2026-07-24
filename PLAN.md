@@ -2789,17 +2789,32 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    WITHIN-RUN, at monotonic-segment (not per-point) granularity, with no
    smoothing.
 
-   **This is a meaningful, corroborating result, not just a null one: it's
-   direct quantitative confirmation of Stage 7's own founding premise** —
-   modelled power (essentially grade-adjusted pace) reflects momentary
-   terrain+speed, and is nearly decoupled from how hard the athlete's body
-   is actually working within a run, exactly why pulse and not modelled
-   power was designated the trustworthy intensity signal. It also sharpens
-   the earlier surprise that modelledPower's own segment-level pace-fit R²
-   came out 0.44, not ~1 (this stage's own earlier finding): part of that
-   gap is the averaging-washes-out-the-tautology mechanism already
-   documented, but part of it is now shown to be this — modelled power and
-   pulse are, within a run, measuring almost entirely different things.
+   **Read the CONTRAST, not the absolute numbers, as the defensible
+   finding: measured power (R²=0.1886) carries roughly 26x the within-run
+   HR signal that modelled power does (R²=0.0072), on the exact same
+   segments, same demeaning, same lack of smoothing, same lag.** Since
+   both arms share every one of those handicaps equally, the gap between
+   them can't be explained away by methodology — device power carries
+   real within-run effort information that pace-derived power essentially
+   doesn't. (One caveat even here: Stryd's own internal smoothing may
+   align it better with HR's own lagged response than a truly raw signal
+   would, which could flatter this number somewhat — "carries more
+   within-run effort signal," not "proven to carry genuine effort
+   signal.")
+
+   The absolute near-zero for modelled power is a LOWER BOUND, not a
+   clean measurement of true decoupling — no smoothing plus HR's own
+   ~20-45s lag (hrCalibration.ts's own real-data finding: R² rose from
+   0.31 to ~0.43 from smoothing alone) means some of this could be
+   attenuation, not zero underlying relationship. Consistent with, but
+   does not prove, Stage 7's premise. And that premise is worth stating
+   precisely: Stage 7 distrusted modelled power because it's a
+   DETERMINISTIC function of pace (a math property, independent of HR) —
+   this result is a related but distinct observation, not a retroactive
+   proof of that circularity concern. What it DOES cleanly support is
+   forward-looking: HR carries information pace-derived power doesn't,
+   which is the actual case for using pulse as an intensity term, not
+   confirmation that modelled power was circular all along.
 
 ### Open questions
 
