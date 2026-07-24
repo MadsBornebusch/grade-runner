@@ -2897,37 +2897,82 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    - **`--targetSelection=longest` (sorts by actual finish time
      descending, takes the top 20), 20/20 folds attempted, 17 feasible for
      both models** — durations spanned 2.18h-24.55h in the candidate
-     pool, but the 3 infeasible folds were exactly the longest ones (the
-     model bonks/stalls under held-out-fitted ceiling params before
-     finishing), so the folds that actually completed still topped out at
-     4.3h — one bucket above the previous run, still well short of the
-     theorized 2-4×tau peak (tau≈4.2h, so 8.4-16.8h). Overall: theta
-     −26.19%, flat −24.52% (n=17). By bucket: 2-4h (n=16) theta −25.63%
-     vs flat −23.94%; 4-8h (n=1, not meaningful alone) theta −35.10% vs
-     flat −33.82%. By whether the old model was aerobically- vs
-     fuel-limited: aerobically-limited (n=16) theta −29.80% vs flat
-     −28.08%; the single fuel-limited fold moved the OPPOSITE direction
-     (theta +31.64% vs flat +32.36%, flat slightly worse) — exactly the
-     failure mode flagged as a real possibility before this was built,
-     though n=1 is nowhere near enough to act on.
+     pool. Overall: theta −26.19%, flat −24.52% (n=17). By bucket: 2-4h
+     (n=16) theta −25.63% vs flat −23.94%; 4-8h (n=1, not meaningful
+     alone, a 4.30h training run) theta −35.10% vs flat −33.82%. By
+     whether the old model was aerobically- vs fuel-limited:
+     aerobically-limited (n=16) theta −29.80% vs flat −28.08%; the single
+     fuel-limited fold moved the OPPOSITE direction (theta +31.64% vs
+     flat +32.36%, flat slightly worse) — exactly the failure mode
+     flagged as a real possibility before this was built, though n=1 is
+     nowhere near enough to act on.
 
-   **Read honestly: a real, consistent, but small (~1.3-1.9 percentage
-   point) improvement across every duration bucket reached so far, NOT
-   yet a test of the theory's actual core prediction** (that the
-   correction should be small at short durations and grow materially in
-   the multi-hour ultra range). Both backtest runs are stuck in the same
-   place for the same reason: the truly long runs in this athlete's own
-   library are infeasible for BOTH models once ceilingParams come from a
-   training pool that excludes them — the fitted tau/fInf curve without
-   the target's own data apparently can't sustain a finish at all for the
-   longest efforts. That's a real data/model limitation, not a bug to
-   route around by picking different folds. Until that's resolved (e.g. a
-   looser feasibility fallback for backtesting purposes only, or simply
-   accepting the multi-hour range may never be testable against this
-   particular athlete's own held-out data), this backtest can only speak
-   to short-to-mid-duration folds, where the flat-pacing correction reads
-   as a small, one-directional nudge rather than a duration-shaped effect
-   — consistent with, but not yet confirming, the underlying theory.
+   **The 3 infeasible folds are exactly the 3 longest races in the whole
+   library — Soria Moria (24.55h), Ås Backyard Ultra (13.39h), Ecotrail
+   80 (8.41h) — and in every one of the three it's specifically
+   `findFlatPacedFinishTime` that bonks while `findSustainableTheta` stays
+   feasible.** Not "both models fail on long races" as first assumed —
+   this is a structural asymmetry. `findFlatPacedFinishTime` commits to
+   exactly 100% of the fitted long-run ceiling for the whole race with no
+   safety margin; `findSustainableTheta` explicitly bisects for the
+   LARGEST θ<1 that avoids bonking, so it always has a margin degree of
+   freedom flat-pacing doesn't. Compounding this: the backtest fuels
+   every fold at a single flat 60g/h (`formInputs.intakeGPerH`), not the
+   athlete's own actual per-race intake — this athlete's real numbers for
+   two of these three races were 80g/h (Ecotrail 80) and 120g/h (Soria
+   Moria), both well above the model's assumption. A model with no margin
+   knob, fed noticeably less carbohydrate than what was actually
+   consumed, bonking on exactly the longest 3 races is the expected
+   outcome of that combination, not evidence flat-pacing is wrong at long
+   durations — the test as built can't currently distinguish "flat-pacing
+   is a bad idea for ultras" from "flat-pacing has no margin and was
+   underfed in this test."
+
+   **The prediction-direction check the theory needs is also not the one
+   this backtest currently answers.** 16 of the 17 feasible folds predict
+   FASTER finishes than what actually happened (signed error −14% to
+   −35%) — a large, systematic under-prediction bias that dwarfs the
+   1-2 percentage point flat-vs-theta gap sitting on top of it. Only the
+   one fuel-limited fold predicts slower. Until that ~27% baseline bias
+   (consistent with Stage 6's own baseline-model number) is addressed,
+   any duration-shaped signal from flat-pacing is a small perturbation on
+   a much bigger, unrelated miscalibration.
+
+   **Surprising, not-yet-trusted tau/fInf finding.** The per-fold joint
+   fit (`fitTauFInfWithSupportGate`, tier="joint", 17 of 20 folds) is
+   remarkably stable at **tau≈22-24 minutes, fInf≈0.772-0.777** —
+   nowhere near the tau=250min/fInf=0.38 calibration defaults used
+   everywhere else in this plan (including the "2-4×tau" prediction
+   above, which assumed tau≈4.2h). The other 3 folds — coincidentally the
+   3 shortest targets in the sample (2.2-2.5h) — fail the joint fit's own
+   support gate and fall back to tier="tauOnly": tau=2622min (43.7h!),
+   fInf held at the unfit default 0.38. A "trusted" fit swinging between
+   22 minutes and 43.7 hours depending on which single race (out of 203)
+   gets excluded is itself a red flag, not a settled number — plausible
+   explanations include tau and fInf being poorly identified against each
+   other in this dataset (a small-tau/high-fInf curve and a
+   large-tau/low-fInf curve can fit similarly without genuinely
+   long-duration data to disambiguate them), or the support gate's own
+   thresholds being too permissive. **Do not use tau=22min/fInf=0.777 as
+   a recalibration of the app's defaults on the strength of this alone** —
+   it needs its own dedicated investigation (stability across bootstrap
+   resamples, sensitivity to which races are informative) before it's
+   trusted either way.
+
+   **Read honestly: this backtest currently has three confounded problems
+   stacked on top of each other** — a large baseline under-prediction
+   bias unrelated to pacing strategy, a flat-pacing model with no margin
+   being tested under a fueling assumption well below what this athlete
+   actually uses on long days, and a joint tau/fInf fit whose long-run
+   parameters are unexpectedly unstable across folds. Any one of these
+   would be enough to keep this from being a clean test of "does
+   flat-pacing help more at long durations." Worth fixing before drawing
+   further conclusions: (1) feed each held-out fold its own actual
+   fueling rate instead of one flat default, (2) decide whether
+   `findFlatPacedFinishTime` should gain its own margin parameter (mirror
+   theta's) rather than assuming 100% of the ceiling is holdable, (3)
+   separately investigate why the joint tau/fInf fit is this sensitive to
+   which race is excluded.
 
 ### Open questions
 

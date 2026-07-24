@@ -70,10 +70,10 @@ interface CachedActivityPoints {
   points: Array<Omit<GpxPoint, "time"> & { time: string | null }>;
 }
 
-function loadCachedActivity(path: string): { id: string; points: GpxPoint[] } {
+function loadCachedActivity(path: string): { id: string; name: string; points: GpxPoint[] } {
   const raw = JSON.parse(readFileSync(path, "utf8")) as CachedActivityPoints;
   const id = path.match(/activity-([^/]+)\.json$/)?.[1] ?? path;
-  return { id, points: raw.points.map((p) => ({ ...p, time: p.time ? new Date(p.time) : null })) };
+  return { id, name: raw.name ?? "", points: raw.points.map((p) => ({ ...p, time: p.time ? new Date(p.time) : null })) };
 }
 
 function loadCachedSurfaceEdges(activityId: string): ValhallaSurfaceEdge[] | null {
@@ -84,6 +84,7 @@ function loadCachedSurfaceEdges(activityId: string): ValhallaSurfaceEdge[] | nul
 
 interface RunRecord {
   id: string;
+  name: string;
   date: Date | null;
   segments: CourseSegment[];
   effortTrendPoints: EffortTrendPoint[];
@@ -141,7 +142,7 @@ function main() {
 
   for (const file of files) {
     if (runs.length >= MAX_ACTIVITIES) break;
-    const { id, points } = loadCachedActivity(`${CACHE_DIR}${file}`);
+    const { id, name, points } = loadCachedActivity(`${CACHE_DIR}${file}`);
     if (!points.some((p) => p.time !== null)) {
       skipped++;
       continue;
@@ -162,10 +163,11 @@ function main() {
     const isSustainedEffort =
       buildWithinRaceDiagnosticPoint(id, { ...course, segments }, { ...commonInputs, ceilingParams: baseCeilingParams }) !== null;
     const firstTimed = points.find((p) => p.time !== null);
-    runs.push({ id, date: firstTimed?.time ?? null, isSustainedEffort, segments, effortTrendPoints, actualFinishTimeS: analysis.totalMovingTimeS });
+    runs.push({ id, name, date: firstTimed?.time ?? null, isSustainedEffort, segments, effortTrendPoints, actualFinishTimeS: analysis.totalMovingTimeS });
   }
 
-  console.log(`Activities used: ${runs.length} (skipped ${skipped} without timestamps, cached surface data, or distance)\n`);
+  console.log(`Activities used: ${runs.length} (skipped ${skipped} without timestamps, cached surface data, or distance)`);
+  console.log(`Fueling assumed for EVERY fold (flat, not per-race): ${commonInputs.fueling.intakeGPerH} g/h carb intake\n`);
 
   let targetIndices: number[];
   if (RACE_ONLY) {
@@ -193,18 +195,23 @@ function main() {
     const target = runs[targetIdx];
     if (target.actualFinishTimeS <= 0) continue;
     const foldStart = Date.now();
-    process.stderr.write(`fold ${foldsRun + 1}/${targetIndices.length} (${target.id})... `);
 
     const trainingRuns = runs.filter((_, i) => i !== targetIdx);
     const races = trainingRuns.map((r) => r.effortTrendPoints);
     const raceDates = trainingRuns.map((r) => r.date);
     const safeFit = fitTauFInfWithSupportGate(races, baseCeilingParams, { raceDates });
     const fittedCeilingParams = safeFit.ceilingParams;
+    const fitLabel = `tier=${safeFit.tier} tau=${fittedCeilingParams.tauMin?.toFixed(0)}min fInf=${fittedCeilingParams.fInf?.toFixed(3)} f0=${fittedCeilingParams.f0?.toFixed(3)}`;
 
     const solverInputs: SolverInputs = { segments: target.segments, ...commonInputs, ceilingParams: fittedCeilingParams };
     const thetaBased = findSustainableTheta(solverInputs);
     const flatBased = findFlatPacedFinishTime(solverInputs);
 
+    // Single-line, newline-terminated per fold (no partial stderr write
+    // interleaved with stdout) -- a prior run mixing process.stderr.write
+    // (no trailing newline) with console.log produced visibly garbled
+    // output when captured through a background task pipe.
+    const header = `fold ${foldsRun + 1}/${targetIndices.length} ${target.name || target.id} actual=${(target.actualFinishTimeS / 3600).toFixed(2)}h [${fitLabel}]`;
     if (thetaBased.result.feasible && flatBased.result.feasible) {
       const thetaErrorPct = (100 * (thetaBased.result.finishTimeS - target.actualFinishTimeS)) / target.actualFinishTimeS;
       const flatErrorPct = (100 * (flatBased.result.finishTimeS - target.actualFinishTimeS)) / target.actualFinishTimeS;
@@ -214,7 +221,7 @@ function main() {
       // the process partway through -- doesn't throw away every completed
       // fold's result along with it.
       console.log(
-        `  fold result: actual=${(target.actualFinishTimeS / 3600).toFixed(2)}h theta=${thetaErrorPct >= 0 ? "+" : ""}${thetaErrorPct.toFixed(2)}% flat=${flatErrorPct >= 0 ? "+" : ""}${flatErrorPct.toFixed(2)}%`,
+        `${header} -- theta=${thetaErrorPct >= 0 ? "+" : ""}${thetaErrorPct.toFixed(2)}% flat=${flatErrorPct >= 0 ? "+" : ""}${flatErrorPct.toFixed(2)}% total=${Date.now() - foldStart}ms`,
       );
       const outcome: FoldOutcome = {
         actualFinishTimeS: target.actualFinishTimeS,
@@ -223,10 +230,12 @@ function main() {
         oldWasAerobicallyLimited: thetaBased.theta >= 0.999,
       };
       outcomes.push(outcome);
-      appendFileSync(OUTCOMES_JSONL_PATH, JSON.stringify({ runId: target.id, ...outcome }) + "\n");
+      appendFileSync(OUTCOMES_JSONL_PATH, JSON.stringify({ runId: target.id, name: target.name, ...outcome }) + "\n");
+    } else {
+      const reason = (r: typeof thetaBased.result) => (!r.feasible ? (r.bonkIndex !== null ? "bonked" : "stalled") : "ok");
+      console.log(`${header} -- INFEASIBLE theta=${reason(thetaBased.result)} flat=${reason(flatBased.result)} total=${Date.now() - foldStart}ms`);
     }
     foldsRun++;
-    process.stderr.write(`total=${Date.now() - foldStart}ms\n`);
   }
 
   console.log(`Held-out folds run: ${foldsRun}, both models feasible: ${outcomes.length}\n`);
