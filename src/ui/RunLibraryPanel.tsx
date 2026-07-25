@@ -1145,10 +1145,12 @@ export function RunLibraryPanel({
           <div className="fatox-rows">
             {vo2MaxEstimates.map(({ run, estimateMlPerKgPerMin }) => {
               const added = addedVo2MaxRunIds.has(run.id);
+              const date = runDate(run);
               return (
                 <div key={run.id} className="run-library-row">
                   <span className="run-library-row__label">
-                    {run.name} &middot; est. VO2max {estimateMlPerKgPerMin.toFixed(1)} ml/kg/min
+                    {run.name} &middot; {date ? date.toISOString().slice(0, 10) : "unknown date"} &middot; est. VO2max{" "}
+                    {estimateMlPerKgPerMin.toFixed(1)} ml/kg/min
                   </span>
                   <button
                     type="button"
