@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { GpxPoint, PipelineResult } from "../gpx/pipeline";
+import type { GpxPoint } from "../gpx/pipeline";
 import { parseGpx, runPipeline } from "../gpx/pipeline";
 import { analyzeRun } from "../model/analysis";
 import {
@@ -29,13 +29,6 @@ import {
 } from "../model/hrCalibration";
 import { sustainableFraction } from "../model/ceiling";
 import { filterRunsSinceDate, shouldFetchNextBackfillPage, toStoredRunSummaryInput, type BackfillPage } from "../model/stravaBackfill";
-import { computeTauDiagnostic, type RaceDiagnosticPoint } from "../model/tauDiagnostic";
-import { buildRaceDiagnosticPoint } from "../model/raceDiagnosticPoint";
-import {
-  buildWithinRaceDiagnosticPoint,
-  computeWithinRaceDescentDiagnostic,
-  type WithinRaceDiagnosticPoint,
-} from "../model/withinRaceDescentDiagnostic";
 import { estimateVo2MaxFromRun } from "../model/vo2MaxEstimate";
 import {
   addStoredRun,
@@ -191,17 +184,6 @@ function interleave<T>(lists: T[][]): T[] {
     }
   }
   return result;
-}
-
-function courseLegsForRun(run: StoredRun): { course: PipelineResult; label: string }[] {
-  if (run.points === null) return [];
-  const pointLegs = splitAtTransitGaps(run.points);
-  const labeled = pointLegs.map((points, i) => ({
-    course: runPipeline(points),
-    label: pointLegs.length > 1 ? `${run.name} (leg ${i + 1})` : run.name,
-  }));
-  if (pointLegs.length === 1) return labeled;
-  return labeled.filter((l) => l.course.totalDistance3D / 1000 >= MIN_LEG_DISTANCE_KM);
 }
 
 export function RunLibraryPanel({
@@ -401,55 +383,6 @@ export function RunLibraryPanel({
     formInputs.vo2MaxHistory,
     ceilingParams,
   ]);
-
-  // PLAN.md §12 stage 4 / §13: does descent load (or generic intensity)
-  // actually predict this athlete's own tau? Only races with full points
-  // already fetched are included -- no new Strava calls triggered just to
-  // populate a diagnostic. Races whose own single-race fit hit a search
-  // boundary are excluded too (an unreliable estimate would just add noise).
-  const tauDiagnostic = useMemo(() => {
-    const diagnosticCeilingParams = resolveCeilingParams(formInputs);
-    const points: RaceDiagnosticPoint[] = [];
-    for (const run of dedupedRuns) {
-      for (const { course, label } of courseLegsForRun(run)) {
-        const point = buildRaceDiagnosticPoint(label, course, {
-          bodyMassKg: formInputs.bodyMassKg,
-          ceilingParams: diagnosticCeilingParams,
-          fueling: { intakeGPerH: formInputs.intakeGPerH },
-          glycogenStoreG: resolveGlycogenStoreG(formInputs),
-          walkMaxMs: formInputs.walkMaxMs,
-          altitudeAdjustment: formInputs.altitudeAdjustment,
-        });
-        if (point) points.push(point);
-      }
-    }
-    return computeTauDiagnostic(points);
-  }, [dedupedRuns, formInputs]);
-
-  // Within-race redesign of the descent diagnostic above: eccentric-loading
-  // damage from a fast downhill should show up as degraded fade in whatever
-  // comes *after* it, not smeared into a whole-race average -- few real
-  // races have the ideal shape to test that via a whole-race comparison, so
-  // this compares each race's own late-window behavior to its own early-
-  // window descent instead. See withinRaceDescentDiagnostic.ts.
-  const withinRaceDiagnostic = useMemo(() => {
-    const diagnosticCeilingParams = resolveCeilingParams(formInputs);
-    const points: WithinRaceDiagnosticPoint[] = [];
-    for (const run of dedupedRuns) {
-      for (const { course, label } of courseLegsForRun(run)) {
-        const point = buildWithinRaceDiagnosticPoint(label, course, {
-          bodyMassKg: formInputs.bodyMassKg,
-          ceilingParams: diagnosticCeilingParams,
-          fueling: { intakeGPerH: formInputs.intakeGPerH },
-          glycogenStoreG: resolveGlycogenStoreG(formInputs),
-          walkMaxMs: formInputs.walkMaxMs,
-          altitudeAdjustment: formInputs.altitudeAdjustment,
-        });
-        if (point) points.push(point);
-      }
-    }
-    return computeWithinRaceDescentDiagnostic(points);
-  }, [dedupedRuns, formInputs]);
 
   // PLAN.md §12: candidate VO2max estimates from already-fetched runs whose
   // duration falls in the near-maximal-effort window vo2MaxEstimate.ts can
@@ -1166,133 +1099,6 @@ export function RunLibraryPanel({
           </div>
         </div>
       )}
-
-      <div className="run-library__diagnostic">
-        <p className="field-group-note">Diagnostic: does descent (or descent covered fast) or intensity predict your own tau?</p>
-        <p className="field-group-help">
-          Cheap check before considering a model redesign (PLAN.md §12/§13): each already-fetched run's own
-          single-race best-fit tau, average effort, descent per km, and two descent-<em>impact</em> variants per
-          km -- weighting each descending stretch by how fast it was run (descent meters &times; speed, or
-          &times; speed&sup2; for a kinetic-energy-proportional reading) instead of by elevation loss alone, on
-          the theory that eccentric-loading damage tracks how fast you hit the downhills. The stage-5 hypothesis is
-          that harder, more descent-loaded, or faster-descended runs fade <em>faster</em> -- a{" "}
-          <strong>negative</strong> correlation (higher intensity/descent/impact going with a <em>smaller</em>{" "}
-          tau), not just any relationship. Runs whose own fit hit a search-range boundary are excluded as unreliable.
-          Average effort is computed against each run's <em>own</em> best-fit tau, not one shared default -- using one
-          global tau for every run inflates the reading for anything much longer than that tau's own timescale (a
-          ~30h race can otherwise misread as ~100% effort simply because the ceiling has already decayed to near-fInf
-          long before the race is done), which would make short and long runs incomparable on this axis.
-        </p>
-        {tauDiagnostic.points.length < 3 ? (
-          <p className="placeholder">
-            Need at least 3 runs with full data already fetched and a reliable single-race tau fit -- currently{" "}
-            {tauDiagnostic.points.length}.
-          </p>
-        ) : (
-          <>
-            <div className="fatox-rows">
-              {tauDiagnostic.points.map((p, i) => (
-                <div key={i} className="run-library-row">
-                  <span className="run-library-row__label">
-                    {p.label} &middot; tau {p.tauMin} min &middot; {(p.avgIntensity * 100).toFixed(0)}% avg effort
-                    &middot; {p.descentPerKm.toFixed(0)} m/km descent &middot; {p.descentImpactPerKm.toFixed(0)}{" "}
-                    impact/km &middot; {p.descentImpactSquaredPerKm.toFixed(0)} impact&sup2;/km
-                  </span>
-                </div>
-              ))}
-            </div>
-            <p className="field-group-note">
-              Correlation (tau vs. intensity):{" "}
-              {tauDiagnostic.intensityCorrelation !== null ? tauDiagnostic.intensityCorrelation.toFixed(2) : "n/a"}
-              {" · "}
-              Correlation (tau vs. descent):{" "}
-              {tauDiagnostic.descentCorrelation !== null ? tauDiagnostic.descentCorrelation.toFixed(2) : "n/a"}
-              {" · "}
-              Correlation (tau vs. descent impact):{" "}
-              {tauDiagnostic.descentImpactCorrelation !== null
-                ? tauDiagnostic.descentImpactCorrelation.toFixed(2)
-                : "n/a"}
-              {" · "}
-              Correlation (tau vs. descent impact&sup2;):{" "}
-              {tauDiagnostic.descentImpactSquaredCorrelation !== null
-                ? tauDiagnostic.descentImpactSquaredCorrelation.toFixed(2)
-                : "n/a"}
-            </p>
-            <p className="field-group-help">
-              A meaningfully negative value (below roughly −0.5) on any of these supports building that
-              signal into a fade term. Near zero or positive means this athlete's own data doesn't show the effect
-              -- not a reason to build it yet. Watch both descent-impact variants against <em>intensity</em>, not
-              against raw descent: both have speed baked directly into them, so they'll tend to beat raw descent
-              for reasons that have nothing to do with descent -- a fast race scores high on impact and intensity
-              together. The real test of whether descent-at-speed is its own effect is whether either impact
-              variant explains tau any better than intensity alone already does, not whether it beats descent
-              alone. Comparing the two impact variants against each other is also informative: if the squared
-              version tracks tau meaningfully better than the linear one, that favors a kinetic-energy-style
-              relationship over a linear one -- if they're about equally (un)correlated, the exponent isn't
-              distinguishing anything with this library yet.
-            </p>
-          </>
-        )}
-      </div>
-
-      <div className="run-library__diagnostic">
-        <p className="field-group-note">Experimental: does early descent predict a worse-than-expected late fade?</p>
-        <p className="field-group-help">
-          A redesign of the diagnostic above: eccentric-loading damage from a fast downhill should show up as
-          degraded fade in whatever comes <em>after</em> it, not smeared into a whole-race average -- few real
-          races have the ideal shape (fast descent concentrated early, substantial distance remaining after) to
-          test that via a whole-race comparison. This instead splits each race at its midpoint, sums descent in the
-          first half, and computes the second half's own residual trend at the race's already-fitted tau -- near
-          zero if a single clean fade shape explains the whole race, negative if the back half faded faster than
-          that shape predicts. The hypothesis predicts a <strong>negative</strong> correlation (more early descent
-          going with a worse-than-expected late residual). Works with any race that has some early descent -- it
-          doesn't need a specially-shaped race, since the comparison is within each race, not between them. Races
-          whose late half is under an hour are excluded -- not just too few points to fit, but too little time for
-          a real muscular-fatigue effect to plausibly show up in at all (confirmed on real data: a couple of
-          ~20-minute late windows swung wildly and dominated an otherwise-small sample).
-        </p>
-        {withinRaceDiagnostic.points.length < 3 ? (
-          <p className="placeholder">
-            Need at least 3 runs with full data already fetched, a reliable whole-race tau fit, and a late half of at
-            least an hour -- currently {withinRaceDiagnostic.points.length}.
-          </p>
-        ) : (
-          <>
-            <div className="fatox-rows">
-              {withinRaceDiagnostic.points.map((p, i) => (
-                <div key={i} className="run-library-row">
-                  <span className="run-library-row__label">
-                    {p.label} &middot; late residual {p.lateResidualTrendPctPerHour >= 0 ? "+" : ""}
-                    {p.lateResidualTrendPctPerHour.toFixed(1)}%/h &middot; {p.earlyDescentPerKm.toFixed(0)} m/km early
-                    descent &middot; {p.earlyDescentImpactPerKm.toFixed(0)} early impact/km &middot;{" "}
-                    {p.earlyDescentImpactSquaredPerKm.toFixed(0)} early impact&sup2;/km
-                  </span>
-                </div>
-              ))}
-            </div>
-            <p className="field-group-note">
-              Correlation (late residual vs. early descent):{" "}
-              {withinRaceDiagnostic.lateResidualVsEarlyDescentCorrelation !== null
-                ? withinRaceDiagnostic.lateResidualVsEarlyDescentCorrelation.toFixed(2)
-                : "n/a"}
-              {" · "}
-              vs. early descent impact:{" "}
-              {withinRaceDiagnostic.lateResidualVsEarlyDescentImpactCorrelation !== null
-                ? withinRaceDiagnostic.lateResidualVsEarlyDescentImpactCorrelation.toFixed(2)
-                : "n/a"}
-              {" · "}
-              vs. early descent impact&sup2;:{" "}
-              {withinRaceDiagnostic.lateResidualVsEarlyDescentImpactSquaredCorrelation !== null
-                ? withinRaceDiagnostic.lateResidualVsEarlyDescentImpactSquaredCorrelation.toFixed(2)
-                : "n/a"}
-            </p>
-            <p className="field-group-help">
-              Newer and less battle-tested than the whole-race diagnostic above -- treat any result here as a
-              first read, not a settled one. The 50/50 early/late split is a fixed default, not tuned yet.
-            </p>
-          </>
-        )}
-      </div>
     </div>
   );
 }
