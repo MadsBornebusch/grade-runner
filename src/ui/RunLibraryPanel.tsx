@@ -88,6 +88,32 @@ function oneYearAgoDateInput(): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Persists the backfill "from" date across sessions (same localStorage
+ * pattern as formInputs.ts's own settings) -- so a returning user doesn't
+ * have to remember or re-enter it, and clicking the same button again
+ * naturally becomes an incremental update: after a successful backfill,
+ * this is advanced to today, so next time there's nothing to re-scan
+ * except whatever's genuinely new since then. */
+const LAST_BACKFILL_DATE_STORAGE_KEY = "grade-runner:lastBackfillDate";
+
+function loadLastBackfillDate(): string | null {
+  try {
+    return localStorage.getItem(LAST_BACKFILL_DATE_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveLastBackfillDate(dateInput: string): void {
+  try {
+    localStorage.setItem(LAST_BACKFILL_DATE_STORAGE_KEY, dateInput);
+  } catch {
+    // Storage can fail (private browsing, quota) -- losing the saved date
+    // just means the next visit falls back to the one-year-ago default,
+    // not a functional break.
+  }
+}
+
 /** Which values `fitTauFInfWithSupportGate` actually applied, if any -- the
  * tau-only fit and the joint fInf/tau fit are two independently-run,
  * methodologically different searches (one holds fInf fixed, the other
@@ -169,7 +195,7 @@ export function RunLibraryPanel({
   const [computingTauCI, setComputingTauCI] = useState(false);
   const [halfLifeDays, setHalfLifeDays] = useState(DEFAULT_HALF_LIFE_DAYS);
 
-  const [backfillFrom, setBackfillFrom] = useState(oneYearAgoDateInput);
+  const [backfillFrom, setBackfillFrom] = useState(() => loadLastBackfillDate() ?? oneYearAgoDateInput());
   const [backfilling, setBackfilling] = useState(false);
   const [backfillProgress, setBackfillProgress] = useState<string | null>(null);
 
@@ -276,6 +302,14 @@ export function RunLibraryPanel({
         await new Promise((r) => setTimeout(r, BACKFILL_PAGE_DELAY_MS));
       }
       setBackfillProgress(`Imported ${imported} run${imported === 1 ? "" : "s"} since ${backfillFrom}.`);
+      // Advances the saved date to today on ANY successful completion (even
+      // zero new runs) -- it means everything up to today has now been
+      // checked, so the next click (with no date change needed) only looks
+      // for whatever's genuinely new since then, turning this same button
+      // into an incremental "check for new runs" update.
+      const today = new Date().toISOString().slice(0, 10);
+      saveLastBackfillDate(today);
+      setBackfillFrom(today);
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Backfill failed.");
@@ -690,9 +724,11 @@ export function RunLibraryPanel({
             </button>
           </div>
           <p className="field-group-help">
-            Pulls a lightweight summary (distance, duration, elevation, avg heart rate/power) for every run in this
-            range -- no full GPS data yet, so this stays cheap regardless of how far back you go. Full data for a
-            specific run is only fetched once you actually select it below.
+            Pulls a lightweight summary (distance, duration, elevation, avg heart rate/power) for every run since
+            this date, then automatically fetches full GPS data for whichever of those are actually useful for the
+            fits below (hard efforts, longest runs, duration spread) -- no manual selection needed. After a
+            successful run, this date advances to today, so clicking the same button again only checks for
+            whatever's genuinely new since then -- the same button doubles as an update check.
           </p>
           {backfillProgress && <p className="field-group-note">{backfillProgress}</p>}
         </>
