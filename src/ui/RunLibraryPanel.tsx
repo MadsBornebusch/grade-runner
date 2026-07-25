@@ -244,7 +244,6 @@ export function RunLibraryPanel({
       setTransitGapCount(0);
       setExcludedForDurationCount(0);
       setFitRan(false);
-      setDeselectedSuggestionIds(new Set());
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to clear the run library.");
