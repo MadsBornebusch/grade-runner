@@ -78,11 +78,21 @@ const BACKFILL_PAGE_DELAY_MS = 300;
  * fully automatic (no one is scanning rows) -- a 10-per-bucket cap
  * silently starved a real backfill of 280 summaries down to just 10
  * downloaded runs, nowhere near enough moving time to fit anything. This
- * is a much larger bound for the automatic path specifically, high enough
- * that a normal backfill actually gets enough long/diverse runs to work
- * with, not so high that a very large library tries to fetch everything
- * in one pass and risks Strava's own rate limits. */
+ * is the PER-BUCKET pool size fed into suggestRunsForFit -- generous on
+ * purpose, since AUTO_FETCH_TOTAL_CAP below is what actually bounds how
+ * many get fetched; this just needs to be large enough that each bucket
+ * has enough of its own pool to pick a good, diverse set from before that
+ * final cap trims the combined list down. */
 const AUTO_FETCH_CANDIDATE_COUNT = 60;
+/** The REAL ceiling on how many runs get auto-fetched in one pass, across
+ * all three suggestion buckets combined -- suggestRunsForFit's own
+ * candidateCount only bounds each bucket independently, so passing it
+ * AUTO_FETCH_CANDIDATE_COUNT alone still let the deduped union balloon to
+ * up to 3x that (a real 280-summary backfill produced 138 candidates, not
+ * 60). This total is enforced by interleaving picks round-robin across the
+ * three buckets before truncating, so a big vo2max pool can't crowd out
+ * the durability/duration-spread picks the tau fit actually needs. */
+const AUTO_FETCH_TOTAL_CAP = 60;
 /** Paces auto-fetches so a large batch doesn't hammer Strava's API all at
  * once and trip its rate limit -- same spirit as BACKFILL_PAGE_DELAY_MS. */
 const AUTO_FETCH_DELAY_MS = 250;
@@ -166,6 +176,22 @@ function runDate(run: StoredRun): Date | null {
  * behavior, since a short *recorded* run isn't the problem this guards
  * against. */
 const MIN_LEG_DISTANCE_KM = 5;
+
+/** Round-robin across several lists (one pick from each in turn) instead of
+ * concatenating them -- used to combine the three suggestion buckets before
+ * truncating to AUTO_FETCH_TOTAL_CAP, so a bucket with a big pool (e.g.
+ * vo2max candidates) can't crowd out every pick from a smaller one (e.g.
+ * duration-spread) just by coming first in a plain concat-then-slice. */
+function interleave<T>(lists: T[][]): T[] {
+  const result: T[] = [];
+  const maxLen = Math.max(0, ...lists.map((l) => l.length));
+  for (let i = 0; i < maxLen; i++) {
+    for (const list of lists) {
+      if (i < list.length) result.push(list[i]);
+    }
+  }
+  return result;
+}
 
 function courseLegsForRun(run: StoredRun): { course: PipelineResult; label: string }[] {
   if (run.points === null) return [];
@@ -670,8 +696,12 @@ export function RunLibraryPanel({
   // both a durability and a duration-spread candidate) -- dedupe by id so it
   // isn't counted or fetched twice.
   const suggestedRuns = useMemo(() => {
-    const byId = new Map([...suggestions.vo2max, ...suggestions.durability, ...suggestions.durationSpread].map((r) => [r.id, r]));
-    return [...byId.values()];
+    const interleaved = interleave([suggestions.vo2max, suggestions.durability, suggestions.durationSpread]);
+    const byId = new Map<string, StoredRun>();
+    for (const r of interleaved) {
+      if (!byId.has(r.id)) byId.set(r.id, r);
+    }
+    return [...byId.values()].slice(0, AUTO_FETCH_TOTAL_CAP);
   }, [suggestions]);
   const pendingSuggestedRuns = useMemo(() => suggestedRuns.filter((r) => r.points === null), [suggestedRuns]);
   const [fetchProgress, setFetchProgress] = useState<{ done: number; total: number } | null>(null);
