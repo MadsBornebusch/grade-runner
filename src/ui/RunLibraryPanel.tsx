@@ -71,6 +71,22 @@ const BACKFILL_MAX_PAGES = 50;
 const BACKFILL_PER_PAGE = 100;
 const BACKFILL_PAGE_DELAY_MS = 300;
 
+/** suggestRunsForFit's own default (10 per bucket) is deliberately small --
+ * it exists to keep a MANUAL review list short (see that file's own doc:
+ * "meant to replace manually scanning hundreds of rows, not to invite
+ * fetching all of them"). That rationale doesn't apply once fetching is
+ * fully automatic (no one is scanning rows) -- a 10-per-bucket cap
+ * silently starved a real backfill of 280 summaries down to just 10
+ * downloaded runs, nowhere near enough moving time to fit anything. This
+ * is a much larger bound for the automatic path specifically, high enough
+ * that a normal backfill actually gets enough long/diverse runs to work
+ * with, not so high that a very large library tries to fetch everything
+ * in one pass and risks Strava's own rate limits. */
+const AUTO_FETCH_CANDIDATE_COUNT = 60;
+/** Paces auto-fetches so a large batch doesn't hammer Strava's API all at
+ * once and trip its rate limit -- same spirit as BACKFILL_PAGE_DELAY_MS. */
+const AUTO_FETCH_DELAY_MS = 250;
+
 const DEFAULT_HALF_LIFE_DAYS = 75;
 /** Only the strongest few estimates are shown -- see vo2MaxEstimates below
  * for why sorting by estimate descending is itself the intensity filter. */
@@ -217,23 +233,32 @@ export function RunLibraryPanel({
   // count in the run list, a fit, the suggestions, or the diagnostic.
   const { kept: dedupedRuns, duplicateGroups } = useMemo(() => dedupeStoredRuns(runs), [runs]);
 
-  const [removingDuplicates, setRemovingDuplicates] = useState(false);
-  const removeDuplicates = async () => {
-    setRemovingDuplicates(true);
-    setError(null);
-    try {
-      for (const group of duplicateGroups) {
-        for (const redundant of group.slice(1)) {
-          await deleteStoredRun(redundant.id);
+  // Silently cleans up duplicates as soon as they're found -- no button, no
+  // warning banner. dedupedRuns already excludes them from every list/fit/
+  // suggestion above, so nothing depends on this finishing quickly; it's
+  // pure storage hygiene.
+  useEffect(() => {
+    if (duplicateGroups.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        for (const group of duplicateGroups) {
+          for (const redundant of group.slice(1)) {
+            if (cancelled) return;
+            await deleteStoredRun(redundant.id);
+          }
         }
+        if (!cancelled) refresh();
+      } catch {
+        // Silent by design (matches the "no notification" ask) -- worst
+        // case a duplicate lingers until the next render re-attempts it.
       }
-      refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to remove duplicates.");
-    } finally {
-      setRemovingDuplicates(false);
-    }
-  };
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duplicateGroups]);
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -640,7 +665,7 @@ export function RunLibraryPanel({
     [fitResult, fInfFitResult, tauCI],
   );
 
-  const suggestions = useMemo(() => suggestRunsForFit(dedupedRuns), [dedupedRuns]);
+  const suggestions = useMemo(() => suggestRunsForFit(dedupedRuns, AUTO_FETCH_CANDIDATE_COUNT), [dedupedRuns]);
   // A run can appear in more than one bucket (e.g. the single longest run is
   // both a durability and a duration-spread candidate) -- dedupe by id so it
   // isn't counted or fetched twice.
@@ -649,28 +674,42 @@ export function RunLibraryPanel({
     return [...byId.values()];
   }, [suggestions]);
   const pendingSuggestedRuns = useMemo(() => suggestedRuns.filter((r) => r.points === null), [suggestedRuns]);
+  const [fetchProgress, setFetchProgress] = useState<{ done: number; total: number } | null>(null);
 
   // Auto-fetches full data for every suggested run -- no manual approve/
   // exclude step. Only re-runs when the pending set actually changes (which
   // only happens once refresh() below updates `runs` post-fetch), so this
   // settles once every suggestion has full data, rather than looping.
+  // Continues past a single run's own fetch failure (paced, so a large
+  // batch doesn't trip Strava's rate limit in the first place) rather than
+  // aborting the whole batch on the first error -- with dozens of runs, one
+  // bad fetch shouldn't cost every other one.
   useEffect(() => {
-    if (pendingSuggestedRuns.length === 0) return;
+    if (pendingSuggestedRuns.length === 0) {
+      setFetchProgress(null);
+      return;
+    }
     let cancelled = false;
     (async () => {
       setFetchingSuggestions(true);
       setError(null);
-      try {
-        for (const run of pendingSuggestedRuns) {
-          if (cancelled) return;
-          await ensurePoints(run);
+      const total = pendingSuggestedRuns.length;
+      let failures = 0;
+      for (let i = 0; i < total; i++) {
+        if (cancelled) return;
+        setFetchProgress({ done: i, total });
+        try {
+          await ensurePoints(pendingSuggestedRuns[i]);
+        } catch {
+          failures++;
         }
-        if (!cancelled) refresh();
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to fetch suggested runs.");
-      } finally {
-        if (!cancelled) setFetchingSuggestions(false);
+        if (i < total - 1) await new Promise((r) => setTimeout(r, AUTO_FETCH_DELAY_MS));
       }
+      if (cancelled) return;
+      setFetchProgress(null);
+      setFetchingSuggestions(false);
+      if (failures > 0) setError(`Fetched ${total - failures} of ${total} recommended runs -- ${failures} failed (Strava rate limit or a transient error). Try again shortly.`);
+      refresh();
     })();
     return () => {
       cancelled = true;
@@ -737,17 +776,9 @@ export function RunLibraryPanel({
       {error && <p className="gpx-upload__error">{error}</p>}
 
       {fetchingSuggestions && (
-        <p className="field-group-note">Fetching full data for recommended runs (hard efforts, longest runs, duration spread)…</p>
-      )}
-
-      {duplicateGroups.length > 0 && (
-        <p className="warning">
-          Found {duplicateGroups.length} run{duplicateGroups.length === 1 ? "" : "s"} stored twice under different
-          ids (e.g. uploaded manually and later pulled in again via Strava backfill) -- excluded from the list,
-          fit, suggestions, and diagnostic below, but still sitting in storage.{" "}
-          <button type="button" className="fatox-add" onClick={() => void removeDuplicates()} disabled={removingDuplicates}>
-            {removingDuplicates ? "Removing…" : `Remove ${duplicateGroups.length} duplicate entr${duplicateGroups.length === 1 ? "y" : "ies"}`}
-          </button>
+        <p className="field-group-note">
+          Fetching full data for recommended runs (hard efforts, longest runs, duration spread)
+          {fetchProgress ? ` -- ${fetchProgress.done} of ${fetchProgress.total}…` : "…"}
         </p>
       )}
 
