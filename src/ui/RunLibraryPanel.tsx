@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GpxPoint } from "../gpx/pipeline";
 import { parseGpx, runPipeline } from "../gpx/pipeline";
 import { analyzeRun } from "../model/analysis";
@@ -35,6 +35,7 @@ import {
   clearStoredRuns,
   deleteStoredRun,
   listStoredRuns,
+  markRunsWantedForFetch,
   setStoredRunPoints,
   setStoredRunSurfaceEdges,
   upsertStoredRunSummary,
@@ -229,6 +230,34 @@ export function RunLibraryPanel({
     listStoredRuns().then(setRuns).catch((err) => setError(String(err)));
   }, []);
 
+  // Computes "which summary-only runs are worth fetching full data for"
+  // ONCE (via suggestRunsForFit + the same interleave-then-cap logic as
+  // before) and PERSISTS the decision (StoredRun.wantsFullData), rather
+  // than re-deriving it reactively on every render. Re-deriving reactively
+  // was the actual cause of fetches appearing to "fail and restart":
+  // listStoredRuns() (called by refresh()) returns a brand-new array every
+  // time even when nothing meaningful changed, so any refresh() firing
+  // anywhere (duplicate cleanup, a manual fit, etc.) gave the fetch
+  // effect's own dependency a new-but-similar list, aborting whatever
+  // iteration was in flight and restarting from a fresh (but nearly
+  // identical) batch. Marking is idempotent and cheap to call again with
+  // an unchanged candidate set (already-marked ids are just skipped).
+  const markNewFetchCandidates = useCallback(async () => {
+    const freshRuns = await listStoredRuns();
+    const { kept } = dedupeStoredRuns(freshRuns);
+    const suggestions = suggestRunsForFit(kept, AUTO_FETCH_CANDIDATE_COUNT);
+    const interleaved = interleave([suggestions.vo2max, suggestions.durability, suggestions.durationSpread]);
+    const byId = new Map<string, StoredRun>();
+    for (const r of interleaved) {
+      if (!byId.has(r.id)) byId.set(r.id, r);
+    }
+    const candidateIds = [...byId.values()]
+      .slice(0, AUTO_FETCH_TOTAL_CAP)
+      .filter((r) => !r.wantsFullData)
+      .map((r) => r.id);
+    if (candidateIds.length > 0) await markRunsWantedForFetch(candidateIds);
+  }, []);
+
   useEffect(() => {
     refresh();
   }, [refresh]);
@@ -343,13 +372,17 @@ export function RunLibraryPanel({
       const today = new Date().toISOString().slice(0, 10);
       saveLastBackfillDate(today);
       setBackfillFrom(today);
+      // Decides which of the just-imported summaries are worth fetching
+      // full data for, ONCE, right here -- not left to be re-derived
+      // reactively later (see markNewFetchCandidates' own doc).
+      await markNewFetchCandidates();
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Backfill failed.");
     } finally {
       setBackfilling(false);
     }
-  }, [backfillFrom, refresh]);
+  }, [backfillFrom, markNewFetchCandidates, refresh]);
 
   const ceilingParams = resolveCeilingParams(formInputs);
 
@@ -650,31 +683,31 @@ export function RunLibraryPanel({
     [fitResult, fInfFitResult, tauCI],
   );
 
-  const suggestions = useMemo(() => suggestRunsForFit(dedupedRuns, AUTO_FETCH_CANDIDATE_COUNT), [dedupedRuns]);
-  // A run can appear in more than one bucket (e.g. the single longest run is
-  // both a durability and a duration-spread candidate) -- dedupe by id so it
-  // isn't counted or fetched twice.
-  const suggestedRuns = useMemo(() => {
-    const interleaved = interleave([suggestions.vo2max, suggestions.durability, suggestions.durationSpread]);
-    const byId = new Map<string, StoredRun>();
-    for (const r of interleaved) {
-      if (!byId.has(r.id)) byId.set(r.id, r);
-    }
-    return [...byId.values()].slice(0, AUTO_FETCH_TOTAL_CAP);
-  }, [suggestions]);
-  const pendingSuggestedRuns = useMemo(() => suggestedRuns.filter((r) => r.points === null), [suggestedRuns]);
+  // One-time catch-up for runs backfilled before this flag existed (or from
+  // any earlier session where marking didn't happen yet) -- guarded so it
+  // only ever fires once per mount, not on every dedupedRuns recompute.
+  const ranCatchUpMarking = useRef(false);
+  useEffect(() => {
+    if (ranCatchUpMarking.current) return;
+    if (!dedupedRuns.some((r) => r.points === null && !r.wantsFullData)) return;
+    ranCatchUpMarking.current = true;
+    void markNewFetchCandidates().then(refresh);
+  }, [dedupedRuns, markNewFetchCandidates, refresh]);
+
+  const pendingFetchRuns = useMemo(() => dedupedRuns.filter((r) => r.wantsFullData && r.points === null), [dedupedRuns]);
+  // A plain string, not the array itself, so the effect below only
+  // restarts when the actual SET of pending ids changes -- not every time
+  // dedupedRuns gets a new (but equivalent) array reference.
+  const pendingFetchKey = useMemo(() => pendingFetchRuns.map((r) => r.id).sort().join(","), [pendingFetchRuns]);
   const [fetchProgress, setFetchProgress] = useState<{ done: number; total: number } | null>(null);
 
-  // Auto-fetches full data for every suggested run -- no manual approve/
-  // exclude step. Only re-runs when the pending set actually changes (which
-  // only happens once refresh() below updates `runs` post-fetch), so this
-  // settles once every suggestion has full data, rather than looping.
-  // Continues past a single run's own fetch failure (paced, so a large
-  // batch doesn't trip Strava's rate limit in the first place) rather than
-  // aborting the whole batch on the first error -- with dozens of runs, one
-  // bad fetch shouldn't cost every other one.
+  // Auto-fetches full data for every marked-wanted run -- no manual approve/
+  // exclude step. Continues past a single run's own fetch failure (paced,
+  // so a large batch doesn't trip Strava's rate limit in the first place)
+  // rather than aborting the whole batch on the first error -- with dozens
+  // of runs, one bad fetch shouldn't cost every other one.
   useEffect(() => {
-    if (pendingSuggestedRuns.length === 0) {
+    if (pendingFetchRuns.length === 0) {
       setFetchProgress(null);
       return;
     }
@@ -682,13 +715,13 @@ export function RunLibraryPanel({
     (async () => {
       setFetchingSuggestions(true);
       setError(null);
-      const total = pendingSuggestedRuns.length;
+      const total = pendingFetchRuns.length;
       let failures = 0;
       for (let i = 0; i < total; i++) {
         if (cancelled) return;
         setFetchProgress({ done: i, total });
         try {
-          await ensurePoints(pendingSuggestedRuns[i]);
+          await ensurePoints(pendingFetchRuns[i]);
         } catch {
           failures++;
         }
@@ -704,7 +737,7 @@ export function RunLibraryPanel({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingSuggestedRuns]);
+  }, [pendingFetchKey]);
 
   const readyCount = dedupedRuns.filter((r) => r.points !== null).length;
 

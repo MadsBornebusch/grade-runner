@@ -35,6 +35,22 @@ export interface StoredRun {
    * forever over what might have been a transient outage.
    */
   surfaceEdges?: ValhallaSurfaceEdge[];
+  /**
+   * Set once, right after a backfill identifies this summary-only run as
+   * worth fetching full data for (a suggestRunsForFit candidate) -- the
+   * auto-fetch effect in RunLibraryPanel.tsx then just filters on this flag
+   * plus points===null, instead of re-deriving "what's worth fetching" from
+   * a live re-ranking on every render. Re-ranking reactively was the actual
+   * cause of fetches appearing to "fail and restart" -- suggestRunsForFit's
+   * candidate set can shift slightly as runs gain full data, so recomputing
+   * it mid-batch (any time `runs` got a new array reference, which
+   * listStoredRuns() gives on every call even with unchanged content)
+   * could hand the fetch effect a different-enough list to look like it
+   * started over. Persisting the decision once makes "which runs do we
+   * still owe full data" a stable, inspectable fact instead of a derived
+   * value that can flicker.
+   */
+  wantsFullData?: boolean;
 }
 
 export interface StravaRunSummaryInput {
@@ -148,6 +164,28 @@ export async function setStoredRunSurfaceEdges(id: string, surfaceEdges: Valhall
       const existing = getReq.result as StoredRun | undefined;
       if (existing) store.put({ ...existing, surfaceEdges });
     };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/** Marks a set of already-stored summary rows as wanted for a full-data
+ * fetch -- one transaction, not one per id. Silently skips any id that
+ * isn't actually present (e.g. deleted as a duplicate between being
+ * suggested and marked) rather than failing the whole batch over it. */
+export async function markRunsWantedForFetch(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    for (const id of ids) {
+      const getReq = store.get(id);
+      getReq.onsuccess = () => {
+        const existing = getReq.result as StoredRun | undefined;
+        if (existing) store.put({ ...existing, wantsFullData: true });
+      };
+    }
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
