@@ -51,6 +51,21 @@ export interface StoredRun {
    * value that can flicker.
    */
   wantsFullData?: boolean;
+  /**
+   * Set once, after this run's full data has been downloaded and checked
+   * against the VO2max estimate's own duration window (see
+   * vo2MaxEstimate.ts's isEstimableEffort) -- true if at least one of its
+   * transit-gap-split legs qualifies, false if none do. Safe to cache
+   * indefinitely: which duration bucket a leg's own moving time falls
+   * into depends only on GPS-detected pauses (never on any user-editable
+   * setting), not on formInputs, so this verdict can't go stale the way a
+   * computed *value* (which does depend on bodyMassKg/ceilingParams/etc.)
+   * would. undefined = not yet checked. Lets RunLibraryPanel.tsx skip
+   * re-running the full pipeline (transit-gap split + course build) on
+   * every render for a run already known to have no usable leg, instead
+   * of silently re-testing the same negative result over and over.
+   */
+  vo2MaxEstimable?: boolean;
 }
 
 export interface StravaRunSummaryInput {
@@ -184,6 +199,29 @@ export async function markRunsWantedForFetch(ids: string[]): Promise<void> {
       getReq.onsuccess = () => {
         const existing = getReq.result as StoredRun | undefined;
         if (existing) store.put({ ...existing, wantsFullData: true });
+      };
+    }
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/** Persists the VO2max-estimability verdict (see StoredRun.vo2MaxEstimable's
+ * own doc) for a batch of runs in one transaction. Each entry's own
+ * `estimable` value is written independently -- unlike markRunsWantedForFetch,
+ * this isn't a uniform "set true for all of these" call, since different
+ * runs resolve to true or false. */
+export async function setVo2MaxEstimability(results: { id: string; estimable: boolean }[]): Promise<void> {
+  if (results.length === 0) return;
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    for (const { id, estimable } of results) {
+      const getReq = store.get(id);
+      getReq.onsuccess = () => {
+        const existing = getReq.result as StoredRun | undefined;
+        if (existing) store.put({ ...existing, vo2MaxEstimable: estimable });
       };
     }
     tx.oncomplete = () => resolve();

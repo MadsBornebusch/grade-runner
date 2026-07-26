@@ -29,7 +29,7 @@ import {
 } from "../model/hrCalibration";
 import { sustainableFraction } from "../model/ceiling";
 import { filterRunsSinceDate, shouldFetchNextBackfillPage, toStoredRunSummaryInput, type BackfillPage } from "../model/stravaBackfill";
-import { estimateVo2MaxFromRun } from "../model/vo2MaxEstimate";
+import { estimateVo2MaxFromRun, isEstimableEffort } from "../model/vo2MaxEstimate";
 import {
   addStoredRun,
   clearStoredRuns,
@@ -37,6 +37,7 @@ import {
   listStoredRuns,
   markRunsWantedForFetch,
   setStoredRunSurfaceEdges,
+  setVo2MaxEstimability,
   upsertStoredRunSummary,
   type StoredRun,
 } from "../storage/runLibrary";
@@ -437,12 +438,24 @@ export function RunLibraryPanel({
   // Each leg is its own candidate, dated from its own first point rather
   // than the whole run's start, since a later leg's actual effort happened
   // well after the run's nominal start time.
-  const vo2MaxEstimates = useMemo(() => {
+  // vo2MaxEstimable (see StoredRun's own doc) caches whether ANY of a run's
+  // transit-split legs falls in the VO2max estimate's duration window --
+  // that's decided purely by GPS-detected pauses (isEstimableEffort's own
+  // input), never by formInputs, so it's safe to persist indefinitely and
+  // skip re-running the whole transit-split + course-build pipeline for a
+  // run already known to have no usable leg. The actual ESTIMATE VALUE
+  // still depends on formInputs (bodyMassKg, ceilingParams, ...) and is
+  // recomputed fresh every time regardless -- only the cheap duration gate
+  // is cached, not the number itself.
+  const vo2MaxComputation = useMemo(() => {
     const estimateCeilingParams = resolveCeilingParams(formInputs);
     const results: Vo2MaxCandidate[] = [];
+    const newEstimabilityVerdicts: { id: string; estimable: boolean }[] = [];
     for (const run of dedupedRuns) {
       if (run.points === null) continue;
+      if (run.vo2MaxEstimable === false) continue;
       const pointLegs = splitAtTransitGaps(run.points);
+      let anyLegEstimable = false;
       for (let i = 0; i < pointLegs.length; i++) {
         const legPoints = pointLegs[i];
         const course = runPipeline(legPoints);
@@ -456,6 +469,7 @@ export function RunLibraryPanel({
           walkMaxMs: formInputs.walkMaxMs,
           altitudeAdjustment: formInputs.altitudeAdjustment,
         });
+        if (isEstimableEffort(analysis.totalMovingTimeS / 60)) anyLegEstimable = true;
         const estimateMlPerKgPerMin = estimateVo2MaxFromRun(analysis, estimateCeilingParams);
         if (estimateMlPerKgPerMin === null) continue;
         results.push({
@@ -465,9 +479,23 @@ export function RunLibraryPanel({
           estimateMlPerKgPerMin,
         });
       }
+      if (run.vo2MaxEstimable === undefined) newEstimabilityVerdicts.push({ id: run.id, estimable: anyLegEstimable });
     }
-    return results.sort((a, b) => b.estimateMlPerKgPerMin - a.estimateMlPerKgPerMin).slice(0, MAX_VO2MAX_ESTIMATES_SHOWN);
+    return {
+      estimates: results.sort((a, b) => b.estimateMlPerKgPerMin - a.estimateMlPerKgPerMin).slice(0, MAX_VO2MAX_ESTIMATES_SHOWN),
+      newEstimabilityVerdicts,
+    };
   }, [dedupedRuns, formInputs]);
+
+  const vo2MaxEstimates = vo2MaxComputation.estimates;
+
+  // Persists newly-determined verdicts once (see StoredRun.vo2MaxEstimable's
+  // doc) -- refresh() afterward so dedupedRuns picks up the cached flag and
+  // stops re-testing these runs on the next recompute.
+  useEffect(() => {
+    if (vo2MaxComputation.newEstimabilityVerdicts.length === 0) return;
+    void setVo2MaxEstimability(vo2MaxComputation.newEstimabilityVerdicts).then(refresh);
+  }, [vo2MaxComputation.newEstimabilityVerdicts, refresh]);
 
   const [addedVo2MaxRunIds, setAddedVo2MaxRunIds] = useState<Set<string>>(new Set());
   const addVo2MaxEstimate = (candidate: Vo2MaxCandidate) => {
