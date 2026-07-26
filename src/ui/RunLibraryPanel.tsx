@@ -394,33 +394,59 @@ export function RunLibraryPanel({
   // descending and showing only the top few naturally surfaces the runs
   // most likely to have actually been run near-maximally, without needing a
   // separate intensity signal.
+  interface Vo2MaxCandidate {
+    id: string;
+    label: string;
+    date: Date | null;
+    estimateMlPerKgPerMin: number;
+  }
+
+  // Splits each run at any transit gap first (same fix as runFit() below --
+  // a watch left running across a train/bus/car leg can hide a transit hop
+  // inside an otherwise-real run, showing up as impossible pace; fed
+  // straight into analyzeRun unsplit, that badly distorts (or, if it pushes
+  // the whole span outside the estimable-duration window, silently drops)
+  // the VO2max estimate for what would otherwise be a perfectly good run).
+  // Each leg is its own candidate, dated from its own first point rather
+  // than the whole run's start, since a later leg's actual effort happened
+  // well after the run's nominal start time.
   const vo2MaxEstimates = useMemo(() => {
     const estimateCeilingParams = resolveCeilingParams(formInputs);
-    const results: { run: StoredRun; estimateMlPerKgPerMin: number }[] = [];
+    const results: Vo2MaxCandidate[] = [];
     for (const run of dedupedRuns) {
       if (run.points === null) continue;
-      const course = runPipeline(run.points);
-      if (!course.hasTimestamps) continue;
-      const analysis = analyzeRun(course.segments, {
-        bodyMassKg: formInputs.bodyMassKg,
-        ceilingParams: estimateCeilingParams,
-        fueling: { intakeGPerH: formInputs.intakeGPerH },
-        glycogenStoreG: resolveGlycogenStoreG(formInputs),
-        walkMaxMs: formInputs.walkMaxMs,
-        altitudeAdjustment: formInputs.altitudeAdjustment,
-      });
-      const estimateMlPerKgPerMin = estimateVo2MaxFromRun(analysis, estimateCeilingParams);
-      if (estimateMlPerKgPerMin === null) continue;
-      results.push({ run, estimateMlPerKgPerMin });
+      const pointLegs = splitAtTransitGaps(run.points);
+      for (let i = 0; i < pointLegs.length; i++) {
+        const legPoints = pointLegs[i];
+        const course = runPipeline(legPoints);
+        if (!course.hasTimestamps) continue;
+        if (pointLegs.length > 1 && course.totalDistance3D / 1000 < MIN_LEG_DISTANCE_KM) continue;
+        const analysis = analyzeRun(course.segments, {
+          bodyMassKg: formInputs.bodyMassKg,
+          ceilingParams: estimateCeilingParams,
+          fueling: { intakeGPerH: formInputs.intakeGPerH },
+          glycogenStoreG: resolveGlycogenStoreG(formInputs),
+          walkMaxMs: formInputs.walkMaxMs,
+          altitudeAdjustment: formInputs.altitudeAdjustment,
+        });
+        const estimateMlPerKgPerMin = estimateVo2MaxFromRun(analysis, estimateCeilingParams);
+        if (estimateMlPerKgPerMin === null) continue;
+        results.push({
+          id: pointLegs.length > 1 ? `${run.id}-leg${i + 1}` : run.id,
+          label: pointLegs.length > 1 ? `${run.name} (leg ${i + 1})` : run.name,
+          date: legPoints[0]?.time ?? runDate(run),
+          estimateMlPerKgPerMin,
+        });
+      }
     }
     return results.sort((a, b) => b.estimateMlPerKgPerMin - a.estimateMlPerKgPerMin).slice(0, MAX_VO2MAX_ESTIMATES_SHOWN);
   }, [dedupedRuns, formInputs]);
 
   const [addedVo2MaxRunIds, setAddedVo2MaxRunIds] = useState<Set<string>>(new Set());
-  const addVo2MaxEstimate = (run: StoredRun, estimateMlPerKgPerMin: number) => {
-    const date = runDate(run)?.toISOString().slice(0, 10) ?? new Date().toISOString().slice(0, 10);
-    onAddVo2MaxEntry({ date, value: Math.round(estimateMlPerKgPerMin), source: "race" });
-    setAddedVo2MaxRunIds((prev) => new Set(prev).add(run.id));
+  const addVo2MaxEstimate = (candidate: Vo2MaxCandidate) => {
+    const date = candidate.date?.toISOString().slice(0, 10) ?? new Date().toISOString().slice(0, 10);
+    onAddVo2MaxEntry({ date, value: Math.round(candidate.estimateMlPerKgPerMin), source: "race" });
+    setAddedVo2MaxRunIds((prev) => new Set(prev).add(candidate.id));
   };
 
   /** Fetches and persists full points for a summary-only row; a no-op if
@@ -1076,21 +1102,15 @@ export function RunLibraryPanel({
             test but more than a bare guess.
           </p>
           <div className="fatox-rows">
-            {vo2MaxEstimates.map(({ run, estimateMlPerKgPerMin }) => {
-              const added = addedVo2MaxRunIds.has(run.id);
-              const date = runDate(run);
+            {vo2MaxEstimates.map((candidate) => {
+              const added = addedVo2MaxRunIds.has(candidate.id);
               return (
-                <div key={run.id} className="run-library-row">
+                <div key={candidate.id} className="run-library-row">
                   <span className="run-library-row__label">
-                    {run.name} &middot; {date ? date.toISOString().slice(0, 10) : "unknown date"} &middot; est. VO2max{" "}
-                    {estimateMlPerKgPerMin.toFixed(1)} ml/kg/min
+                    {candidate.label} &middot; {candidate.date ? candidate.date.toISOString().slice(0, 10) : "unknown date"} &middot; est.
+                    VO2max {candidate.estimateMlPerKgPerMin.toFixed(1)} ml/kg/min
                   </span>
-                  <button
-                    type="button"
-                    className="fatox-add"
-                    onClick={() => addVo2MaxEstimate(run, estimateMlPerKgPerMin)}
-                    disabled={added}
-                  >
+                  <button type="button" className="fatox-add" onClick={() => addVo2MaxEstimate(candidate)} disabled={added}>
                     {added ? "Added" : "Add to history"}
                   </button>
                 </div>
