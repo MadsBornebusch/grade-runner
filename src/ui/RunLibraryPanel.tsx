@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { GpxPoint } from "../gpx/pipeline";
 import { parseGpx, runPipeline } from "../gpx/pipeline";
 import { analyzeRun } from "../model/analysis";
@@ -36,14 +36,13 @@ import {
   deleteStoredRun,
   listStoredRuns,
   markRunsWantedForFetch,
-  setStoredRunPoints,
   setStoredRunSurfaceEdges,
   upsertStoredRunSummary,
   type StoredRun,
 } from "../storage/runLibrary";
 import { resolveCeilingParams, resolveGlycogenStoreG, resolveLt1Lt2Fractions, type FormInputs, type Vo2MaxEntry } from "./formInputs";
 import { StravaImport } from "./StravaImport";
-import { fetchStravaActivity } from "./stravaClient";
+import { ensurePointsForRun, getAutoFetchStatus, runAutoFetchBatch, subscribeToAutoFetch } from "./autoFetchRuns";
 import { fetchSurfaceEdges } from "./surfaceLookup";
 import { useStravaSession } from "./useStravaSession";
 
@@ -87,9 +86,6 @@ const AUTO_FETCH_CANDIDATE_COUNT = 60;
  * three buckets before truncating, so a big vo2max pool can't crowd out
  * the durability/duration-spread picks the tau fit actually needs. */
 const AUTO_FETCH_TOTAL_CAP = 60;
-/** Paces auto-fetches so a large batch doesn't hammer Strava's API all at
- * once and trip its rate limit -- same spirit as BACKFILL_PAGE_DELAY_MS. */
-const AUTO_FETCH_DELAY_MS = 250;
 
 const DEFAULT_HALF_LIFE_DAYS = 75;
 /** Only the strongest few estimates are shown -- see vo2MaxEstimates below
@@ -223,8 +219,6 @@ export function RunLibraryPanel({
   const [backfillFrom, setBackfillFrom] = useState(() => loadLastBackfillDate() ?? oneYearAgoDateInput());
   const [backfilling, setBackfilling] = useState(false);
   const [backfillProgress, setBackfillProgress] = useState<string | null>(null);
-
-  const [fetchingSuggestions, setFetchingSuggestions] = useState(false);
 
   const refresh = useCallback(() => {
     listStoredRuns().then(setRuns).catch((err) => setError(String(err)));
@@ -484,14 +478,6 @@ export function RunLibraryPanel({
 
   /** Fetches and persists full points for a summary-only row; a no-op if
    * they're already present. */
-  const ensurePoints = async (run: StoredRun): Promise<GpxPoint[]> => {
-    if (run.points !== null) return run.points;
-    if (run.stravaId === undefined) return [];
-    const { points } = await fetchStravaActivity(run.stravaId);
-    await setStoredRunPoints(run.id, points);
-    return points;
-  };
-
   /** Fetches and caches Valhalla surface classification for a run; a no-op
    * if already cached. Returns null on any failure (or if this run has no
    * stable id to cache against) -- callers treat that exactly like "no
@@ -536,7 +522,7 @@ export function RunLibraryPanel({
       let detectedTransitGaps = 0;
       let excludedForDuration = 0;
       for (const run of readyRuns) {
-        const points = await ensurePoints(run);
+        const points = await ensurePointsForRun(run);
         const pointLegs = splitAtTransitGaps(points);
         detectedTransitGaps += pointLegs.length - 1;
         // Cached surface edges were fetched (and are indexed by cumulative
@@ -695,49 +681,34 @@ export function RunLibraryPanel({
   }, [dedupedRuns, markNewFetchCandidates, refresh]);
 
   const pendingFetchRuns = useMemo(() => dedupedRuns.filter((r) => r.wantsFullData && r.points === null), [dedupedRuns]);
-  // A plain string, not the array itself, so the effect below only
-  // restarts when the actual SET of pending ids changes -- not every time
-  // dedupedRuns gets a new (but equivalent) array reference.
+  // A plain string, not the array itself, so the effect below only kicks
+  // off a new batch when the actual SET of pending ids changes -- not
+  // every time dedupedRuns gets a new (but equivalent) array reference.
   const pendingFetchKey = useMemo(() => pendingFetchRuns.map((r) => r.id).sort().join(","), [pendingFetchRuns]);
-  const [fetchProgress, setFetchProgress] = useState<{ done: number; total: number } | null>(null);
 
-  // Auto-fetches full data for every marked-wanted run -- no manual approve/
-  // exclude step. Continues past a single run's own fetch failure (paced,
-  // so a large batch doesn't trip Strava's rate limit in the first place)
-  // rather than aborting the whole batch on the first error -- with dozens
-  // of runs, one bad fetch shouldn't cost every other one.
+  // Reads the shared auto-fetch module's status (see autoFetchRuns.ts) --
+  // its batch loop lives OUTSIDE this component's lifecycle deliberately,
+  // so closing Settings (which unmounts this whole panel) no longer stops
+  // an in-progress download. useSyncExternalStore re-renders this component
+  // whenever the module's status changes, even though the loop itself
+  // isn't "owned" by this component at all.
+  const autoFetchStatus = useSyncExternalStore(subscribeToAutoFetch, getAutoFetchStatus);
+
+  // Kicks off (or no-ops into) a batch whenever there's marked-pending work
+  // -- runAutoFetchBatch is itself idempotent against an already-running
+  // batch, so it's safe to call this on every mount/remount (including
+  // reopening Settings mid-download) without risking a duplicate,
+  // competing fetch loop.
   useEffect(() => {
-    if (pendingFetchRuns.length === 0) {
-      setFetchProgress(null);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      setFetchingSuggestions(true);
-      setError(null);
-      const total = pendingFetchRuns.length;
-      let failures = 0;
-      for (let i = 0; i < total; i++) {
-        if (cancelled) return;
-        setFetchProgress({ done: i, total });
-        try {
-          await ensurePoints(pendingFetchRuns[i]);
-        } catch {
-          failures++;
-        }
-        if (i < total - 1) await new Promise((r) => setTimeout(r, AUTO_FETCH_DELAY_MS));
-      }
-      if (cancelled) return;
-      setFetchProgress(null);
-      setFetchingSuggestions(false);
-      if (failures > 0) setError(`Fetched ${total - failures} of ${total} recommended runs -- ${failures} failed (Strava rate limit or a transient error). Try again shortly.`);
-      refresh();
-    })();
-    return () => {
-      cancelled = true;
-    };
+    if (pendingFetchRuns.length === 0) return;
+    setError(null);
+    void runAutoFetchBatch(pendingFetchRuns, refresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingFetchKey]);
+
+  useEffect(() => {
+    if (autoFetchStatus.error) setError(autoFetchStatus.error);
+  }, [autoFetchStatus.error]);
 
   const readyCount = dedupedRuns.filter((r) => r.points !== null).length;
 
@@ -797,10 +768,11 @@ export function RunLibraryPanel({
 
       {error && <p className="gpx-upload__error">{error}</p>}
 
-      {fetchingSuggestions && (
+      {autoFetchStatus.running && (
         <p className="field-group-note">
           Fetching full data for recommended runs (hard efforts, longest runs, duration spread)
-          {fetchProgress ? ` -- ${fetchProgress.done} of ${fetchProgress.total}…` : "…"}
+          {autoFetchStatus.progress ? ` -- ${autoFetchStatus.progress.done} of ${autoFetchStatus.progress.total}…` : "…"}
+          {" "}Keeps running in the background even if you close Settings.
         </p>
       )}
 
