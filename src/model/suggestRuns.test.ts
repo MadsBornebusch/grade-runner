@@ -74,6 +74,23 @@ describe("suggestRunsForFit", () => {
     expect(ids).not.toContain("rolling");
   });
 
+  it("keeps a duration standout in the durability bucket even when its own descent profile is unremarkable", () => {
+    // Regression test: scripts/diagnoseBackyardMissing.ts found a real 13.7h
+    // backyard ultra -- a genuine duration standout, second only to the
+    // single longest race -- silently missing from every suggestRunsForFit
+    // bucket, because the old "only the single longest run is duration-
+    // exempt" rule left every other long run to compete purely on
+    // descent/km, where it landed at a middling, unremarkable value and
+    // simply wasn't hit by the evenly-spaced descent sampling.
+    const longest = makeRun({ id: "longest", durationS: 20 * 3600, distanceKm: 150, elevationGainM: 1000 });
+    const standout = makeRun({ id: "standout", durationS: 10 * 3600, distanceKm: 50, elevationGainM: 600 }); // descent/km = 12, strictly between the others below
+    const others = [0, 200, 400, 600, 800].map((elevationGainM, i) =>
+      makeRun({ id: `other${i}`, durationS: 8 * 3600, distanceKm: 40, elevationGainM }),
+    ); // descent/km = 0, 5, 10, 15, 20
+    const suggestions = suggestRunsForFit([longest, standout, ...others], 3);
+    expect(suggestions.durability.map((r) => r.id)).toContain("standout");
+  });
+
   it("always keeps the single longest run even when diversifying the rest by descent", () => {
     // The longest run is usually the most responsive for the tau fit -- it
     // should never be dropped in favor of descent variety among shorter

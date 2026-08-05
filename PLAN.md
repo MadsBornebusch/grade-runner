@@ -3292,6 +3292,85 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    no browser-automation tool was available this session, so this is
    type-checked and unit-tested but not visually confirmed end-to-end.
 
+   **Follow-up: the joint fit's own candidate-selection step was quietly
+   starving it down to 2 informative races — found and fixed.**
+   (`scripts/reproduceLiveTauFInfFit.ts`, `scripts/
+   investigateRunSelectionSensitivity.ts`, `scripts/decoupledCapSweep.ts`,
+   `scripts/diagnoseBackyardMissing.ts`, `suggestRuns.ts`'s
+   `selectDurationPriorityRuns`.) The swamping bug above was fixed at the
+   *fitting* layer (`poolIndicesInformativeAtReference` correctly ignores
+   short races once they're in the pool) but that still depends on the
+   long races making it into the pool in the first place — this asked
+   whether `suggestRunsForFit`'s own candidate selection was silently
+   doing the opposite of the fix, by never surfacing them as fetch
+   candidates at all.
+
+   `reproduceLiveTauFInfFit.ts` (mirrors the app's real auto-fetch + fit
+   pipeline exactly, from `backfill()` through `fitTauFInfWithSupportGate`)
+   confirmed the joint fit was landing on a plausible-looking result
+   (tau=445min, fInf=0.678, no boundary hit) but with only 2 of 30 fetched
+   races counted as informative. `investigateRunSelectionSensitivity.ts`
+   widened the lens: a full-pool fit (fetching every available run since
+   the cutoff, not just the 60-candidate subset) found a 3rd genuinely
+   long, informative race — Ås Backyard Ultra, 13.7h, second-longest race
+   in the whole library — that the production 60-candidate selection was
+   dropping entirely, and leave-one-out on the full pool's informative set
+   showed the result shifting depending on which of these rare long races
+   was included, exactly the "thin support" fragility flagged (but not yet
+   traced to a cause) in the surprising-tau/fInf finding earlier in this
+   section.
+
+   `decoupledCapSweep.ts` isolated *which* knob was responsible by holding
+   the per-bucket pool at the real production value (60) and varying only
+   the final total-candidate cap: Ås Backyard was absent from the
+   `durability` bucket's own suggestions at every cap tested, meaning it
+   never even reached the pool — it wasn't merely being crowded out by
+   the 60-candidate slice downstream. `diagnoseBackyardMissing.ts` then
+   instrumented `suggestRunsForFit`'s durability bucket step by step and
+   found the exact mechanism: the old logic exempted only the single
+   longest run from descent-based competition (`pool[0]`), then sorted
+   every other candidate — including Ås Backyard, second-longest overall
+   and well above the 1-hour durability floor — purely by descent/km with
+   zero credit for duration. Confirmed against the real library: Ås
+   Backyard's own descent/km landed at 13.9 m/km, sandwiched between nine
+   ordinary training runs at 12.4-15.6 m/km, and `evenlySpacedPicks`'s
+   even-index-spacing math (picking 59 of 121 candidates) simply never
+   sampled that exact value — never appearing in any bucket regardless of
+   how high the per-bucket candidate count was raised.
+
+   **Fix:** `selectDurationPriorityRuns` (new in `suggestRuns.ts`) exempts
+   more than just the single longest run from descent competition — it
+   walks the duration-sorted pool from the top, keeping a run in the
+   duration-priority set only while it's a meaningful step down from the
+   last one kept (ratio >= `DURATION_PRIORITY_GAP_RATIO` = 1.3), capped at
+   `DURABILITY_DURATION_PRIORITY_COUNT` = 5 slots. This reaches genuinely
+   distinct duration tiers (like Ås Backyard sitting well above the bulk
+   of shorter runs) without a flat top-N cutoff, which would instead burn
+   every priority slot on arbitrary members of one similar-duration
+   cluster when several long runs happen to be nearly tied (see the
+   preserved "diversifies durability candidates by descent" test). A new
+   regression test locks in the motivating case (a duration standout with
+   an unremarkable descent/km, sitting strictly between several
+   evenly-spaced decoys); all 418 project tests pass.
+
+   **Verified against the real library, both directly and end-to-end.**
+   `decoupledCapSweep.ts` re-run with the fix: Ås Backyard now clears the
+   `durability` bucket (combined rank 4 of 146, alongside Ecotrail 80 at
+   rank 5 and Soria Moria at rank 2), and the informative race count rose
+   from 2 to **3 of 30**, stable across every total-cap tested (60/70/80/90
+   all give tau=412min, fInf=0.696 — noticeably MORE stable than the old
+   2-race support, which is exactly the fragility this was meant to fix).
+   `reproduceLiveTauFInfFit.ts` re-run end-to-end through the real
+   production pipeline confirms the same: tier=joint, tau=412min,
+   fInf=0.696, durationDiversityRatio=28.07, informative=3/30, no search-
+   boundary hits. Not a dramatic swing from the pre-fix numbers (tau
+   412min vs. 445min, fInf 0.696 vs. 0.678) — reassuring on its own, since
+   it means the earlier fInf≈0.7 finding wasn't an artifact of this
+   particular selection bug — but the fit now rests on one more
+   genuinely-long, genuinely-informative race than before, and the
+   candidate-selection layer no longer silently drops known-informative
+   long races regardless of how generous the per-bucket count is set.
+
 ### Open questions
 
 **Resolved with the user (2026-07-23):** segmentation also breaks on a

@@ -30,6 +30,29 @@ export const DURABILITY_MIN_DURATION_S = 60 * 60;
  * to be longest -- descent variety is what the tau-vs-descent diagnostic
  * (PLAN.md §12/§13) actually needs, not raw duration alone. */
 const DURABILITY_POOL_MULTIPLIER = 3;
+/**
+ * Upper bound on how many of the longest-by-duration runs can be kept as
+ * duration priority picks (see selectDurationPriorityRuns) before the rest
+ * of the durability bucket gets diversified by descent. Found via a
+ * real-data sensitivity check (scripts/diagnoseBackyardMissing.ts): with
+ * only the single longest run exempted, a genuinely long, highly informative
+ * race (a 13.7h backyard ultra -- the *second*-longest available, well
+ * above DURABILITY_MIN_DURATION_S) still got dropped, because
+ * evenlySpacedPicks sorts everything else by descent/km with zero credit
+ * for duration -- it landed at a middling, unremarkable descent value and
+ * simply wasn't hit by the even-spacing index math. The races that actually
+ * end up "informative" to the tau/fInf fit (ceilingDropFraction clears
+ * MIN_CEILING_DROP_FRACTION) are rare and skew toward the very longest
+ * efforts available, not evenly distributed across the duration range --
+ * so duration rank deserves more than one guaranteed slot before descent
+ * diversity takes over the rest. A flat top-N cutoff isn't right either
+ * though: with several near-tied long runs, it would burn every priority
+ * slot on arbitrary members of one cluster (see the "diversifies durability
+ * candidates by descent" test) -- selectDurationPriorityRuns only advances
+ * past a genuine duration gap, so this is a ceiling on priority slots, not
+ * a guarantee that all of them get used.
+ */
+const DURABILITY_DURATION_PRIORITY_COUNT = 5;
 
 /** For the joint (f0, fInf, tau) fit (PLAN.md §11) -- not runnable yet (still
  * needs a level-anchor term), but it needs races spanning a genuinely wide
@@ -102,6 +125,34 @@ function evenlySpacedPicks<T>(items: T[], count: number): T[] {
   return picks;
 }
 
+/** Walks byDurationDesc from the top, keeping a run in the duration-priority
+ * set only while it's a MEANINGFUL step down from the last one kept (ratio
+ * >= DURATION_PRIORITY_GAP_RATIO) -- stops at the first run that's merely
+ * similar in length to one already kept, leaving the rest of that
+ * similar-duration cluster to be diversified by descent instead (see
+ * DURABILITY_DURATION_PRIORITY_COUNT's own doc for why a flat top-N count
+ * doesn't work: with several near-tied long runs, a flat cutoff burns every
+ * priority slot on arbitrary members of one cluster instead of reaching the
+ * genuinely distinct duration tiers above it). Comparing each candidate
+ * against the last *kept* run (not the immediately preceding one in the
+ * sorted list) means one plateau of similar durations doesn't block a later,
+ * genuinely-longer-than-that-plateau run from still counting as a fresh gap
+ * -- though in practice byDurationDesc is monotonic, so this only matters
+ * for degenerate/tied input. */
+const DURATION_PRIORITY_GAP_RATIO = 1.3;
+
+function selectDurationPriorityRuns(byDurationDesc: StoredRun[], maxCount: number): StoredRun[] {
+  if (byDurationDesc.length === 0 || maxCount <= 0) return [];
+  const priority: StoredRun[] = [byDurationDesc[0]];
+  for (let i = 1; i < byDurationDesc.length && priority.length < maxCount; i++) {
+    const lastKeptDuration = priority[priority.length - 1].durationS ?? 0;
+    const candidateDuration = byDurationDesc[i].durationS ?? 0;
+    if (lastKeptDuration / (candidateDuration || 1) < DURATION_PRIORITY_GAP_RATIO) break;
+    priority.push(byDurationDesc[i]);
+  }
+  return priority;
+}
+
 /** See RunSuggestions.durationSpread. Picks the single longest available
  * race, then the longest-among-the-qualifying-shorter races (still gives
  * the fit the most signal per race) that are at least
@@ -130,17 +181,25 @@ export function suggestRunsForFit(runs: StoredRun[], candidateCount = DEFAULT_CA
   const longEnough = unfetched.filter((r) => (r.durationS ?? 0) >= DURABILITY_MIN_DURATION_S);
   const byDurationDesc = [...longEnough].sort((a, b) => (b.durationS ?? 0) - (a.durationS ?? 0));
   const pool = byDurationDesc.slice(0, candidateCount * DURABILITY_POOL_MULTIPLIER);
-  // The single longest run is always kept -- it's usually the most
+  // The longest few runs are always kept (see DURABILITY_DURATION_PRIORITY_COUNT's
+  // own doc for why one alone isn't enough) -- they're usually the most
   // responsive for the tau fit (PLAN.md §12/§13) -- and only the *remaining*
   // slots get diversified by descent, so descent variety never comes at the
-  // cost of dropping the most duration-informative run. These same runs,
-  // once fetched, are also what feeds stage 5's tau-vs-descent diagnostic --
+  // cost of dropping a duration-informative run. These same runs, once
+  // fetched, are also what feeds stage 5's tau-vs-descent diagnostic --
   // there's no separate bucket for that, since it needs the same "long
   // enough, descent-diverse" candidates this one already targets.
+  const durationPriority = selectDurationPriorityRuns(pool, Math.min(DURABILITY_DURATION_PRIORITY_COUNT, candidateCount));
   const durability =
     pool.length === 0
       ? []
-      : [pool[0], ...evenlySpacedPicks([...pool.slice(1)].sort((a, b) => descentPerKmProxy(a) - descentPerKmProxy(b)), candidateCount - 1)];
+      : [
+          ...durationPriority,
+          ...evenlySpacedPicks(
+            [...pool.slice(durationPriority.length)].sort((a, b) => descentPerKmProxy(a) - descentPerKmProxy(b)),
+            candidateCount - durationPriority.length,
+          ),
+        ];
 
   const durationSpread = findDurationSpreadCandidates(unfetched, candidateCount);
 
