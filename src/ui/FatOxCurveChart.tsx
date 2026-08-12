@@ -31,7 +31,7 @@ export function FatOxCurveChart({ points }: FatOxCurveChartProps) {
       <p className="field-group-help">
         Derived from LT1, LT2, and VO2max alone (no lab data) -- the same logistic fuel-split model a real
         fat-ox test would calibrate, just anchored on your thresholds instead of measured points. Enter your own
-        fat-ox curve above to replace this with real data.
+        fat-ox curve below to replace this with real data.
       </p>
       <div className="chart__canvas" ref={containerRef}>
         {width > 0 && (

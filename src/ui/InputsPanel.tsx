@@ -484,9 +484,9 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
       <fieldset>
         <legend>Athlete</legend>
         <p className="field-group-help">
-          VO2max and LT1/LT2 set both your pace ceiling and (by default) how your energy split shifts from fat to
-          carbs as effort increases. Don't know your VO2max? Fill in your fat oxidation curve below instead — it
-          overrides LT1/LT2 for the fuel split, though VO2max still governs your pace ceiling.
+          Body mass, VO2max, and LT2 are what your pace ceiling needs — the minimum for a working plan. VO2max sets
+          the scale; LT2 caps how much of it you can sustain at all. Add LT1 below (in Fuel split) to also shape your
+          carb-vs-fat split, or skip straight to a real fat-oxidation curve there for the fewest assumptions.
         </p>
         <NumberField
           label="Body mass"
@@ -507,20 +507,6 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
         </p>
         <Vo2MaxRows history={values.vo2MaxHistory} onChange={(vo2MaxHistory) => set("vo2MaxHistory", vo2MaxHistory)} />
         <LtThresholdField
-          label="LT1"
-          paceMinPerKm={values.lt1PaceMinPerKm}
-          heartRateBpm={values.lt1HeartRateBpm}
-          fraction={values.lt1Fraction}
-          fractionMin={0.1}
-          fractionMax={0.95}
-          walkMaxMs={values.walkMaxMs}
-          vo2Max={resolveVo2Max(values.vo2MaxHistory)}
-          defaultPaceMinPerKm={6.0}
-          onFractionChange={(v) => set("lt1Fraction", v)}
-          onPaceChange={(v) => set("lt1PaceMinPerKm", v)}
-          onHeartRateChange={(v) => set("lt1HeartRateBpm", v)}
-        />
-        <LtThresholdField
           label="LT2"
           paceMinPerKm={values.lt2PaceMinPerKm}
           heartRateBpm={values.lt2HeartRateBpm}
@@ -533,6 +519,29 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
           onFractionChange={(v) => set("lt2Fraction", v)}
           onPaceChange={(v) => set("lt2PaceMinPerKm", v)}
           onHeartRateChange={(v) => set("lt2HeartRateBpm", v)}
+        />
+      </fieldset>
+
+      <fieldset>
+        <legend>Fuel split</legend>
+        <p className="field-group-help">
+          How your energy split shifts from fat to carbs as effort rises -- doesn't touch your pace ceiling above.
+          LT1 alone (below) gives a theoretical curve, shown live as you adjust it. A real fat-oxidation curve
+          replaces LT1/LT2 entirely for the fewest assumptions, once you have lab data.
+        </p>
+        <LtThresholdField
+          label="LT1"
+          paceMinPerKm={values.lt1PaceMinPerKm}
+          heartRateBpm={values.lt1HeartRateBpm}
+          fraction={values.lt1Fraction}
+          fractionMin={0.1}
+          fractionMax={0.95}
+          walkMaxMs={values.walkMaxMs}
+          vo2Max={resolveVo2Max(values.vo2MaxHistory)}
+          defaultPaceMinPerKm={6.0}
+          onFractionChange={(v) => set("lt1Fraction", v)}
+          onPaceChange={(v) => set("lt1PaceMinPerKm", v)}
+          onHeartRateChange={(v) => set("lt1HeartRateBpm", v)}
         />
         {usingFatOxCurve && (
           <p className="field-group-note">
@@ -548,10 +557,6 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
             )}
           </p>
         )}
-      </fieldset>
-
-      <fieldset>
-        <legend>Fat oxidation curve</legend>
         {!usingFatOxCurve && <FatOxCurveChart points={theoreticalFatOxCurve} />}
         <details>
           <summary>Advanced: full fat-ox curve (overrides LT1/LT2 above)</summary>
