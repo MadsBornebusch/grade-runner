@@ -340,6 +340,11 @@
 
 .fatox-row input[type="number"] {
   width: 100%;
+  /* Grid items default to min-width: auto (won't shrink below their content/
+     intrinsic size) -- on a narrow screen that's what forces this row (and
+     everything above it up to the modal) wider than the viewport instead of
+     the input just getting smaller. */
+  min-width: 0;
 }
 
 .fatox-row__unit {
@@ -370,6 +375,7 @@
 .vo2max-row input,
 .vo2max-row select {
   width: 100%;
+  min-width: 0;
 }
 
 .fatox-add {
@@ -572,5 +578,46 @@
 
 .settings-modal__body {
   overflow-y: auto;
+  /* Safety net against the exact bug fixed below (a dense grid row -- e.g.
+     .fatox-row/.vo2max-row -- refusing to shrink below its content width on
+     a narrow screen and bleeding out past the modal's edge): clip rather
+     than silently overflow, so a similar future layout bug is visually
+     obvious (content cut off) instead of invisible (content pushed off
+     past the visible viewport with no scrollbar). */
+  overflow-x: hidden;
   padding: 16px;
+}
+
+/* Narrow phone screens: the dense multi-input rows below (.fatox-row's
+   pace/fat/carb/HR inputs each with their own unit label, .vo2max-row's
+   date/value/unit/source) were designed for desktop width and have no room
+   to fit on ~320-390px screens even with min-width:0 letting the inputs
+   shrink -- so many fields at once just becomes illegibly tiny rather than
+   actually fitting. Reflow both into a narrower column count instead, which
+   wraps each row's own items onto multiple lines (grid auto-placement
+   handles this for free -- no JSX change needed, since these are flat
+   lists of grid items in a fixed DOM order, not paired sub-containers). */
+@media (max-width: 480px) {
+  .settings-modal__overlay {
+    padding: 12px;
+  }
+
+  .settings-modal__body {
+    padding: 12px;
+  }
+
+  .fatox-row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .vo2max-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  /* Shared by both rows above -- give the remove button its own full-width
+     line instead of sitting awkwardly alone in the first column. */
+  .fatox-row__remove {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
 }
