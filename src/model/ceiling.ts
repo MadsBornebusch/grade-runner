@@ -26,6 +26,16 @@ export interface CeilingParams {
    * together, or either can be used alone.
    */
   durabilityDriftPerDescentUnit?: number;
+  /**
+   * Master on/off switch for all time/exposure-based fade -- the f0->fInf
+   * duration curve below, AND both durabilityDrift terms in ceilingPower
+   * (they're a second fade mechanism layered on top of this one, so "no
+   * fade" has to silence both, not just the curve). Default true (on).
+   * False returns a flat ceiling at f0 (capped by LT2) regardless of
+   * elapsed time or descent exposure -- for an athlete who doesn't trust,
+   * or doesn't want, any fade modeling in their plan.
+   */
+  pacingCurveEnabled?: boolean;
 }
 
 const DEFAULTS: Required<CeilingParams> = {
@@ -36,6 +46,7 @@ const DEFAULTS: Required<CeilingParams> = {
   tauMin: 250,
   durabilityDriftPerHour: 0,
   durabilityDriftPerDescentUnit: 0,
+  pacingCurveEnabled: true,
 };
 
 /**
@@ -47,7 +58,8 @@ export function sustainableFraction(
   tMin: number,
   params: CeilingParams = {},
 ): number {
-  const { f0, fInf, tauMin, lt2Fraction } = { ...DEFAULTS, ...params };
+  const { f0, fInf, tauMin, lt2Fraction, pacingCurveEnabled } = { ...DEFAULTS, ...params };
+  if (!pacingCurveEnabled) return Math.min(f0, lt2Fraction);
   const fraction = fInf + (f0 - fInf) * Math.exp(-tMin / tauMin);
   return Math.min(fraction, lt2Fraction);
 }
@@ -114,7 +126,7 @@ export function ceilingPower(
   const availableVo2 = fraction * altFraction * merged.vo2MaxMlPerKgPerMin;
   let power = vo2ToPower(availableVo2, O2_ENERGY_EQUIVALENT_CARB_KJ_PER_L);
 
-  if (merged.durabilityDriftPerHour > 0) {
+  if (merged.pacingCurveEnabled && merged.durabilityDriftPerHour > 0) {
     const driftFactor = Math.max(
       0,
       1 - merged.durabilityDriftPerHour * elapsedHours,
@@ -122,7 +134,7 @@ export function ceilingPower(
     power *= driftFactor;
   }
 
-  if (merged.durabilityDriftPerDescentUnit > 0 && input.descentExposure !== undefined) {
+  if (merged.pacingCurveEnabled && merged.durabilityDriftPerDescentUnit > 0 && input.descentExposure !== undefined) {
     const descentDriftFactor = Math.max(0, 1 - merged.durabilityDriftPerDescentUnit * input.descentExposure);
     power *= descentDriftFactor;
   }

@@ -24,6 +24,13 @@ describe("sustainableFraction", () => {
   it("respects a custom LT2 cap", () => {
     expect(sustainableFraction(0, { lt2Fraction: 0.7 })).toBeCloseTo(0.7, 6);
   });
+
+  it("returns a flat f0-at-LT2-cap fraction for any tMin when disabled, ignoring fInf/tau entirely", () => {
+    const params = { pacingCurveEnabled: false, f0: 0.9, fInf: 0.3, tauMin: 100, lt2Fraction: 0.85 };
+    for (const t of [0, 60, 600, 6000]) {
+      expect(sustainableFraction(t, params)).toBeCloseTo(0.85, 6); // capped by lt2Fraction, not decaying toward fInf
+    }
+  });
 });
 
 describe("altitudeFraction", () => {
@@ -90,6 +97,22 @@ describe("ceilingPower", () => {
       );
       // Both terms active should reduce the ceiling further than either alone.
       expect(both).toBeLessThan(timeOnly);
+    });
+  });
+
+  describe("pacingCurveEnabled", () => {
+    it("disabling silences both the duration curve and both durability-drift terms at once", () => {
+      const withEverything = ceilingPower(
+        { tMin: 300, elapsedHours: 5, descentExposure: 500 },
+        { durabilityDriftPerHour: 0.01, durabilityDriftPerDescentUnit: 0.0005 },
+      );
+      const curveOff = ceilingPower(
+        { tMin: 300, elapsedHours: 5, descentExposure: 500 },
+        { durabilityDriftPerHour: 0.01, durabilityDriftPerDescentUnit: 0.0005, pacingCurveEnabled: false },
+      );
+      const fresh = ceilingPower({ tMin: 0, elapsedHours: 0 }, { pacingCurveEnabled: false });
+      expect(curveOff).toBeGreaterThan(withEverything);
+      expect(curveOff).toBeCloseTo(fresh, 10); // flat regardless of how far into the event
     });
   });
 });

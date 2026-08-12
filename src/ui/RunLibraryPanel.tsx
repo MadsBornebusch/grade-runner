@@ -667,9 +667,23 @@ export function RunLibraryPanel({
       }
       setFitRan(true);
       setLastFittedRaces({ races, raceDates });
-      setTauCI(null); // stale relative to the new fit above -- re-estimate on demand
       onRacesFitted?.(races, raceDates);
       refresh();
+
+      // Auto-estimate the tau range right after the fit, using the races
+      // computed just above directly (not the `lastFittedRaces` state,
+      // which won't reflect this update until the next render) -- so the
+      // range appears as part of the normal fit flow instead of requiring
+      // a separate manual click. Still one bounded async step chained onto
+      // an already-multi-second operation, not a live/reactive recompute.
+      setComputingTauCI(true);
+      setTauCI(null);
+      try {
+        const ci = await bootstrapTauConfidenceInterval(races, raceDates, ceilingParams);
+        setTauCI(ci ?? "insufficient");
+      } finally {
+        setComputingTauCI(false);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fit failed.");
     } finally {
@@ -805,6 +819,13 @@ export function RunLibraryPanel({
       )}
 
       {dedupedRuns.length === 0 && <p className="placeholder">No runs stored yet.</p>}
+
+      {!formInputs.pacingCurveEnabled && (
+        <p className="field-group-note">
+          The pacing curve is off (Settings -- Pacing curve). Fitting and applying tau/f_inf below still works, but
+          won't affect your plan until it's back on.
+        </p>
+      )}
 
       {dedupedRuns.length > 0 && (
         <>

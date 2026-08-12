@@ -68,15 +68,16 @@ interface FieldProps {
   step?: number;
   min?: number;
   max?: number;
+  disabled?: boolean;
   onChange: (value: number) => void;
 }
 
-function NumberField({ label, hint, value, step = 1, min, max, onChange }: FieldProps) {
+function NumberField({ label, hint, value, step = 1, min, max, disabled, onChange }: FieldProps) {
   const field = useNumberField(value, onChange);
   return (
     <label className="field">
       <span className="field__label">{label}</span>
-      <input type="number" step={step} min={min} max={max} {...field} />
+      <input type="number" step={step} min={min} max={max} disabled={disabled} {...field} />
       {hint && <span className="field__hint">{hint}</span>}
     </label>
   );
@@ -574,9 +575,25 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
           fitting your own past runs below (see the Strava/fit section) whenever that fit clears its own quality bar,
           or left at reasonable defaults otherwise.
         </p>
-        <p className="field-group-note">
-          Current: f0 {values.f0.toFixed(2)}, f_inf {values.fInf.toFixed(2)}, tau {values.tauMin} min.
-        </p>
+        <label className="field field--checkbox">
+          <input
+            type="checkbox"
+            checked={values.pacingCurveEnabled}
+            onChange={(e) => set("pacingCurveEnabled", e.target.checked)}
+          />
+          <span>Enable pacing curve</span>
+        </label>
+        {!values.pacingCurveEnabled && (
+          <p className="field-group-note">
+            Off — your plan uses a flat sustainable fraction (f0, capped by LT2) for the whole event, with no fade
+            over duration and no durability drift. f_inf and tau below have no effect until this is back on.
+          </p>
+        )}
+        {values.pacingCurveEnabled && (
+          <p className="field-group-note">
+            Current: f0 {values.f0.toFixed(2)}, f_inf {values.fInf.toFixed(2)}, tau {values.tauMin} min.
+          </p>
+        )}
         <details>
           <summary>Advanced: override the pacing curve manually</summary>
           <p className="field-group-help">
@@ -590,6 +607,7 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
             step={0.01}
             min={0.5}
             max={1}
+            disabled={!values.pacingCurveEnabled}
             onChange={(v) => set("f0", v)}
           />
           <NumberField
@@ -599,6 +617,7 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
             step={0.01}
             min={0.1}
             max={0.9}
+            disabled={!values.pacingCurveEnabled}
             onChange={(v) => set("fInf", v)}
           />
           <NumberField
@@ -607,12 +626,14 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
             value={values.tauMin}
             step={10}
             min={10}
+            disabled={!values.pacingCurveEnabled}
             onChange={(v) => set("tauMin", v)}
           />
           <label className="field field--checkbox">
             <input
               type="checkbox"
               checked={values.durabilityDriftPerHour > 0}
+              disabled={!values.pacingCurveEnabled}
               onChange={(e) => set("durabilityDriftPerHour", e.target.checked ? 0.01 : 0)}
             />
             <span>Durability drift</span>
@@ -629,6 +650,7 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
               step={0.001}
               min={0}
               max={0.1}
+              disabled={!values.pacingCurveEnabled}
               onChange={(v) => set("durabilityDriftPerHour", v)}
             />
           )}

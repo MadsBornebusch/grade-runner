@@ -51,6 +51,11 @@ export interface FormInputs {
   f0: number;
   fInf: number;
   tauMin: number;
+  /** Master on/off switch for the whole pacing/fade curve (the f0->fInf
+   * decay AND durability drift below, which layers on top of it) -- see
+   * CeilingParams.pacingCurveEnabled's own doc. Default true (on); off
+   * gives a flat ceiling at f0 for the whole event. */
+  pacingCurveEnabled: boolean;
   intakeGPerH: number;
   /** Glycogen store, expressed per kg body mass (not a raw gram total) --
    * see resolveGlycogenStoreG. */
@@ -119,6 +124,7 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   f0: 0.94,
   fInf: 0.38,
   tauMin: 250,
+  pacingCurveEnabled: true,
   intakeGPerH: 60,
   // ~7-8 g/kg (liver + muscle glycogen) is a standard range for a fed,
   // trained endurance athlete -- see PLAN.md §5/§7. At the default 70kg body
@@ -392,6 +398,7 @@ export function resolveCeilingParams(inputs: FormInputs): CeilingParams {
     f0: inputs.f0,
     fInf: inputs.fInf,
     tauMin: inputs.tauMin,
+    pacingCurveEnabled: inputs.pacingCurveEnabled,
     durabilityDriftPerHour: inputs.durabilityDriftPerHour,
   };
 }
