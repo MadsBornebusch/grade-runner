@@ -20,6 +20,7 @@ import {
 import { DURABILITY_MIN_DURATION_S, suggestRunsForFit } from "../model/suggestRuns";
 import { dedupeStoredRuns } from "../model/dedupeRuns";
 import { attachSurfaceData } from "../model/surfaceExposure";
+import { buildWithinRaceDiagnosticPoint } from "../model/withinRaceDescentDiagnostic";
 import { splitAtTransitGaps } from "../gpx/transitGap";
 import {
   fitHrToEffortCalibrationAcrossRaces,
@@ -599,7 +600,25 @@ export function RunLibraryPanel({
           }
           races.push(buildEffortTrendPoints(segments, analysis.segments, formInputs.altitudeAdjustment));
           raceDates.push(pointLegs.length > 1 ? (legPoints[0]?.time ?? runDate(run)) : runDate(run));
-          finishTimeRaces.push({ segments, actualFinishTimeS: analysis.totalMovingTimeS });
+          // Unlike the tau/fInf trend-point pool above, the unpaved-cost-
+          // multiplier fit below asks "how much does this athlete's actual
+          // finish time diverge from the solver's max-sustainable-effort
+          // prediction" -- a question only a genuinely race-paced effort can
+          // answer. An easy/training-paced run is deliberately run well
+          // below max-sustainable effort, so it shows a large baseline
+          // finish-time gap that has nothing to do with terrain; pooling
+          // those in was inflating the fitted multiplier well past what any
+          // single real race needs (confirmed against this athlete's own
+          // Oslo Trail Challenge 55km: pooling everything landed on 1.80x
+          // and overpredicted that race's finish time by 12.5%, restricting
+          // to sustained-effort runs only via the same gate below dropped it
+          // to 1.70x and 6.6%). Reuses withinRaceDescentDiagnostic's own
+          // sustained-effort gate rather than inventing a new heuristic.
+          const isSustainedEffort =
+            buildWithinRaceDiagnosticPoint(run.id, { ...course, segments }, { ...commonMultiplierFitInputs, ceilingParams }) !== null;
+          if (isSustainedEffort) {
+            finishTimeRaces.push({ segments, actualFinishTimeS: analysis.totalMovingTimeS });
+          }
         }
       }
       setTransitGapCount(detectedTransitGaps);
@@ -984,20 +1003,22 @@ export function RunLibraryPanel({
             A flat cost multiplier applied while actually moving across unpaved/technical trail -- an instantaneous
             effect with no carryover to paved segments afterward, unlike a durability/fatigue term. Surface fetched
             via a public OpenStreetMap map-matching lookup per run (fails silently and just leaves a run out if that
-            lookup doesn't succeed). Fit directly against each training run's own actual finish time via the real
-            solver, not just an average-effort comparison -- a leave-one-out backtest showed this flat-cost model
-            roughly halves the remaining prediction error on real races with meaningful unpaved terrain.
+            lookup doesn't succeed). Fit directly against each qualifying run's own actual finish time via the real
+            solver, not just an average-effort comparison. Restricted to genuinely race-paced runs (the same
+            sustained-effort gate the durability drift fit uses) -- an easy training run is deliberately paced well
+            below max-sustainable effort, so pooling it in was inflating this multiplier past what real races
+            actually need.
           </p>
           <p className="field-group-note">
             Best fit: {unpavedCostMultiplierFitResult.unpavedCostMultiplier.toFixed(2)}x cost (
             {((unpavedCostMultiplierFitResult.unpavedCostMultiplier - 1) * 100).toFixed(0)}% slower on unpaved
-            terrain), across {unpavedCostMultiplierFitResult.perRace.length} run
+            terrain), across {unpavedCostMultiplierFitResult.perRace.length} race-paced run
             {unpavedCostMultiplierFitResult.perRace.length === 1 ? "" : "s"} with surface data.
           </p>
           {unpavedCostMultiplierFitResult.informativeRaceCount < MIN_INFORMATIVE_RACES && (
             <p className="warning">
               Only {unpavedCostMultiplierFitResult.informativeRaceCount} of {unpavedCostMultiplierFitResult.perRace.length}{" "}
-              runs with surface data actually had any unpaved terrain to learn from -- with fewer than{" "}
+              race-paced runs with surface data actually had any unpaved terrain to learn from -- with fewer than{" "}
               {MIN_INFORMATIVE_RACES}, treat this multiplier with real caution.
             </p>
           )}
