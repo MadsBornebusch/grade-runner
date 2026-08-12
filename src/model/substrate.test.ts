@@ -5,6 +5,9 @@ import {
   fatOxPacePointToPowerFraction,
   fatOxPointToFraction,
   fitCarbFractionAnchors,
+  generateTheoreticalFatOxCurve,
+  paceToGrossPowerWPerKg,
+  powerToPaceMinPerKm,
   splitPower,
   stepGlycogen,
 } from "./substrate";
@@ -162,5 +165,59 @@ describe("bonkPowerWPerKg", () => {
     // No cap: more planned intake means more assumed-absorbed carb, full stop.
     const withHigherIntake = bonkPowerWPerKg(70, { intakeGPerH: 200 });
     expect(withHigherIntake).toBeGreaterThan(power);
+  });
+});
+
+describe("powerToPaceMinPerKm", () => {
+  it("exactly inverts paceToGrossPowerWPerKg on both sides of the walk/run threshold", () => {
+    for (const pace of [3.5, 5.0, 6.5, 9.0]) {
+      const power = paceToGrossPowerWPerKg(pace, 2.0);
+      expect(powerToPaceMinPerKm(power, 2.0)).toBeCloseTo(pace, 6);
+    }
+  });
+});
+
+describe("generateTheoreticalFatOxCurve", () => {
+  const inputs = {
+    lt1Fraction: 0.65,
+    lt2Fraction: 0.85,
+    vo2MaxMlPerKgPerMin: 50,
+    bodyMassKg: 70,
+    foPeakGPerMin: 0.55,
+    walkMaxMs: 2.0,
+  };
+
+  it("total energy burned rises monotonically as the generated domain's underlying intensity rises", () => {
+    // Points are generated in increasing-intensity (increasing-power) order
+    // -- fat+carb energy should track that power monotonically, which can
+    // only hold if splitPower's own carbRate+fatRate=grossPower invariant
+    // survived the W/kg -> g/min conversion intact.
+    const points = generateTheoreticalFatOxCurve(inputs);
+    const totalKJPerMin = points.map((p) => p.fatGPerMin * 37.7 + p.carbGPerMin * 16.7);
+    for (let i = 1; i < totalKJPerMin.length; i++) {
+      expect(totalKJPerMin[i]).toBeGreaterThan(totalKJPerMin[i - 1]);
+    }
+  });
+
+  it("fat oxidation falls and carb oxidation rises as pace gets faster (intensity increases)", () => {
+    const points = [...generateTheoreticalFatOxCurve(inputs)].sort((a, b) => b.paceMinPerKm - a.paceMinPerKm);
+    // Slowest (easiest) point should burn more fat and less carb than the fastest (hardest) point.
+    expect(points[0].fatGPerMin).toBeGreaterThan(points[points.length - 1].fatGPerMin);
+    expect(points[0].carbGPerMin).toBeLessThan(points[points.length - 1].carbGPerMin);
+  });
+
+  it("spans a domain anchored on LT1/LT2, scaling with the athlete's own thresholds", () => {
+    const narrow = generateTheoreticalFatOxCurve({ ...inputs, lt1Fraction: 0.7, lt2Fraction: 0.75 });
+    const wide = generateTheoreticalFatOxCurve({ ...inputs, lt1Fraction: 0.55, lt2Fraction: 0.9 });
+    const paceRange = (points: typeof narrow) => Math.max(...points.map((p) => p.paceMinPerKm)) - Math.min(...points.map((p) => p.paceMinPerKm));
+    expect(paceRange(wide)).toBeGreaterThan(paceRange(narrow));
+  });
+
+  it("never returns a negative rate even where the fat ceiling binds", () => {
+    const points = generateTheoreticalFatOxCurve(inputs);
+    for (const p of points) {
+      expect(p.fatGPerMin).toBeGreaterThanOrEqual(0);
+      expect(p.carbGPerMin).toBeGreaterThanOrEqual(0);
+    }
   });
 });

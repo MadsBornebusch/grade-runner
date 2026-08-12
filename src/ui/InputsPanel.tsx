@@ -8,6 +8,7 @@ import {
   rateToGPerMin,
   resolveGlycogenStoreG,
   resolveHrZones,
+  resolveLt1Lt2Fractions,
   resolveVo2Max,
   speedFromMs,
   speedToMs,
@@ -20,6 +21,8 @@ import {
   type Vo2MaxSource,
   type WalkSpeedUnit,
 } from "./formInputs";
+import { FatOxCurveChart } from "./FatOxCurveChart";
+import { generateTheoreticalFatOxCurve } from "../model/substrate";
 
 interface FieldsProps {
   values: FormInputs;
@@ -455,6 +458,26 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
   const usingFatOxCurve = values.fatOxPoints.length > 0;
   const equivalentThresholds = useMemo(() => equivalentLT1LT2(values), [values]);
   const hrZones = useMemo(() => resolveHrZones(values), [values]);
+  const theoreticalFatOxCurve = useMemo(() => {
+    const { lt1Fraction, lt2Fraction } = resolveLt1Lt2Fractions(values);
+    return generateTheoreticalFatOxCurve({
+      lt1Fraction,
+      lt2Fraction,
+      vo2MaxMlPerKgPerMin: resolveVo2Max(values.vo2MaxHistory) ?? 50,
+      bodyMassKg: values.bodyMassKg,
+      foPeakGPerMin: values.foPeakGPerMin,
+      walkMaxMs: values.walkMaxMs,
+    });
+  }, [
+    values.lt1Fraction,
+    values.lt2Fraction,
+    values.lt1PaceMinPerKm,
+    values.lt2PaceMinPerKm,
+    values.vo2MaxHistory,
+    values.bodyMassKg,
+    values.foPeakGPerMin,
+    values.walkMaxMs,
+  ]);
 
   return (
     <div className="inputs-panel">
@@ -529,6 +552,7 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
 
       <fieldset>
         <legend>Fat oxidation curve</legend>
+        {!usingFatOxCurve && <FatOxCurveChart points={theoreticalFatOxCurve} />}
         <details>
           <summary>Advanced: full fat-ox curve (overrides LT1/LT2 above)</summary>
           <p className="field-group-help">

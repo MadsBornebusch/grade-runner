@@ -2,8 +2,9 @@
 // See PLAN.md §5 "Fat oxidation — energy-conserving default (P1)" and
 // "Fuel = reservoir + flow limit, in grams".
 
-import { CARB_KJ_PER_G, FAT_KJ_PER_G, netToGross } from "./energetics";
+import { CARB_KJ_PER_G, FAT_KJ_PER_G, grossToNet, netToGross } from "./energetics";
 import { costOfRunning, costOfWalking } from "./minetti";
+import { maxAerobicPower } from "./ceiling";
 
 export interface SubstrateParams {
   /** Anchor: intensity at which carb fraction = 0.5. Default LT1 = 0.65 (%VO2max). */
@@ -117,6 +118,31 @@ export function paceToGrossPowerWPerKg(paceMinPerKm: number, walkMaxMs = 2.0): n
 }
 
 /**
+ * Inverse of `paceToGrossPowerWPerKg` -- exact wherever a genuine inverse
+ * exists, not iterative: within each gait (walk/run), cost is a flat-ground
+ * constant, so gross power is linear in speed and solving for speed is a
+ * single division. The gait itself is decided the same way the forward
+ * function decides it (by the resulting SPEED against walkMaxMs, not by
+ * power) -- computing the walk-gait speed first and checking it against the
+ * threshold applies that identical rule in reverse.
+ *
+ * Running costs more per meter than walking at the same speed (near the
+ * transition), so paceToGrossPowerWPerKg's own output actually JUMPS up
+ * discontinuously right at walkMaxMs -- power values in the gap between
+ * "fastest walk" and "slowest run" are never produced by ANY pace, so no
+ * exact inverse exists there. Falls back to walkMaxMs itself (the closest
+ * achievable point) for a power that falls in that gap.
+ */
+export function powerToPaceMinPerKm(grossPowerWPerKg: number, walkMaxMs = 2.0): number {
+  const netPowerWPerKg = grossToNet(grossPowerWPerKg);
+  const walkSpeedMs = netPowerWPerKg / costOfWalking(0);
+  if (walkSpeedMs <= walkMaxMs) return 1000 / (walkSpeedMs * 60);
+  const runSpeedMs = netPowerWPerKg / costOfRunning(0);
+  const speedMs = runSpeedMs >= walkMaxMs ? runSpeedMs : walkMaxMs;
+  return 1000 / (speedMs * 60);
+}
+
+/**
  * Converts a (pace, fat-ox, carb-ox) calibration point measured on flat
  * ground into a (gross power, carb-energy-fraction) pair, in absolute W/kg
  * rather than %VO2max — for users who have their own fat/carb-oxidation-vs-pace
@@ -177,6 +203,64 @@ export function splitPower(
   const carbRateWPerKg = pGrossWPerKg - fatRateWPerKg;
 
   return { carbRateWPerKg, fatRateWPerKg, fatCapped };
+}
+
+export interface TheoreticalFatOxPoint {
+  paceMinPerKm: number;
+  fatGPerMin: number;
+  carbGPerMin: number;
+}
+
+export interface TheoreticalFatOxCurveInputs {
+  lt1Fraction: number;
+  lt2Fraction: number;
+  vo2MaxMlPerKgPerMin: number;
+  bodyMassKg: number;
+  foPeakGPerMin: number;
+  walkMaxMs: number;
+}
+
+const THEORETICAL_CURVE_POINT_COUNT = 20;
+/** How far below LT1 / above LT2 the generated curve's domain extends, as a
+ * multiple of the LT1-LT2 gap -- wide enough to show the logistic curve's
+ * full S-shape (easy jogging through race-pace effort), not just the
+ * narrow segment between the two thresholds themselves. */
+const THEORETICAL_CURVE_DOMAIN_MARGIN = 1.5;
+
+/**
+ * Generates a theoretical fat/carb-oxidation-vs-pace curve from LT1/LT2/
+ * VO2max alone, via the exact same logistic substrate model
+ * (carbEnergyFraction/splitPower) real metabolic-cart points feed --
+ * `substrateAnchorsFromThresholds` in formInputs.ts's own x0/k formula,
+ * duplicated here rather than imported to avoid a model-layer file
+ * depending on a UI-layer one. So an athlete without lab data still sees a
+ * physiologically grounded curve, not a placeholder. Domain is anchored on
+ * LT1/LT2 (not a fixed pace range) so it scales sensibly across athletes
+ * of very different fitness.
+ */
+export function generateTheoreticalFatOxCurve(
+  inputs: TheoreticalFatOxCurveInputs,
+  pointCount: number = THEORETICAL_CURVE_POINT_COUNT,
+): TheoreticalFatOxPoint[] {
+  const { lt1Fraction, lt2Fraction, vo2MaxMlPerKgPerMin, bodyMassKg, foPeakGPerMin, walkMaxMs } = inputs;
+  const gap = lt2Fraction - lt1Fraction;
+  const xLo = Math.max(0.15, lt1Fraction - gap * THEORETICAL_CURVE_DOMAIN_MARGIN);
+  const xHi = Math.min(0.98, lt2Fraction + gap * THEORETICAL_CURVE_DOMAIN_MARGIN);
+  const k = Math.log(9) / gap;
+  const freshCeilingWPerKg = maxAerobicPower(0, { vo2MaxMlPerKgPerMin });
+
+  const points: TheoreticalFatOxPoint[] = [];
+  for (let i = 0; i < pointCount; i++) {
+    const x = xLo + (i * (xHi - xLo)) / (pointCount - 1);
+    const grossPowerWPerKg = x * freshCeilingWPerKg;
+    const split = splitPower(grossPowerWPerKg, x, bodyMassKg, { x0: lt1Fraction, k, foPeakGPerMin });
+    points.push({
+      paceMinPerKm: powerToPaceMinPerKm(grossPowerWPerKg, walkMaxMs),
+      fatGPerMin: (split.fatRateWPerKg * bodyMassKg * 60) / (FAT_KJ_PER_G * 1000),
+      carbGPerMin: (split.carbRateWPerKg * bodyMassKg * 60) / (CARB_KJ_PER_G * 1000),
+    });
+  }
+  return points;
 }
 
 export interface FuelingParams {
