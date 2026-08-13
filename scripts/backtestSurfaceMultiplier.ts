@@ -62,7 +62,7 @@
 // consumed, so this is a fair like-for-like swap through the same arbiter.
 //
 // Usage:
-//   npx tsx scripts/backtestSurfaceMultiplier.ts [--bodyMassKg=70] [--vo2Max=50] [--maxActivities=250] [--maxFolds=20] [--raceOnly=true] [--surfaceFitBasis=logGap|pulse]
+//   npx tsx scripts/backtestSurfaceMultiplier.ts [--bodyMassKg=70] [--vo2Max=50] [--maxActivities=250] [--maxFolds=20] [--raceOnly=true] [--trainOnRaceOnly=true] [--surfaceFitBasis=logGap|pulse]
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -111,6 +111,22 @@ const MAX_FOLDS = parseInt(arg("maxFolds", "20"), 10);
 // has enough points AND enough elapsed time) -- reusing Stage 4's already-
 // built race-like filter rather than inventing a new heuristic.
 const RACE_ONLY = arg("raceOnly", "false") === "true";
+// A second, independent lever from RACE_ONLY: that flag restricts which
+// activities get PREDICTED (the target), but each fold's training pool
+// (tau/fInf fit AND the surface regression) still drew from the full mixed
+// population. A separate investigation (grade-runner session, see PLAN.md
+// §14 stage 6 follow-up) found that mixed pool itself was the deeper
+// problem for a related fit (fitUnpavedCostMultiplierAcrossRaces's flat
+// multiplier): easy/training-paced runs are deliberately run well below
+// max-sustainable effort, so they show a large finish-time gap against the
+// solver's baseline that has nothing to do with terrain -- pooling them
+// into ANY fit that leans on the solver's max-sustainable-effort assumption
+// (tau/fInf here, not just the flat multiplier) risks contaminating it the
+// same way. --trainOnRaceOnly restricts the ENTIRE pool (not just targets)
+// to sustained-effort runs before folding, to test whether Stage 6's
+// "surface term ties with blind control" verdict survives once that
+// contamination is fully removed from both sides, not just the target.
+const TRAIN_ON_RACE_ONLY = arg("trainOnRaceOnly", "false") === "true";
 
 const CACHE_DIR = fileURLToPath(new URL("../.strava-cache/", import.meta.url));
 const SURFACE_CACHE_DIR = fileURLToPath(new URL("../.surface-cache/", import.meta.url));
@@ -164,7 +180,7 @@ function main() {
     altitudeAdjustment: formInputs.altitudeAdjustment,
   };
 
-  const runs: RunRecord[] = [];
+  let runs: RunRecord[] = [];
   let skipped = 0;
 
   for (const file of files) {
@@ -203,6 +219,12 @@ function main() {
   }
 
   console.log(`Activities used: ${runs.length} (skipped ${skipped} without timestamps, cached surface data, or distance)\n`);
+
+  if (TRAIN_ON_RACE_ONLY) {
+    const before = runs.length;
+    runs = runs.filter((r) => r.isSustainedEffort);
+    console.log(`--trainOnRaceOnly: pool restricted from ${before} to ${runs.length} sustained-effort runs (both training and target)\n`);
+  }
 
   const library: TaggedMonotonicSegment[] = buildSegmentLibrary(
     runs.map((r) => ({ runId: r.id, segments: r.segments })),
