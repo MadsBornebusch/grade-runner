@@ -134,6 +134,7 @@ async function main() {
   const results: FoldResult[] = [];
   let skippedNoCalibration = 0;
   let skippedHrInfeasible = 0;
+  const chosenThetaByFold: { name: string; durationHours: number; meanChosenTheta: number | null; solvedTheta: number }[] = [];
 
   let foldNum = 0;
   for (const targetIdx of targetIndices) {
@@ -172,6 +173,28 @@ async function main() {
     target.segments.slice(0, cutoffIndex + 1).forEach((seg, i) => {
       const hr = target.effortTrendPoints[i]?.heartRateBpm;
       if (hr !== undefined) hrBySegmentIndex.set(seg.index, hr);
+    });
+
+    // Chosen theta: the athlete's own HR-implied effort fraction, duration-
+    // weighted mean over the SAME early window the fit trusts -- the number
+    // that decides whether "pacing margin" is a flat scalar haircut on the
+    // fitted ceiling or something that itself needs a duration-dependent
+    // curve. Computed directly from data already in hand, no new model.
+    let weightedThetaSum = 0;
+    let weightedThetaWeight = 0;
+    for (let i = 0; i <= cutoffIndex; i++) {
+      const p = target.effortTrendPoints[i];
+      if (p.heartRateBpm === undefined) continue;
+      const effortFraction = predictEffortFractionFromHr(p.heartRateBpm, calibration);
+      weightedThetaSum += effortFraction * p.dtS;
+      weightedThetaWeight += p.dtS;
+    }
+    const meanChosenTheta = weightedThetaWeight > 0 ? weightedThetaSum / weightedThetaWeight : null;
+    chosenThetaByFold.push({
+      name: target.name,
+      durationHours: target.actualFinishTimeS / 3600,
+      meanChosenTheta,
+      solvedTheta: thetaSolve.theta,
     });
 
     const hrResult = simulate(1, { ...solverInputs, segments: target.segments.slice(0, cutoffIndex + 1) }, {
@@ -218,6 +241,32 @@ async function main() {
     "hrDriven",
     results.filter((r) => r.hrCutoffS !== null).map((r) => ({ actual: r.actualCutoffS, predicted: r.hrCutoffS! })),
   );
+
+  console.log("\nChosen theta (HR-implied, early-window mean) vs. race duration -- the model-form question:");
+  console.log("name".padEnd(35), "duration(h)".padStart(11), "chosenTheta".padStart(12), "solvedTheta".padStart(12));
+  const sortedByDuration = [...chosenThetaByFold].sort((a, b) => a.durationHours - b.durationHours);
+  for (const r of sortedByDuration) {
+    console.log(
+      r.name.slice(0, 34).padEnd(35),
+      r.durationHours.toFixed(2).padStart(11),
+      (r.meanChosenTheta !== null ? r.meanChosenTheta.toFixed(3) : "n/a").padStart(12),
+      r.solvedTheta.toFixed(3).padStart(12),
+    );
+  }
+  const withTheta = chosenThetaByFold.filter((r): r is typeof r & { meanChosenTheta: number } => r.meanChosenTheta !== null);
+  if (withTheta.length > 1) {
+    const meanDuration = withTheta.reduce((s, r) => s + r.durationHours, 0) / withTheta.length;
+    const meanTheta = withTheta.reduce((s, r) => s + r.meanChosenTheta, 0) / withTheta.length;
+    let sXY = 0, sXX = 0;
+    for (const r of withTheta) {
+      sXY += (r.durationHours - meanDuration) * (r.meanChosenTheta - meanTheta);
+      sXX += (r.durationHours - meanDuration) ** 2;
+    }
+    const slope = sXX > 0 ? sXY / sXX : 0;
+    console.log(
+      `\nMean chosen theta = ${meanTheta.toFixed(3)} (n=${withTheta.length}). Slope of chosenTheta vs durationHours = ${slope.toFixed(4)} per hour -- near zero means a flat scalar margin fits; a real slope means it needs a duration-dependent curve.`,
+    );
+  }
 
   console.log("\nPer-fold detail:");
   console.log("name".padEnd(35), "theta err%".padStart(11), "hr err%".padStart(11));
