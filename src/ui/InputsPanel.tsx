@@ -691,18 +691,30 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
         <p className="field-group-help">
           Unpaved/technical trail costs more to move across than pavement at the same gradient -- this multiplies
           the running/walking cost curve while actually on unpaved terrain, with no carryover once you're back on
-          pavement. Found from fitting your own past runs with surface data below (see the Strava/fit section)
-          whenever that fit clears its own quality bar, or left at 1 (no effect) otherwise.
+          pavement. Found per surface category (gravel/dirt/compacted/path) from fitting your own past runs with
+          surface data below (see the Strava/fit section), conditioned on your recorded heart rate so it isn't
+          distorted by how hard you happened to be pushing -- applied automatically whenever that fit clears its own
+          quality bar. The flat multiplier below is a fallback for any category the fit has no entry for, or a
+          manual override if you'd rather not rely on the fit at all.
         </p>
-        <p className="field-group-note">
-          Current: {values.unpavedCostMultiplier.toFixed(2)}x (
-          {((values.unpavedCostMultiplier - 1) * 100).toFixed(0)}% slower on unpaved terrain).
-        </p>
+        {values.surfaceCostMultipliers && Object.keys(values.surfaceCostMultipliers).length > 0 && (
+          <p className="field-group-note">
+            Current per-category fit:{" "}
+            {Object.entries(values.surfaceCostMultipliers)
+              .map(([category, multiplier]) => `${category} ${multiplier!.toFixed(2)}x`)
+              .join(", ")}
+            .
+          </p>
+        )}
         <details>
-          <summary>Advanced: override manually</summary>
+          <summary>Advanced: flat fallback / manual override</summary>
           <p className="field-group-help">
             Only change this if you know how much slower you personally move on technical terrain and don't want to
-            rely on the fit below.
+            rely on the per-category fit above.
+          </p>
+          <p className="field-group-note">
+            Current: {values.unpavedCostMultiplier.toFixed(2)}x (
+            {((values.unpavedCostMultiplier - 1) * 100).toFixed(0)}% slower on unpaved terrain).
           </p>
           <NumberField
             label="Cost multiplier"

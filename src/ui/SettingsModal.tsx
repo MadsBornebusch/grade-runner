@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { SurfaceCategory } from "../gpx/pipeline";
 import type { EffortTrendPoint } from "../model/pacingFit";
 import { AthleteFields } from "./InputsPanel";
 import { RunLibraryPanel } from "./RunLibraryPanel";
@@ -12,7 +13,7 @@ interface SettingsModalProps {
   onChange: (values: FormInputs) => void;
   onApplyTau: (tauMin: number) => void;
   onApplyFInf: (fInf: number) => void;
-  onApplyUnpavedCostMultiplier: (unpavedCostMultiplier: number) => void;
+  onApplySurfaceCostMultipliers: (multipliers: Partial<Record<SurfaceCategory, number>>) => void;
   onApplyHrCalibration: (slope: number, intercept: number) => void;
   onAddVo2MaxEntry: (entry: Vo2MaxEntry) => void;
   onRacesFitted: (races: EffortTrendPoint[][], raceDates: (Date | null)[]) => void;
@@ -34,7 +35,7 @@ export function SettingsModal({
   onChange,
   onApplyTau,
   onApplyFInf,
-  onApplyUnpavedCostMultiplier,
+  onApplySurfaceCostMultipliers,
   onApplyHrCalibration,
   onAddVo2MaxEntry,
   onRacesFitted,
@@ -75,7 +76,7 @@ export function SettingsModal({
             formInputs={formInputs}
             onApplyTau={onApplyTau}
             onApplyFInf={onApplyFInf}
-            onApplyUnpavedCostMultiplier={onApplyUnpavedCostMultiplier}
+            onApplySurfaceCostMultipliers={onApplySurfaceCostMultipliers}
             onApplyHrCalibration={onApplyHrCalibration}
             onAddVo2MaxEntry={onAddVo2MaxEntry}
             onRacesFitted={onRacesFitted}

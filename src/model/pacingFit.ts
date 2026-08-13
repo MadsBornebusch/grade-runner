@@ -13,10 +13,12 @@
 // drift) at whatever's currently configured and searches only the one
 // parameter a single race actually constrains.
 
-import type { CourseSegment } from "../gpx/pipeline";
+import type { CourseSegment, SurfaceCategory } from "../gpx/pipeline";
 import type { AnalysisSegmentResult } from "./analysis";
 import { type CeilingParams, ceilingPower } from "./ceiling";
 import { descentStepForSegment } from "./descentImpact";
+import { fitIntensityConditionedSlowdownModel } from "./intensityConditionedSlowdownFit";
+import type { TaggedMonotonicSegment } from "./segmentLibrary";
 import { findSustainableTheta, type SolverInputs } from "./solver";
 
 export interface EffortTrendPoint {
@@ -1497,5 +1499,77 @@ export function fitUnpavedCostMultiplierAcrossRaces(
     perRace,
     informativeRaceCount: informative.length,
     hitSearchBoundary,
+  };
+}
+
+export interface SurfaceCostMultiplierFitResult {
+  surfaceCostMultipliers: Partial<Record<SurfaceCategory, number>>;
+  runCount: number;
+  segmentCount: number;
+  /** Within-run R^2 of the underlying regression -- NOT a fit-quality gate
+   * on its own (see intensityConditionedSlowdownFit.ts's own doc: this is
+   * inflated by circularity for the power-based intensity arms), kept here
+   * purely for display alongside the multipliers. */
+  rSquaredWithinRun: number;
+  /** Parallel to surfaceCostMultipliers -- variance inflation per category,
+   * same rule-of-thumb concern threshold (~5-10) as linearSolve.ts's own
+   * doc. A caller can flag a specific category as shaky without discarding
+   * the whole fit. */
+  variableInflationFactors: Partial<Record<SurfaceCategory, number>>;
+}
+
+const NON_SURFACE_INTENSITY_FIT_COLUMNS = new Set(["intensity", "grade", "gradeSquared", "aerobicClock", "impact"]);
+
+/**
+ * Per-surface-category cost multiplier fit, replacing the flat
+ * fitUnpavedCostMultiplierAcrossRaces mechanism above with one that doesn't
+ * depend on findSustainableTheta's zero-margin max-sustainable-effort
+ * assumption at all. That assumption is what made the flat fit's own
+ * finish-time backtest arbiter unable to tell "the terrain model is wrong"
+ * apart from "the athlete doesn't actually race at the theoretical ceiling"
+ * -- a real, ~30% uniform under-prediction bias that persists even on
+ * held-out real races (see PLAN.md §14 stage 6's follow-up). This fit
+ * sidesteps the whole question: it conditions on the athlete's own recorded
+ * heart rate as the effort signal (intensityConditionedSlowdownFit.ts's
+ * "pulse" basis -- the one candidate that doesn't move in lockstep with
+ * pace, so a genuine surface-driven slowdown stays visible at matched
+ * effort) and asks directly "how much slower at the SAME intensity", never
+ * invoking the solver or any notion of a sustainable ceiling. Unlike the
+ * flat fit, this does NOT need restricting to sustained-effort/race-paced
+ * runs -- an easy run's own paved-vs-unpaved segments are still valid,
+ * matched-intensity information here, so a broader pool is strictly more
+ * statistical power, not contamination.
+ *
+ * Coefficients convert to solver.ts SurfaceCostMultipliers via
+ * multiplier = exp(-coefficient), the same convention
+ * backtestSurfaceMultiplier.ts's own held-out comparison uses (terrain
+ * multiplier divides speed for a fixed target power).
+ */
+export function fitSurfaceCostMultipliersFromIntensity(
+  library: TaggedMonotonicSegment[],
+): SurfaceCostMultiplierFitResult | null {
+  const fit = fitIntensityConditionedSlowdownModel(library, {
+    intensityBasis: "pulse",
+    aerobicClockBasis: "elapsedHours",
+    impactBasis: "descentMeters",
+  });
+  if (!fit) return null;
+
+  const surfaceCostMultipliers: Partial<Record<SurfaceCategory, number>> = {};
+  const variableInflationFactors: Partial<Record<SurfaceCategory, number>> = {};
+  for (let i = 0; i < fit.columns.length; i++) {
+    const col = fit.columns[i];
+    if (NON_SURFACE_INTENSITY_FIT_COLUMNS.has(col)) continue;
+    const category = col as SurfaceCategory;
+    surfaceCostMultipliers[category] = Math.exp(-fit.coefficients[i]);
+    variableInflationFactors[category] = fit.variableInflationFactors[i];
+  }
+
+  return {
+    surfaceCostMultipliers,
+    runCount: fit.runCount,
+    segmentCount: fit.segmentCount,
+    rSquaredWithinRun: fit.rSquaredWithinRun,
+    variableInflationFactors,
   };
 }

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { analyzeRun } from "./analysis";
 import { ceilingPower, type CeilingParams } from "./ceiling";
 import { descentImpact, descentImpactSquared, descentMeters } from "./descentImpact";
-import type { CourseSegment } from "../gpx/pipeline";
+import type { CourseSegment, SurfaceCategory } from "../gpx/pipeline";
+import type { TaggedMonotonicSegment } from "./segmentLibrary";
 import { findSustainableTheta } from "./solver";
 import {
   bootstrapTauConfidenceInterval,
@@ -14,6 +15,7 @@ import {
   fitDurabilityDriftPerDescentUnitAcrossRaces,
   fitDurabilityDriftPerHour,
   fitFInfAndTauAcrossRaces,
+  fitSurfaceCostMultipliersFromIntensity,
   fitTauAcrossRaces,
   fitTauFInfWithSupportGate,
   fitTauMinutes,
@@ -881,6 +883,89 @@ describe("fitUnpavedCostMultiplierAcrossRaces", () => {
 
   it("returns null for an empty race list", () => {
     expect(fitUnpavedCostMultiplierAcrossRaces([], baseParams, commonInputs)).toBeNull();
+  });
+});
+
+describe("fitSurfaceCostMultipliersFromIntensity", () => {
+  /** Minimal synthetic TaggedMonotonicSegment builder, same shape as
+   * intensityConditionedSlowdownFit.test.ts's own buildSegment -- only the
+   * fields that regression actually reads matter here, since this describe
+   * block is testing pacingFit.ts's own coefficient->multiplier conversion
+   * and null-passthrough, not re-deriving the regression's own correctness
+   * (already covered by that file's tests). */
+  // Decorrelated from the i%2 surface assignment and from HR -- constant
+  // grade left the design singular (no variance to identify the grade
+  // column against, same collinearity trap
+  // intensityConditionedSlowdownFit.test.ts's own buildLibrary helper
+  // avoids the same way).
+  function gradeFor(i: number): number {
+    return ((i % 7) - 3) * 0.03;
+  }
+
+  function buildSegment(params: {
+    runId: string;
+    index: number;
+    targetLogSpeed: number;
+    surfaceCategory?: SurfaceCategory;
+    heartRateBpm?: number;
+  }): TaggedMonotonicSegment {
+    const timeS = 60;
+    const avgSpeedMs = Math.exp(params.targetLogSpeed);
+    return {
+      runId: params.runId,
+      startIndex: params.index,
+      endIndex: params.index,
+      distance3D: avgSpeedMs * timeS,
+      timeS,
+      avgSpeedMs,
+      avgGradient: gradeFor(params.index),
+      gradeSign: 0,
+      surfaceCategory: params.surfaceCategory ?? "paved",
+      gaitMode: "run",
+      avgMeasuredPowerWPerKg: null,
+      measuredPowerCoverage: 0,
+      avgHeartRateBpm: params.heartRateBpm ?? 140 + ((params.index * 7) % 13),
+      heartRateCoverage: 1,
+      avgMinettiGrossPowerWPerKg: 10,
+      cumulativeElapsedHoursAtStart: params.index * 0.05,
+      cumulativeDistanceMAtStart: params.index * 500,
+      cumulativeNetWorkJPerKgAtStart: params.index * 100,
+      cumulativeHardWorkJPerKgAtStart: params.index * 10,
+      cumulativeDescentMAtStart: ((params.index * 13) % 17) * 1.5,
+      cumulativeDescentImpactAtStart: ((params.index * 13) % 17) * 3,
+      cumulativeDescentImpactSquaredAtStart: ((params.index * 13) % 17) * 6,
+      cumulativeRunningImpactAtStart: params.index * 0.5,
+    };
+  }
+
+  it("converts an injected pulse-conditioned surface offset to exp(-coefficient), excluding non-surface columns", () => {
+    const base = Math.log(3);
+    const pathOffset = -0.12; // ~11.3% slower at matched HR
+    const library: TaggedMonotonicSegment[] = [];
+    for (let r = 0; r < 8; r++) {
+      for (let i = 0; i < 20; i++) {
+        const surfaceCategory: SurfaceCategory = i % 2 === 0 ? "paved" : "path";
+        library.push(
+          buildSegment({
+            runId: `run-${r}`,
+            index: i,
+            targetLogSpeed: base + (surfaceCategory === "path" ? pathOffset : 0),
+            surfaceCategory,
+          }),
+        );
+      }
+    }
+    const result = fitSurfaceCostMultipliersFromIntensity(library);
+    expect(result).not.toBeNull();
+    expect(result!.surfaceCostMultipliers.path).toBeCloseTo(Math.exp(-pathOffset), 1);
+    expect(result!.surfaceCostMultipliers.gravel).toBeUndefined();
+    expect(Object.keys(result!.surfaceCostMultipliers)).toEqual(["path"]);
+    expect(result!.runCount).toBe(8);
+    expect(result!.variableInflationFactors.path).toBeDefined();
+  });
+
+  it("returns null when the underlying regression can't be fit (empty library)", () => {
+    expect(fitSurfaceCostMultipliersFromIntensity([])).toBeNull();
   });
 });
 

@@ -155,6 +155,7 @@ function App() {
       forceWalkAboveGrade: formInputs.forceWalkAboveGrade ?? undefined,
       altitudeAdjustment: formInputs.altitudeAdjustment,
       unpavedCostMultiplier: formInputs.unpavedCostMultiplier,
+      surfaceCostMultipliers: formInputs.surfaceCostMultipliers ?? undefined,
     };
   }, [courseResult, formInputs]);
 
@@ -224,6 +225,7 @@ function App() {
       // fit itself) -- the real fitted value belongs here, unlike
       // RunLibraryPanel's own analyzeRun call which deliberately omits it.
       unpavedCostMultiplier: formInputs.unpavedCostMultiplier,
+      surfaceCostMultipliers: formInputs.surfaceCostMultipliers ?? undefined,
     };
   }, [resultMode, courseResult, formInputs]);
 
@@ -479,7 +481,7 @@ function App() {
         onChange={setFormInputs}
         onApplyTau={(tauMin) => setFormInputs({ ...formInputs, tauMin })}
         onApplyFInf={(fInf) => setFormInputs({ ...formInputs, fInf })}
-        onApplyUnpavedCostMultiplier={(unpavedCostMultiplier) => setFormInputs({ ...formInputs, unpavedCostMultiplier })}
+        onApplySurfaceCostMultipliers={(surfaceCostMultipliers) => setFormInputs({ ...formInputs, surfaceCostMultipliers })}
         onApplyHrCalibration={(hrEffortCalibrationSlope, hrEffortCalibrationIntercept) =>
           setFormInputs({ ...formInputs, hrEffortCalibrationSlope, hrEffortCalibrationIntercept })
         }

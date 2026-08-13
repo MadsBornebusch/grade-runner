@@ -1,26 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { GpxPoint } from "../gpx/pipeline";
+import type { CourseSegment, GpxPoint, SurfaceCategory } from "../gpx/pipeline";
 import { parseGpx, runPipeline } from "../gpx/pipeline";
 import { analyzeRun } from "../model/analysis";
 import {
   bootstrapTauConfidenceInterval,
   buildEffortTrendPoints,
+  fitSurfaceCostMultipliersFromIntensity,
   fitTauFInfWithSupportGate,
-  fitUnpavedCostMultiplierAcrossRaces,
   MIN_INFORMATIVE_RACES,
   suggestFitImprovements,
   type EffortTrendPoint,
   type FInfTauFitResult,
-  type FinishTimeTrainingRace,
   type MultiRaceTauFitResult,
-  type MultiRaceUnpavedCostMultiplierResult,
   type SafeFitResult,
+  type SurfaceCostMultiplierFitResult,
   type TauConfidenceInterval,
 } from "../model/pacingFit";
+import { buildSegmentLibrary } from "../model/segmentLibrary";
 import { DURABILITY_MIN_DURATION_S, suggestRunsForFit } from "../model/suggestRuns";
 import { dedupeStoredRuns } from "../model/dedupeRuns";
 import { attachSurfaceData } from "../model/surfaceExposure";
-import { buildWithinRaceDiagnosticPoint } from "../model/withinRaceDescentDiagnostic";
 import { splitAtTransitGaps } from "../gpx/transitGap";
 import {
   fitHrToEffortCalibrationAcrossRaces,
@@ -52,7 +51,7 @@ interface RunLibraryPanelProps {
   formInputs: FormInputs;
   onApplyTau: (tauMin: number) => void;
   onApplyFInf: (fInf: number) => void;
-  onApplyUnpavedCostMultiplier: (unpavedCostMultiplier: number) => void;
+  onApplySurfaceCostMultipliers: (multipliers: Partial<Record<SurfaceCategory, number>>) => void;
   onApplyHrCalibration: (slope: number, intercept: number) => void;
   onAddVo2MaxEntry: (entry: Vo2MaxEntry) => void;
   /** Reports the races/raceDates behind the just-completed fit up to the
@@ -99,6 +98,14 @@ const MAX_VO2MAX_ESTIMATES_SHOWN = 3;
  * HR-effort calibration. Below this, HR just isn't a reliable enough proxy
  * to trust automatically (still shown, and still manually applicable). */
 const MIN_HR_CALIBRATION_R_SQUARED = 0.5;
+
+/** A starting heuristic, not a tuned optimum -- same role as
+ * MIN_INFORMATIVE_RACES for the tau/fInf fits, but scaled up: this fit
+ * pools individual runs (not just races) into a single regression, so a
+ * handful of runs isn't enough to trust the per-category split even though
+ * the regression itself won't refuse to return a result. Below this, still
+ * shown, still manually applicable, just not auto-applied. */
+const MIN_SURFACE_FIT_RUNS = 10;
 
 function oneYearAgoDateInput(): string {
   const d = new Date();
@@ -189,7 +196,7 @@ export function RunLibraryPanel({
   formInputs,
   onApplyTau,
   onApplyFInf,
-  onApplyUnpavedCostMultiplier,
+  onApplySurfaceCostMultipliers,
   onApplyHrCalibration,
   onAddVo2MaxEntry,
   onRacesFitted,
@@ -199,7 +206,7 @@ export function RunLibraryPanel({
   const [error, setError] = useState<string | null>(null);
   const [fitResult, setFitResult] = useState<MultiRaceTauFitResult | null>(null);
   const [fInfFitResult, setFInfFitResult] = useState<FInfTauFitResult | null>(null);
-  const [unpavedCostMultiplierFitResult, setUnpavedCostMultiplierFitResult] = useState<MultiRaceUnpavedCostMultiplierResult | null>(
+  const [surfaceCostMultiplierFitResult, setSurfaceCostMultiplierFitResult] = useState<SurfaceCostMultiplierFitResult | null>(
     null,
   );
   const [hrCalibrationFitResult, setHrCalibrationFitResult] = useState<HrEffortCalibration | null>(null);
@@ -534,20 +541,17 @@ export function RunLibraryPanel({
     setFitting(true);
     setError(null);
     try {
-      // Solver "common" inputs (everything findSustainableTheta needs
-      // besides segments/ceilingParams/unpavedCostMultiplier) for the
-      // finish-time-fit multiplier search below.
-      const commonMultiplierFitInputs = {
-        bodyMassKg: formInputs.bodyMassKg,
-        fueling: { intakeGPerH: formInputs.intakeGPerH },
-        glycogenStoreG: resolveGlycogenStoreG(formInputs),
-        walkMaxMs: formInputs.walkMaxMs,
-        forceWalkAboveGrade: formInputs.forceWalkAboveGrade ?? undefined,
-        altitudeAdjustment: formInputs.altitudeAdjustment,
-      };
       const races: EffortTrendPoint[][] = [];
       const raceDates: (Date | null)[] = [];
-      const finishTimeRaces: FinishTimeTrainingRace[] = [];
+      // Every leg with usable segments contributes here, NOT just the ones
+      // long/race-paced enough for the tau/fInf pool below -- unlike the
+      // flat multiplier this replaced, fitSurfaceCostMultipliersFromIntensity
+      // conditions on the athlete's own recorded heart rate as the effort
+      // signal rather than the solver's max-sustainable-effort assumption,
+      // so an easy run's own paved-vs-unpaved segments are still valid,
+      // matched-intensity information -- more data, not contamination (see
+      // that function's own doc).
+      const libraryInputs: { runId: string; segments: CourseSegment[] }[] = [];
       let detectedTransitGaps = 0;
       let excludedForDuration = 0;
       for (const run of readyRuns) {
@@ -560,19 +564,15 @@ export function RunLibraryPanel({
         // data at all rather than risk misattributing edges from one leg
         // onto another's segments. Split runs are rare (most have no
         // transit gap at all, see transitGap.ts), so this only costs the
-        // surface-cost-multiplier fit a little data in the uncommon case.
+        // surface-cost fit a little data in the uncommon case.
         const surfaceEdges = pointLegs.length === 1 ? await ensureSurfaceData(run, points) : null;
-        for (const legPoints of pointLegs) {
+        for (let i = 0; i < pointLegs.length; i++) {
+          const legPoints = pointLegs[i];
           const course = runPipeline(legPoints);
           if (!course.hasTimestamps) continue;
           if (pointLegs.length > 1 && course.totalDistance3D / 1000 < MIN_LEG_DISTANCE_KM) continue;
           const segments = surfaceEdges ? attachSurfaceData(course.segments, surfaceEdges) : course.segments;
-          // Deliberately NOT passing unpavedCostMultiplier here -- this feeds
-          // fitUnpavedCostMultiplierAcrossRaces below, which needs RAW,
-          // uncorrected grossPowerWPerKg (it applies its own candidate
-          // multiplier internally while searching). See AnalysisInputs'
-          // own doc on why passing an already-applied multiplier here would
-          // compound with the fit instead of being learned from it.
+          libraryInputs.push({ runId: pointLegs.length > 1 ? `${run.id}-leg${i + 1}` : run.id, segments });
           const analysis = analyzeRun(segments, {
             bodyMassKg: formInputs.bodyMassKg,
             ceilingParams,
@@ -600,25 +600,6 @@ export function RunLibraryPanel({
           }
           races.push(buildEffortTrendPoints(segments, analysis.segments, formInputs.altitudeAdjustment));
           raceDates.push(pointLegs.length > 1 ? (legPoints[0]?.time ?? runDate(run)) : runDate(run));
-          // Unlike the tau/fInf trend-point pool above, the unpaved-cost-
-          // multiplier fit below asks "how much does this athlete's actual
-          // finish time diverge from the solver's max-sustainable-effort
-          // prediction" -- a question only a genuinely race-paced effort can
-          // answer. An easy/training-paced run is deliberately run well
-          // below max-sustainable effort, so it shows a large baseline
-          // finish-time gap that has nothing to do with terrain; pooling
-          // those in was inflating the fitted multiplier well past what any
-          // single real race needs (confirmed against this athlete's own
-          // Oslo Trail Challenge 55km: pooling everything landed on 1.80x
-          // and overpredicted that race's finish time by 12.5%, restricting
-          // to sustained-effort runs only via the same gate below dropped it
-          // to 1.70x and 6.6%). Reuses withinRaceDescentDiagnostic's own
-          // sustained-effort gate rather than inventing a new heuristic.
-          const isSustainedEffort =
-            buildWithinRaceDiagnosticPoint(run.id, { ...course, segments }, { ...commonMultiplierFitInputs, ceilingParams }) !== null;
-          if (isSustainedEffort) {
-            finishTimeRaces.push({ segments, actualFinishTimeS: analysis.totalMovingTimeS });
-          }
         }
       }
       setTransitGapCount(detectedTransitGaps);
@@ -628,26 +609,17 @@ export function RunLibraryPanel({
       setFInfFitResult(safeFit.fInfFit);
       setSafeFitTier(safeFit.tier);
 
-      // Unpaved cost multiplier is fit against the SAME (tau, fInf) this fit
-      // just settled on, holding them fixed -- keeps this a one-more-axis
-      // addition, not a simultaneous joint search this session's
-      // investigation never validated. Fits directly against each training
-      // race's own actual finish time via the real solver (not an effort-
-      // fraction proxy -- an earlier version tried that and badly
-      // underestimated the multiplier, see fitUnpavedCostMultiplierAcrossRaces'
-      // own doc comment), so needs full segments + actual time, not just
-      // trend points -- meaningfully more expensive than the tau/fInf fits
-      // above. Auto-applies under the same support bar as the tau-only tier
-      // (informative races, no boundary hit) -- there's no "joint"
-      // equivalent to prefer instead, since this is the only fit for this
-      // term.
-      const multiplierFit = fitUnpavedCostMultiplierAcrossRaces(finishTimeRaces, safeFit.ceilingParams, commonMultiplierFitInputs, {
-        raceDates,
-        halfLifeDays,
-      });
-      setUnpavedCostMultiplierFitResult(multiplierFit);
-      if (multiplierFit && multiplierFit.informativeRaceCount >= MIN_INFORMATIVE_RACES && !multiplierFit.hitSearchBoundary) {
-        onApplyUnpavedCostMultiplier(multiplierFit.unpavedCostMultiplier);
+      // Per-category surface cost, conditioned on recorded heart rate as the
+      // effort signal instead of the solver's own max-sustainable-effort
+      // assumption -- see fitSurfaceCostMultipliersFromIntensity's own doc
+      // for why this replaced the flat unpavedCostMultiplier finish-time fit
+      // that used to run here. Cheap relative to that: a single regression
+      // over the whole library, no per-candidate solver simulation.
+      const library = buildSegmentLibrary(libraryInputs, { bodyMassKg: formInputs.bodyMassKg, ceilingParams });
+      const surfaceFit = fitSurfaceCostMultipliersFromIntensity(library);
+      setSurfaceCostMultiplierFitResult(surfaceFit);
+      if (surfaceFit && surfaceFit.runCount >= MIN_SURFACE_FIT_RUNS) {
+        onApplySurfaceCostMultipliers(surfaceFit.surfaceCostMultipliers);
       }
 
       // HR-to-effort calibration (PLAN.md §11 stage 3): pools (HR, effort)
@@ -996,50 +968,50 @@ export function RunLibraryPanel({
         </div>
       )}
 
-      {unpavedCostMultiplierFitResult && (
+      {surfaceCostMultiplierFitResult && (
         <div className="run-library__experimental-fit">
           <p className="field-group-note">Terrain surface cost</p>
           <p className="field-group-help">
-            A flat cost multiplier applied while actually moving across unpaved/technical trail -- an instantaneous
-            effect with no carryover to paved segments afterward, unlike a durability/fatigue term. Surface fetched
-            via a public OpenStreetMap map-matching lookup per run (fails silently and just leaves a run out if that
-            lookup doesn't succeed). Fit directly against each qualifying run's own actual finish time via the real
-            solver, not just an average-effort comparison. Restricted to genuinely race-paced runs (the same
-            sustained-effort gate the durability drift fit uses) -- an easy training run is deliberately paced well
-            below max-sustainable effort, so pooling it in was inflating this multiplier past what real races
-            actually need.
+            One cost multiplier per surface category, applied while actually moving across it -- an instantaneous
+            effect with no carryover to paved segments afterward, unlike a durability/fatigue term. Fit by
+            conditioning on your own recorded heart rate as the effort signal, then asking how much slower you move
+            at the SAME effort on each surface -- unlike a finish-time fit against the solver's theoretical ceiling,
+            this doesn't assume you race at max sustainable effort with zero margin, so it isn't distorted by that
+            assumption the way a flat multiplier fit against real finish times was. Surface fetched via a public
+            OpenStreetMap map-matching lookup per run (fails silently and just leaves a run out if that lookup
+            doesn't succeed). Every run with heart rate and surface data contributes, not just races -- this fit
+            doesn't need race pacing to be valid.
           </p>
           <p className="field-group-note">
-            Best fit: {unpavedCostMultiplierFitResult.unpavedCostMultiplier.toFixed(2)}x cost (
-            {((unpavedCostMultiplierFitResult.unpavedCostMultiplier - 1) * 100).toFixed(0)}% slower on unpaved
-            terrain), across {unpavedCostMultiplierFitResult.perRace.length} race-paced run
-            {unpavedCostMultiplierFitResult.perRace.length === 1 ? "" : "s"} with surface data.
+            Across {surfaceCostMultiplierFitResult.runCount} run{surfaceCostMultiplierFitResult.runCount === 1 ? "" : "s"} (
+            {surfaceCostMultiplierFitResult.segmentCount} segments):
           </p>
-          {unpavedCostMultiplierFitResult.informativeRaceCount < MIN_INFORMATIVE_RACES && (
+          <ul className="field-group-note">
+            {Object.entries(surfaceCostMultiplierFitResult.surfaceCostMultipliers).map(([category, multiplier]) => (
+              <li key={category}>
+                {category}: {multiplier!.toFixed(2)}x ({((multiplier! - 1) * 100).toFixed(0)}% slower at matched effort)
+                {(surfaceCostMultiplierFitResult.variableInflationFactors[category as SurfaceCategory] ?? 0) > 5 && " -- shaky, high VIF"}
+              </li>
+            ))}
+          </ul>
+          {surfaceCostMultiplierFitResult.runCount < MIN_SURFACE_FIT_RUNS && (
             <p className="warning">
-              Only {unpavedCostMultiplierFitResult.informativeRaceCount} of {unpavedCostMultiplierFitResult.perRace.length}{" "}
-              race-paced runs with surface data actually had any unpaved terrain to learn from -- with fewer than{" "}
-              {MIN_INFORMATIVE_RACES}, treat this multiplier with real caution.
+              Only {surfaceCostMultiplierFitResult.runCount} runs went into this fit -- with fewer than{" "}
+              {MIN_SURFACE_FIT_RUNS}, treat these multipliers with real caution.
             </p>
           )}
           <button
             type="button"
             className="fatox-add"
-            onClick={() => onApplyUnpavedCostMultiplier(unpavedCostMultiplierFitResult.unpavedCostMultiplier)}
+            onClick={() => onApplySurfaceCostMultipliers(surfaceCostMultiplierFitResult.surfaceCostMultipliers)}
           >
-            Apply multiplier = {unpavedCostMultiplierFitResult.unpavedCostMultiplier.toFixed(2)}x
+            Apply per-category costs
           </button>
           <p className="field-group-note">
-            {unpavedCostMultiplierFitResult.informativeRaceCount >= MIN_INFORMATIVE_RACES && !unpavedCostMultiplierFitResult.hitSearchBoundary
-              ? "Applied automatically -- enough informative runs, and stayed within its search range."
-              : "Not applied automatically -- see the notes above; you can still apply it manually if you trust it."}
+            {surfaceCostMultiplierFitResult.runCount >= MIN_SURFACE_FIT_RUNS
+              ? "Applied automatically -- enough runs to trust this."
+              : "Not applied automatically -- see the note above; you can still apply it manually if you trust it."}
           </p>
-          {unpavedCostMultiplierFitResult.hitSearchBoundary && (
-            <p className="field-group-note">
-              This landed at the {unpavedCostMultiplierFitResult.hitSearchBoundary} edge of the search range -- treat
-              it as a bound, not a precise value.
-            </p>
-          )}
         </div>
       )}
 

@@ -1,6 +1,7 @@
 // Shared shape for the user-editable parameters in PLAN.md §7, persisted to
 // localStorage so a returning user doesn't have to re-enter their physiology.
 
+import type { SurfaceCategory } from "../gpx/pipeline";
 import type { CeilingParams } from "../model/ceiling";
 import { maxAerobicPower } from "../model/ceiling";
 import { fatOxPacePointToPowerFraction, fitCarbFractionAnchors, paceToGrossPowerWPerKg } from "../model/substrate";
@@ -73,6 +74,16 @@ export interface FormInputs {
    * CeilingParams field -- threaded directly into SolverInputs/AnalysisInputs,
    * since it's a cost-of-locomotion effect, not an aerobic-ceiling one. */
   unpavedCostMultiplier: number;
+  /** Per-category cost multipliers (see src/model/solver.ts's own doc) --
+   * takes priority over unpavedCostMultiplier above for any surfaceCategory
+   * with an entry here, falling back to the flat value otherwise. null =
+   * not yet fit. Derived from pacingFit.ts's
+   * fitSurfaceCostMultipliersFromIntensity (heart-rate-conditioned, so it
+   * doesn't depend on the aerobic ceiling's own max-sustainable-effort
+   * assumption the way the flat multiplier's finish-time fit does -- see
+   * that function's own doc for why this replaced it as the auto-fit
+   * RunLibraryPanel applies). */
+  surfaceCostMultipliers: Partial<Record<SurfaceCategory, number>> | null;
   /** Heart rate zone display config (PLAN.md §11 stage 4) -- reference/
    * display only, like lt1/lt2HeartRateBpm above: this app's ceiling model
    * is power/pace-based, not HR-based, and these zones aren't fed into any
@@ -136,6 +147,7 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   altitudeAdjustment: true,
   durabilityDriftPerHour: 0,
   unpavedCostMultiplier: 1,
+  surfaceCostMultipliers: null,
   hrZoneModel: null,
   maxHrBpm: null,
   restHrBpm: null,
