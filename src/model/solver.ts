@@ -116,6 +116,34 @@ export interface SimulateOptions {
    * this option existed (see findFlatPacedFinishTime for how it's driven).
    */
   flatDurationMin?: number;
+  /**
+   * PLAN.md pacing-margin follow-up, HR-driven variant: when set, called
+   * once per segment to OVERRIDE theta*ceilingGross entirely with an
+   * externally-supplied gross power target (W/kg) -- e.g. an effort
+   * fraction read from the athlete's own recorded heart rate via
+   * hrCalibration.ts's predictEffortFractionFromHr, instead of a
+   * theoretical pacing shape (theta search or flatDurationMin). Receives
+   * the segment's own index plus the SAME elapsedMin/elapsedHours/
+   * altitudeM the normal ceilingGross computation would have used, so a
+   * caller can still route the athlete's own duration-decay curve through
+   * ceilingPower() itself if it wants to (e.g. effortFraction *
+   * ceilingPower({tMin: elapsedMin, ...}, ceilingParams)) while overriding
+   * only WHICH fraction of it applies. `theta` and flatDurationMin are
+   * ignored for any segment this returns a finite number for; returning
+   * null/undefined falls back to the normal theta*ceilingGross computation
+   * for that segment. Undefined (the default) is byte-for-byte identical
+   * to before this option existed. Everything downstream of the target
+   * power (grade-specific Minetti cost, walk/run mode choice, terrain
+   * multiplier, glycogen/bonk) is untouched -- this only substitutes what
+   * target power gets fed in, so it's a fair test of the cost model in
+   * isolation from the pacing-margin assumption.
+   */
+  targetGrossPowerWPerKgOverride?: (
+    segmentIndex: number,
+    elapsedMin: number,
+    elapsedHours: number,
+    altitudeM: number,
+  ) => number | null | undefined;
 }
 
 /**
@@ -175,7 +203,9 @@ export function simulate(theta: number, inputs: SolverInputs, opts: SimulateOpti
       },
       inputs.ceilingParams,
     );
-    const targetNet = Math.max(0, grossToNet(theta * ceilingGross));
+    const targetOverride = opts.targetGrossPowerWPerKgOverride?.(seg.index, elapsedMin, elapsedHours, altitudeM);
+    const targetGrossPowerWPerKg = targetOverride ?? theta * ceilingGross;
+    const targetNet = Math.max(0, grossToNet(targetGrossPowerWPerKg));
 
     const perCategoryMultiplier =
       seg.surfaceCategory !== undefined ? inputs.surfaceCostMultipliers?.[seg.surfaceCategory] : undefined;

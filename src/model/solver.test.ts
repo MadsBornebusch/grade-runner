@@ -195,6 +195,31 @@ describe("findFlatPacedFinishTime (pacing-margin follow-up)", () => {
     expect(simulate(0.6, course, {})).toEqual(simulate(0.6, course));
   });
 
+  it("simulate() is byte-for-byte unchanged when targetGrossPowerWPerKgOverride is omitted", () => {
+    const course = baseInputs();
+    expect(simulate(0.6, course, {})).toEqual(simulate(0.6, course, undefined));
+  });
+
+  it("targetGrossPowerWPerKgOverride replaces theta*ceiling for every segment it answers", () => {
+    const course = baseInputs();
+    const thetaResult = simulate(0.6, course);
+    // A flat power target should reproduce whatever theta value would have
+    // produced that same power on the FIRST segment (fresh, tMin=0) --
+    // confirms the override is actually driving speed, not silently ignored.
+    const firstSegmentPower = thetaResult.segments[0].grossPowerWPerKg;
+    const overridden = simulate(0.1 /* would be a very different pace if NOT overridden */, course, {
+      targetGrossPowerWPerKgOverride: () => firstSegmentPower,
+    });
+    expect(overridden.segments[0].speedMs).toBeCloseTo(thetaResult.segments[0].speedMs, 6);
+  });
+
+  it("targetGrossPowerWPerKgOverride falls back to theta*ceiling for segments it returns null/undefined for", () => {
+    const course = baseInputs({ segments: makeSegments(2, 50, 0) });
+    const thetaResult = simulate(0.6, course);
+    const partial = simulate(0.6, course, { targetGrossPowerWPerKgOverride: () => undefined });
+    expect(partial).toEqual(thetaResult);
+  });
+
   it("is self-consistent: the simulated finish time matches the assumed total duration", () => {
     const course = baseInputs({ segments: makeSegments(3000, 50, 0), fueling: { intakeGPerH: 90 }, glycogenStoreG: 3000 });
     const { totalDurationMin, result, selfConsistent, targetFraction } = findFlatPacedFinishTime(course);
