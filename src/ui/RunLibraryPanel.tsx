@@ -330,7 +330,7 @@ export function RunLibraryPanel({
       await clearStoredRuns();
       setFitResult(null);
       setFInfFitResult(null);
-      setUnpavedCostMultiplierFitResult(null);
+      setSurfaceCostMultiplierFitResult(null);
       setHrCalibrationFitResult(null);
       setTransitGapCount(0);
       setExcludedForDurationCount(0);
