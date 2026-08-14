@@ -517,6 +517,15 @@
   opacity: 0.8;
 }
 
+.results-summary__averages {
+  flex-basis: 100%;
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
 .results-summary__warning {
   color: var(--warn);
   flex-basis: 100%;

@@ -1,5 +1,6 @@
+import type { CourseSummaryStats } from "./chartData";
 import type { FlatPacedResult, SimulationResult } from "../model/solver";
-import { formatDuration } from "./format";
+import { formatDuration, formatPace } from "./format";
 
 interface ResultsSummaryProps {
   theta: number;
@@ -15,13 +16,28 @@ interface ResultsSummaryProps {
    * execution relative to what the curve expects at a race of this length,
    * not a fantasy number. Still bounded by the theoretical ceiling. */
   bestDemonstrated: FlatPacedResult | null;
+  /** Whole-course averages (pace, grade-adjusted pace, estimated heart
+   * rate) for the theoretical-ceiling plan shown above -- see
+   * chartData.ts's summarizeChartPoints. */
+  summaryStats: CourseSummaryStats;
+}
+
+function formatMinPerKm(minPerKm: number | null): string {
+  return minPerKm === null ? "--:--/km" : formatPace(1000 / (minPerKm * 60));
 }
 
 function formatOrBonk(r: SimulationResult): string {
   return r.feasible ? formatDuration(r.finishTimeS) : "bonks";
 }
 
-export function ResultsSummary({ theta, result, totalDistanceM, chosenPacing, bestDemonstrated }: ResultsSummaryProps) {
+export function ResultsSummary({
+  theta,
+  result,
+  totalDistanceM,
+  chosenPacing,
+  bestDemonstrated,
+  summaryStats,
+}: ResultsSummaryProps) {
   const reachedKm = result.segments.length
     ? result.segments[result.segments.length - 1].cumulativeDistance3D / 1000
     : 0;
@@ -57,6 +73,20 @@ export function ResultsSummary({ theta, result, totalDistanceM, chosenPacing, be
           <span className="results-summary__label">Best demonstrated</span>
           <span className="results-summary__value">{formatOrBonk(bestDemonstrated.result)}</span>
           <span className="results-summary__sublabel">your best day, this duration</span>
+        </div>
+      )}
+
+      {(summaryStats.avgPaceMinPerKm !== null || summaryStats.avgHrBpm !== null) && (
+        <div className="results-summary__averages">
+          <span>Avg pace {formatMinPerKm(summaryStats.avgPaceMinPerKm)}</span>
+          <span title="Grade-adjusted pace -- flat-equivalent pace for the same effort.">
+            GAP {formatMinPerKm(summaryStats.avgGapMinPerKm)}
+          </span>
+          {summaryStats.avgHrBpm !== null && (
+            <span title="Estimated from your HR-effort calibration, not measured.">
+              Avg HR ~{Math.round(summaryStats.avgHrBpm)} bpm
+            </span>
+          )}
         </div>
       )}
 

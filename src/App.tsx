@@ -25,7 +25,7 @@ import { buildEffortTrendPoints, type EffortTrendPoint } from "./model/pacingFit
 import { SplitTable } from "./ui/SplitTable";
 import { ResultsSummary } from "./ui/ResultsSummary";
 import { AnalysisSummary } from "./ui/AnalysisSummary";
-import { buildAnalysisChartPoints, buildChartPoints, type HrEstimateInputs } from "./ui/chartData";
+import { buildAnalysisChartPoints, buildChartPoints, summarizeChartPoints, type HrEstimateInputs } from "./ui/chartData";
 import {
   loadFormInputs,
   resolveCeilingParams,
@@ -215,6 +215,8 @@ function App() {
     if (!courseResult || !solverResult) return [];
     return buildChartPoints(courseResult.segments, solverResult.result.segments, hrEstimateInputs);
   }, [courseResult, solverResult, hrEstimateInputs]);
+
+  const planSummaryStats = useMemo(() => summarizeChartPoints(chartPoints), [chartPoints]);
 
   const analysisInputs = useMemo<AnalysisInputs | null>(() => {
     if (
@@ -419,6 +421,7 @@ function App() {
                           totalDistanceM={courseResult.totalDistance3D}
                           chosenPacing={chosenPacingResult}
                           bestDemonstrated={bestDemonstratedResult}
+                          summaryStats={planSummaryStats}
                         />
                         {solverInputs && solverBaseInputs && (
                           <FinishTimeRangePanel

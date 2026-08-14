@@ -2,6 +2,7 @@ import type { CourseSegment } from "../gpx/pipeline";
 import type { AnalysisSegmentResult } from "../model/analysis";
 import { type CeilingParams, ceilingPower } from "../model/ceiling";
 import { type HrEffortCalibration, predictHeartRateFromEffortFraction } from "../model/hrCalibration";
+import { gradeAdjustedSpeedMs } from "../model/minetti";
 import type { SegmentResult } from "../model/solver";
 
 export interface ChartPoint {
@@ -100,4 +101,54 @@ export function buildAnalysisChartPoints(
       estimatedHeartRateBpm: estimateHeartRateBpm(r.grossPowerWPerKg, tHours, seg?.elevation ?? 0, hrEstimateInputs),
     };
   });
+}
+
+export interface CourseSummaryStats {
+  avgPaceMinPerKm: number | null;
+  /** Grade-adjusted pace: the flat-equivalent pace for the same overall
+   * effort, aggregated by summing each segment's own flat-equivalent time
+   * (distance / gradeAdjustedSpeedMs) rather than averaging per-segment GAP
+   * values directly -- pace is a rate, so a plain arithmetic mean across
+   * unequal segments would be subtly wrong (a harmonic-style, time-based
+   * aggregation is what "how fast would the WHOLE course have felt on
+   * flat ground" actually asks for). */
+  avgGapMinPerKm: number | null;
+  /** Time-weighted mean of estimatedHeartRateBpm, skipping points with none
+   * (no calibration applied) -- null if no point has an estimate at all. */
+  avgHrBpm: number | null;
+}
+
+/** Summarizes a course/effort's chart points into whole-course averages --
+ * pace, grade-adjusted pace (GAP), and estimated heart rate. Needs at least
+ * 2 points (a single point has no distance/time to weight against). */
+export function summarizeChartPoints(points: ChartPoint[]): CourseSummaryStats {
+  if (points.length < 2) return { avgPaceMinPerKm: null, avgGapMinPerKm: null, avgHrBpm: null };
+
+  const totalDistanceKm = points[points.length - 1].distanceKm - points[0].distanceKm;
+  const totalTimeS = points[points.length - 1].cumulativeTimeS - points[0].cumulativeTimeS;
+  const avgPaceMinPerKm = totalDistanceKm > 0 ? totalTimeS / 60 / totalDistanceKm : null;
+
+  let totalGapTimeS = 0;
+  let hrWeightedSum = 0;
+  let hrWeight = 0;
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1];
+    const cur = points[i];
+    const segDistanceM = (cur.distanceKm - prev.distanceKm) * 1000;
+    const segTimeS = cur.cumulativeTimeS - prev.cumulativeTimeS;
+    if (segDistanceM > 0 && cur.speedMs > 0) {
+      const gapSpeedMs = gradeAdjustedSpeedMs(cur.speedMs, cur.gradient, cur.mode);
+      totalGapTimeS += gapSpeedMs > 0 ? segDistanceM / gapSpeedMs : 0;
+    }
+    if (cur.estimatedHeartRateBpm !== null && segTimeS > 0) {
+      hrWeightedSum += cur.estimatedHeartRateBpm * segTimeS;
+      hrWeight += segTimeS;
+    }
+  }
+
+  return {
+    avgPaceMinPerKm,
+    avgGapMinPerKm: totalDistanceKm > 0 ? totalGapTimeS / 60 / totalDistanceKm : null,
+    avgHrBpm: hrWeight > 0 ? hrWeightedSum / hrWeight : null,
+  };
 }

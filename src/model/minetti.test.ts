@@ -3,6 +3,7 @@ import {
   GRADE_CLAMP,
   costOfRunning,
   costOfWalking,
+  gradeAdjustedSpeedMs,
   maxDescentSpeedMs,
 } from "./minetti";
 
@@ -117,5 +118,26 @@ describe("maxDescentSpeedMs", () => {
     // by Cr(i) near its minimum implies an absurd speed; the cap should hold
     // it to something a person could plausibly control on a technical descent.
     expect(maxDescentSpeedMs(-0.18)).toBeLessThan(4);
+  });
+});
+
+describe("gradeAdjustedSpeedMs", () => {
+  it("equals the actual speed on flat ground, for either gait", () => {
+    expect(gradeAdjustedSpeedMs(3, 0, "run")).toBeCloseTo(3, 6);
+    expect(gradeAdjustedSpeedMs(1.5, 0, "walk")).toBeCloseTo(1.5, 6);
+  });
+
+  it("reads faster than actual speed on an uphill (the effort would go further on flat)", () => {
+    expect(gradeAdjustedSpeedMs(2, 0.1, "run")).toBeGreaterThan(2);
+  });
+
+  it("reads slower than actual speed on a moderate downhill (the pace overstates the effort)", () => {
+    expect(gradeAdjustedSpeedMs(3, -0.05, "run")).toBeLessThan(3);
+  });
+
+  it("uses the walking cost curve for a walked segment, not the running one", () => {
+    const runGap = gradeAdjustedSpeedMs(1.5, 0.15, "run");
+    const walkGap = gradeAdjustedSpeedMs(1.5, 0.15, "walk");
+    expect(runGap).not.toBeCloseTo(walkGap, 3);
   });
 });

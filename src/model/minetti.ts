@@ -64,6 +64,22 @@ export function costOfWalking(i: number): number {
 }
 
 /**
+ * Grade-adjusted pace (GAP): the flat-ground speed that would cost the same
+ * energy per unit time as `speedMs` does at this segment's actual gradient
+ * -- the standard "how fast does this effort feel on the flat" reading, in
+ * the SAME gait the segment was actually covered in (a walked segment's GAP
+ * uses costOfWalking throughout, not costOfRunning, so a walk break doesn't
+ * read as an equivalent run pace it never was). Exactly `speedMs` on flat
+ * ground by construction (cost(0)/cost(0) = 1).
+ */
+export function gradeAdjustedSpeedMs(speedMs: number, gradient: number, mode: "run" | "walk"): number {
+  const cost = mode === "walk" ? costOfWalking : costOfRunning;
+  const flatCost = cost(0);
+  if (!(flatCost > 0)) return speedMs;
+  return speedMs * (cost(gradient) / flatCost);
+}
+
+/**
  * Gradient beyond which running speed on a descent starts being limited by
  * something other than metabolic cost. Matches where Cr(i) bottoms out
  * (PLAN.md §2) -- past this point Minetti's treadmill data (a controlled,
