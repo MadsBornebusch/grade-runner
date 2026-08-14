@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CourseSegment } from "../gpx/pipeline";
-import { findFlatPacedFinishTime, findSustainableTheta, simulate, type SolverInputs } from "./solver";
+import { findFlatPacedFinishTime, findSustainableTheta, findThetaForTargetTime, simulate, type SolverInputs } from "./solver";
 
 function makeSegments(n: number, segLenM: number, gradient: number): CourseSegment[] {
   const segments: CourseSegment[] = [];
@@ -530,5 +530,63 @@ describe("per-category surface cost multiplier", () => {
     const withMultiplierNoData = simulate(SURFACE_TEST_THETA, { ...inputs, surfaceCostMultipliers: { path: 1.3 } });
     const plain = simulate(SURFACE_TEST_THETA, inputs);
     expect(withMultiplierNoData).toEqual(plain);
+  });
+});
+
+describe("findThetaForTargetTime", () => {
+  it("finds a theta whose finish time lands on a reachable target between fastest and the gentle-pace band", () => {
+    const course = baseInputs(); // flat 10km, generous fueling
+    const fastest = findSustainableTheta(course);
+    expect(fastest.result.feasible).toBe(true);
+
+    // Comfortably inside the feasible band for this course (fastest.theta=1
+    // finishes in ~44min; theta=0.2-ish gentle paces still finish in several
+    // hours -- see the near-zero-effort stall region below that).
+    const targetTimeS = fastest.result.finishTimeS * 2;
+    const { theta, result } = findThetaForTargetTime(course, targetTimeS);
+    expect(result.feasible).toBe(true);
+    expect(theta).toBeLessThan(fastest.theta);
+    expect(result.finishTimeS).toBeCloseTo(targetTimeS, 0);
+  });
+
+  it("falls back to the fastest feasible plan when the target is faster than achievable without bonking", () => {
+    const course = baseInputs();
+    const fastest = findSustainableTheta(course);
+    const impossiblyFastTarget = fastest.result.finishTimeS * 0.5;
+
+    const { theta, result } = findThetaForTargetTime(course, impossiblyFastTarget);
+    expect(theta).toBe(fastest.theta);
+    expect(result).toEqual(fastest.result);
+  });
+
+  it("caps out at the gentlest feasible pace when the target is far slower than anything reachable", () => {
+    const course = baseInputs();
+    const fastest = findSustainableTheta(course);
+
+    // Low enough theta stalls (infeasible for a different reason than
+    // bonking -- see simulate's docs), so there's a real floor on how slow
+    // a plan this knob can produce; an even-slower target must cap there.
+    const veryFarTarget = fastest.result.finishTimeS * 50;
+    const evenFartherTarget = fastest.result.finishTimeS * 200;
+
+    const capped = findThetaForTargetTime(course, veryFarTarget);
+    const evenFarther = findThetaForTargetTime(course, evenFartherTarget);
+    expect(capped.result.feasible).toBe(true);
+    expect(capped.result.finishTimeS).toBeLessThan(veryFarTarget);
+    // Receding the target further doesn't change the answer -- it's already
+    // pinned to the gentlest feasible pace this knob can reach.
+    expect(evenFarther).toEqual(capped);
+  });
+
+  it("produces a slower finish time for a slower target, holding the course fixed", () => {
+    const course = baseInputs();
+    const fastest = findSustainableTheta(course);
+    const nearTarget = fastest.result.finishTimeS * 1.2;
+    const farTarget = fastest.result.finishTimeS * 2;
+
+    const near = findThetaForTargetTime(course, nearTarget);
+    const far = findThetaForTargetTime(course, farTarget);
+    expect(far.theta).toBeLessThan(near.theta);
+    expect(far.result.finishTimeS).toBeGreaterThan(near.result.finishTimeS);
   });
 });

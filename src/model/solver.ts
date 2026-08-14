@@ -528,3 +528,90 @@ export function findFlatPacedFinishTime(inputs: SolverInputs, opts: FlatPacingOp
     selfConsistent: true,
   };
 }
+
+/**
+ * Solves for the theta whose finish time comes closest to a user-chosen
+ * target, reusing findSustainableTheta's own theta-vs-feasibility model
+ * rather than introducing a second pacing model (c.f. findFlatPacedFinishTime,
+ * which deliberately does use a different, flat-effort model for a different
+ * purpose). Finish time decreases monotonically with theta WITHIN a feasible
+ * band, but low theta can fall into simulate's near-zero-effort stall
+ * (infeasible for a different reason than bonking -- see simulate's own
+ * docs), so the feasible domain here is generally an interval
+ * [gentlestFeasibleTheta, fastest.theta], not all of [lo0, fastest.theta] --
+ * this scans for that gentle edge rather than assuming lo0 itself works.
+ * A target faster than fastest.theta's own finish time can't be reached
+ * without bonking; that case falls back to the fastest feasible plan
+ * unchanged, letting the caller show it alongside a "not achievable" note
+ * instead of silently simulating a bonk. Symmetrically, a target slower
+ * than the gentlest feasible pace falls back to that gentlest plan.
+ */
+export function findThetaForTargetTime(
+  inputs: SolverInputs,
+  targetTimeS: number,
+  opts: BisectionOptions & { scanSteps?: number } = {},
+): SolverResult {
+  const hi0 = opts.hi ?? 1;
+  const lo0 = opts.lo ?? 0.05;
+  const iterations = opts.iterations ?? 30;
+  const scanSteps = opts.scanSteps ?? 20;
+
+  const fastest = findSustainableTheta(inputs, { lo: lo0, hi: hi0, iterations, scanSteps });
+  if (!fastest.result.feasible || fastest.result.finishTimeS >= targetTimeS) {
+    return fastest;
+  }
+
+  let gentlestTheta: number | null = null;
+  let gentlestResult: SimulationResult | null = null;
+  for (let i = 0; i <= scanSteps; i++) {
+    const theta = lo0 + ((fastest.theta - lo0) * i) / scanSteps;
+    const result = simulate(theta, inputs);
+    if (result.feasible) {
+      gentlestTheta = theta;
+      gentlestResult = result;
+      break;
+    }
+  }
+  if (gentlestTheta === null || gentlestResult === null) return fastest; // nothing feasible below fastest.theta -- shouldn't happen, stay defensive
+  if (gentlestResult.finishTimeS <= targetTimeS) {
+    // Target is slower than even our gentlest feasible pace -- can't pace
+    // any slower via this knob; report the closest (gentlest) we have.
+    return { theta: gentlestTheta, result: gentlestResult };
+  }
+
+  let loTheta = gentlestTheta;
+  let loResult = gentlestResult;
+  let hiTheta = fastest.theta;
+  for (let i = 1; i <= scanSteps; i++) {
+    const theta = gentlestTheta + ((fastest.theta - gentlestTheta) * i) / scanSteps;
+    const result = simulate(theta, inputs);
+    if (!result.feasible) continue; // stay defensive; feasibility is expected contiguous above gentlestTheta
+    if (result.finishTimeS <= targetTimeS) {
+      hiTheta = theta;
+      break;
+    }
+    loTheta = theta;
+    loResult = result;
+  }
+
+  let lo = loTheta;
+  let hi = hiTheta;
+  let best = loResult;
+  let bestTheta = loTheta;
+  for (let i = 0; i < iterations; i++) {
+    const mid = (lo + hi) / 2;
+    const midResult = simulate(mid, inputs);
+    if (!midResult.feasible) {
+      hi = mid;
+      continue;
+    }
+    best = midResult;
+    bestTheta = mid;
+    if (midResult.finishTimeS > targetTimeS) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  return { theta: bestTheta, result: best };
+}

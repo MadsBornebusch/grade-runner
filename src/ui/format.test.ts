@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration, formatPace } from "./format";
+import { formatDuration, formatPace, parseDurationToSeconds } from "./format";
 
 describe("formatDuration", () => {
   it("formats h:mm:ss", () => {
@@ -17,5 +17,27 @@ describe("formatPace", () => {
   it("handles zero/negative speed", () => {
     expect(formatPace(0)).toBe("--:--");
     expect(formatPace(-1)).toBe("--:--");
+  });
+});
+
+describe("parseDurationToSeconds", () => {
+  it("parses H:MM", () => {
+    expect(parseDurationToSeconds("5:30")).toBe(5 * 3600 + 30 * 60);
+  });
+
+  it("parses H:MM:SS", () => {
+    expect(parseDurationToSeconds("1:01:01")).toBe(3661);
+  });
+
+  it("round-trips with formatDuration", () => {
+    expect(parseDurationToSeconds(formatDuration(3661))).toBe(3661);
+  });
+
+  it("returns null for empty or malformed input", () => {
+    expect(parseDurationToSeconds("")).toBeNull();
+    expect(parseDurationToSeconds("   ")).toBeNull();
+    expect(parseDurationToSeconds("not a time")).toBeNull();
+    expect(parseDurationToSeconds("5")).toBeNull();
+    expect(parseDurationToSeconds("-1:00")).toBeNull();
   });
 });

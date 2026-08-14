@@ -488,6 +488,25 @@
   background: var(--warn-bg);
 }
 
+.target-time-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.target-time-input label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+.target-time-input input {
+  width: 80px;
+}
+
 .results-summary__stat {
   display: flex;
   flex-direction: column;

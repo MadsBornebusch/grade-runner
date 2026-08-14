@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { GpxPoint } from "./gpx/pipeline";
 import { rawCourseStats, runPipeline } from "./gpx/pipeline";
-import { findFlatPacedFinishTime, findSustainableTheta, type SolverInputs } from "./model/solver";
+import { findFlatPacedFinishTime, findSustainableTheta, findThetaForTargetTime, type SolverInputs } from "./model/solver";
 import { predictBestDemonstratedTheta, predictMarginTheta } from "./model/pacingMarginFit";
 import { analyzeRun, type AnalysisInputs } from "./model/analysis";
 import { ceilingPower } from "./model/ceiling";
@@ -26,6 +26,7 @@ import { SplitTable } from "./ui/SplitTable";
 import { ResultsSummary } from "./ui/ResultsSummary";
 import { AnalysisSummary } from "./ui/AnalysisSummary";
 import { buildAnalysisChartPoints, buildChartPoints, summarizeChartPoints, type HrEstimateInputs } from "./ui/chartData";
+import { formatDuration, parseDurationToSeconds } from "./ui/format";
 import {
   loadFormInputs,
   resolveCeilingParams,
@@ -58,6 +59,13 @@ function App() {
 
   const [rawPoints, setRawPoints] = useState<GpxPoint[] | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
+
+  // Planned-finish-time mode: when set, Results shows the plan for THIS
+  // target instead of the theoretical zero-margin ceiling -- an alternate
+  // detail view, not a fourth number alongside ceiling/chosen/best. Kept as
+  // local, unpersisted state (not formInputs) since it's tied to viewing
+  // this particular course in this session, not an athlete setting.
+  const [targetTimeInput, setTargetTimeInput] = useState("");
 
   useEffect(() => {
     saveFormInputs(formInputs);
@@ -211,10 +219,23 @@ function App() {
     };
   }, [formInputs]);
 
+  const targetTimeS = useMemo(() => parseDurationToSeconds(targetTimeInput), [targetTimeInput]);
+
+  const targetTimeResult = useMemo(() => {
+    if (!solverInputs || targetTimeS === null) return null;
+    return findThetaForTargetTime(solverInputs, targetTimeS);
+  }, [solverInputs, targetTimeS]);
+
+  // Planning mode's detail view (charts/splits/averages) follows whichever
+  // plan is active: the user's target time when set, else the theoretical
+  // ceiling -- see ResultsSummary, which keeps showing the ceiling number
+  // itself as a fixed fact regardless.
+  const activeResult = targetTimeResult ?? solverResult;
+
   const chartPoints = useMemo(() => {
-    if (!courseResult || !solverResult) return [];
-    return buildChartPoints(courseResult.segments, solverResult.result.segments, hrEstimateInputs);
-  }, [courseResult, solverResult, hrEstimateInputs]);
+    if (!courseResult || !activeResult) return [];
+    return buildChartPoints(courseResult.segments, activeResult.result.segments, hrEstimateInputs);
+  }, [courseResult, activeResult, hrEstimateInputs]);
 
   const planSummaryStats = useMemo(() => summarizeChartPoints(chartPoints), [chartPoints]);
 
@@ -415,6 +436,25 @@ function App() {
                   <>
                     {resultMode === "planning" && solverResult && (
                       <>
+                        <div className="target-time-input">
+                          <label>
+                            Target finish time
+                            <input
+                              type="text"
+                              placeholder="H:MM"
+                              value={targetTimeInput}
+                              onChange={(e) => setTargetTimeInput(e.target.value)}
+                            />
+                          </label>
+                          {targetTimeInput && (
+                            <button type="button" onClick={() => setTargetTimeInput("")}>
+                              Clear
+                            </button>
+                          )}
+                          {targetTimeInput && targetTimeS === null && (
+                            <p className="warning">Enter a time as H:MM or H:MM:SS.</p>
+                          )}
+                        </div>
                         <ResultsSummary
                           theta={solverResult.theta}
                           result={solverResult.result}
@@ -422,6 +462,11 @@ function App() {
                           chosenPacing={chosenPacingResult}
                           bestDemonstrated={bestDemonstratedResult}
                           summaryStats={planSummaryStats}
+                          target={
+                            targetTimeResult && targetTimeS !== null
+                              ? { result: targetTimeResult.result, theta: targetTimeResult.theta, targetTimeS }
+                              : null
+                          }
                         />
                         {solverInputs && solverBaseInputs && (
                           <FinishTimeRangePanel
@@ -435,6 +480,15 @@ function App() {
                             enough for a meaningful chart axis/scale. */}
                         {chartPoints.length >= 5 && (
                           <>
+                            {targetTimeResult && targetTimeS !== null && (
+                              <p className="field-group-note">
+                                Splits and charts below show your {formatDuration(targetTimeS)} target
+                                {Math.abs(targetTimeResult.result.finishTimeS - targetTimeS) > 60
+                                  ? " (closest achievable pace, not exact)"
+                                  : ""}
+                                . Clear it to go back to the theoretical ceiling.
+                              </p>
+                            )}
                             <ElevationProfileChart points={chartPoints} />
                             <FuelChart points={chartPoints} />
                             <SplitTable

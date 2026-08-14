@@ -17,9 +17,14 @@ interface ResultsSummaryProps {
    * not a fantasy number. Still bounded by the theoretical ceiling. */
   bestDemonstrated: FlatPacedResult | null;
   /** Whole-course averages (pace, grade-adjusted pace, estimated heart
-   * rate) for the theoretical-ceiling plan shown above -- see
-   * chartData.ts's summarizeChartPoints. */
+   * rate) for whichever plan is active (the target below when set, else
+   * the theoretical ceiling) -- see chartData.ts's summarizeChartPoints. */
   summaryStats: CourseSummaryStats;
+  /** User-chosen planned finish time, if set -- null means no target is
+   * active. targetTimeS is what they asked for; result/theta is the
+   * closest the solver could actually produce (may not match targetTimeS
+   * exactly -- see the sublabel logic below). */
+  target: { result: SimulationResult; theta: number; targetTimeS: number } | null;
 }
 
 function formatMinPerKm(minPerKm: number | null): string {
@@ -30,6 +35,8 @@ function formatOrBonk(r: SimulationResult): string {
   return r.feasible ? formatDuration(r.finishTimeS) : "bonks";
 }
 
+const TARGET_MATCH_TOLERANCE_S = 60;
+
 export function ResultsSummary({
   theta,
   result,
@@ -37,11 +44,17 @@ export function ResultsSummary({
   chosenPacing,
   bestDemonstrated,
   summaryStats,
+  target,
 }: ResultsSummaryProps) {
   const reachedKm = result.segments.length
     ? result.segments[result.segments.length - 1].cumulativeDistance3D / 1000
     : 0;
   const totalKm = totalDistanceM / 1000;
+
+  const targetMatched = target && Math.abs(target.result.finishTimeS - target.targetTimeS) <= TARGET_MATCH_TOLERANCE_S;
+  // Unreachable-fast target: the closest we can do (fastest feasible plan)
+  // still finishes SLOWER than what was asked for.
+  const targetTooFast = target && !targetMatched && target.result.finishTimeS > target.targetTimeS;
 
   return (
     <div className={`results-summary ${result.feasible ? "results-summary--ok" : "results-summary--warn"}`}>
@@ -53,6 +66,29 @@ export function ResultsSummary({
         <span className="results-summary__value">{formatOrBonk(result)}</span>
         <span className="results-summary__sublabel">{(theta * 100).toFixed(0)}% effort — never actually achieved</span>
       </div>
+
+      {target && (
+        <div
+          className="results-summary__stat"
+          title={
+            targetMatched
+              ? "The pacing needed to hit your target finish time."
+              : targetTooFast
+                ? "Your target isn't reachable without bonking — this is your fastest sustainable pace instead."
+                : "Your target is slower than this course's gentlest sustainable pace — this is the closest match."
+          }
+        >
+          <span className="results-summary__label">Target</span>
+          <span className="results-summary__value">{formatOrBonk(target.result)}</span>
+          <span className="results-summary__sublabel">
+            {targetMatched
+              ? `${(target.theta * 100).toFixed(0)}% effort`
+              : targetTooFast
+                ? "not achievable — showing fastest sustainable pace"
+                : "closest achievable pace"}
+          </span>
+        </div>
+      )}
 
       {chosenPacing && (
         <div
