@@ -31,7 +31,7 @@ export function ResultsSummary({ theta, result, totalDistanceM, chosenPacing, be
     <div className={`results-summary ${result.feasible ? "results-summary--ok" : "results-summary--warn"}`}>
       <div
         className="results-summary__stat"
-        title="The largest fraction of your sustainable aerobic ceiling the solver found you can hold the whole way without bonking. This is a THEORETICAL upper bound, not a realistic target — real-data testing found this athlete never came within 15% of it, even on their best confirmed race. Fueling isn't the only real limit; this number only knows about fueling."
+        title="Theoretical upper bound, not a realistic target — you've never come within 15% of it, even on your best race."
       >
         <span className="results-summary__label">Theoretical ceiling</span>
         <span className="results-summary__value">{formatOrBonk(result)}</span>
@@ -41,7 +41,7 @@ export function ResultsSummary({ theta, result, totalDistanceM, chosenPacing, be
       {chosenPacing && (
         <div
           className="results-summary__stat"
-          title="Predicted from your own heart rate during past confirmed races, fit as a curve against race duration (Settings — Strava/fit — Pacing margin) — what you'd likely run pacing the way you actually have before, not a theoretical maximum."
+          title="What you'd likely run, based on your heart rate in past confirmed races."
         >
           <span className="results-summary__label">Chosen pacing</span>
           <span className="results-summary__value">{formatOrBonk(chosenPacing.result)}</span>
@@ -52,7 +52,7 @@ export function ResultsSummary({ theta, result, totalDistanceM, chosenPacing, be
       {bestDemonstrated && (
         <div
           className="results-summary__stat"
-          title="The upper edge of your own pacing-margin curve — what's possible if you execute like your single best confirmed race relative to its own length, not a theoretical fantasy. Still capped by the theoretical ceiling above."
+          title="What's possible if you execute like your best confirmed race, this length."
         >
           <span className="results-summary__label">Best demonstrated</span>
           <span className="results-summary__value">{formatOrBonk(bestDemonstrated.result)}</span>

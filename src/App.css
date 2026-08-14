@@ -311,6 +311,23 @@
   margin: 0;
 }
 
+.run-library__applied-summary {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 8px 0 16px;
+}
+
+.run-library__applied-summary ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.run-library__applied-summary li {
+  margin: 2px 0;
+}
+
 .run-library__status {
   font-size: 13px;
   font-weight: 600;

@@ -483,11 +483,7 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
     <div className="inputs-panel">
       <fieldset>
         <legend>Athlete</legend>
-        <p className="field-group-help">
-          Body mass, VO2max, and LT2 are what your pace ceiling needs — the minimum for a working plan. VO2max sets
-          the scale; LT2 caps how much of it you can sustain at all. Add LT1 below (in Fuel split) to also shape your
-          carb-vs-fat split, or skip straight to a real fat-oxidation curve there for the fewest assumptions.
-        </p>
+        <p className="field-group-help">Body mass, VO2max, and LT2 are the minimum for a working plan.</p>
         <NumberField
           label="Body mass"
           hint="kg"
@@ -500,11 +496,7 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
           Current effective VO2max: {(resolveVo2Max(values.vo2MaxHistory) ?? 50).toFixed(1)} ml/kg/min, combining{" "}
           {values.vo2MaxHistory.length} entr{values.vo2MaxHistory.length === 1 ? "y" : "ies"}.
         </p>
-        <p className="field-group-help">
-          Add every VO2max measurement you have, dated and with its source — a lab test outweighs a wearable guess,
-          and older entries matter less as you train (see PLAN.md §12). One entry works fine too; it's just used
-          directly.
-        </p>
+        <p className="field-group-help">Add every VO2max measurement you have, dated and sourced.</p>
         <Vo2MaxRows history={values.vo2MaxHistory} onChange={(vo2MaxHistory) => set("vo2MaxHistory", vo2MaxHistory)} />
         <LtThresholdField
           label="LT2"
@@ -525,9 +517,7 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
       <fieldset>
         <legend>Fuel split</legend>
         <p className="field-group-help">
-          How your energy split shifts from fat to carbs as effort rises -- doesn't touch your pace ceiling above.
-          LT1 alone (below) gives a theoretical curve, shown live as you adjust it. A real fat-oxidation curve
-          replaces LT1/LT2 entirely for the fewest assumptions, once you have lab data.
+          Sets your fat-vs-carb split by effort. Enter LT1 below, or add a real fat-ox curve for fewer assumptions.
         </p>
         <LtThresholdField
           label="LT1"
@@ -545,14 +535,12 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
         />
         {usingFatOxCurve && (
           <p className="field-group-note">
-            LT1/LT2 are unused — your fat oxidation curve below is active instead.
+            LT1/LT2 unused — your fat-ox curve is active instead.
             {equivalentThresholds && (
               <>
                 {" "}
-                For reference, your curve is equivalent to LT1 ≈ {(equivalentThresholds.lt1Fraction * 100).toFixed(0)}
-                % and LT2 ≈ {(equivalentThresholds.lt2Fraction * 100).toFixed(0)}% of the VO2max above. VO2max itself
-                isn't derived from the curve — a submaximal fat-ox test can't tell us where your true ceiling is — so
-                it still needs its own source and keeps governing your pace ceiling independently.
+                (≈LT1 {(equivalentThresholds.lt1Fraction * 100).toFixed(0)}%, LT2{" "}
+                {(equivalentThresholds.lt2Fraction * 100).toFixed(0)}% of VO2max, for reference.)
               </>
             )}
           </p>
@@ -561,10 +549,8 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
         <details>
           <summary>Advanced: full fat-ox curve (overrides LT1/LT2 above)</summary>
           <p className="field-group-help">
-            If you know your fat and carb oxidation rates at different paces (e.g. from a metabolic test), enter both
-            here instead of relying on the default LT1/LT2 curve — the model needs both numbers to work out the fuel
-            split at that pace. Add at least 2-3 points across a range of paces for a reliable fit — one point just
-            shifts the default curve. Assumes the points were measured on flat ground.
+            Enter fat and carb oxidation rates from a metabolic test. Add 2-3+ points across a range of paces,
+            measured on flat ground.
           </p>
           <FatOxRows
             points={values.fatOxPoints}
@@ -586,10 +572,7 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
             onChange={(v) => set("foPeakGPerMin", rateToGPerMin(v, values.fatOxRateDisplayUnit))}
           />
           {usingFatOxCurve && (
-            <p className="field-group-note">
-              Auto-filled from your highest measured fat-oxidation rate above — override if you know your true peak is
-              higher (e.g. the test didn't reach it).
-            </p>
+            <p className="field-group-note">Auto-filled from your highest measured rate above — override if your true peak is higher.</p>
           )}
         </details>
       </fieldset>
@@ -597,12 +580,9 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
       <fieldset>
         <legend>Pacing curve</legend>
         <p className="field-group-help">
-          How much of your aerobic max you can hold shrinks the longer you race — you can hold a high effort briefly,
-          but only a much lower one all day. This curve models that fade: it starts near <strong>f0</strong> (the
-          fraction of max you can hold at the start) and decays toward <strong>f_inf</strong> (the fraction you can
-          sustain indefinitely), with <strong>tau</strong> controlling how many minutes that fade takes. Found from
-          fitting your own past runs below (see the Strava/fit section) whenever that fit clears its own quality bar,
-          or left at reasonable defaults otherwise.
+          Models how your sustainable effort fades with duration: starts at <strong>f0</strong>, decays to{" "}
+          <strong>f_inf</strong> over <strong>tau</strong> minutes. Fit from your past runs below, or left at
+          defaults.
         </p>
         <label className="field field--checkbox">
           <input
@@ -614,8 +594,7 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
         </label>
         {!values.pacingCurveEnabled && (
           <p className="field-group-note">
-            Off — your plan uses a flat sustainable fraction (f0, capped by LT2) for the whole event, with no fade
-            over duration and no durability drift. f_inf and tau below have no effect until this is back on.
+            Off — plan uses a flat f0 (capped by LT2) for the whole event. f_inf and tau have no effect until back on.
           </p>
         )}
         {values.pacingCurveEnabled && (
@@ -625,10 +604,7 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
         )}
         <details>
           <summary>Advanced: override the pacing curve manually</summary>
-          <p className="field-group-help">
-            Only change these if you know how you personally fade over a long race (e.g. from pacing data on a past
-            ultra) and don't want to rely on the fit below.
-          </p>
+          <p className="field-group-help">Only change if you know your own fade rate and don't want the fit below.</p>
           <NumberField
             label="f0"
             hint="starting sustainable fraction"
@@ -667,10 +643,7 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
             />
             <span>Durability drift</span>
           </label>
-          <p className="field-group-help">
-            Optional extra fade on top of the curve above, to model accumulated muscular fatigue (not just aerobic
-            fade) over a very long day. Off by default — most people don't need this.
-          </p>
+          <p className="field-group-help">Extra fade for accumulated muscular fatigue on very long days. Off by default.</p>
           {values.durabilityDriftPerHour > 0 && (
             <NumberField
               label="Drift rate"
@@ -689,13 +662,8 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
       <fieldset>
         <legend>Terrain surface cost</legend>
         <p className="field-group-help">
-          Unpaved/technical trail costs more to move across than pavement at the same gradient -- this multiplies
-          the running/walking cost curve while actually on unpaved terrain, with no carryover once you're back on
-          pavement. Found per surface category (gravel/dirt/compacted/path) from fitting your own past runs with
-          surface data below (see the Strava/fit section), conditioned on your recorded heart rate so it isn't
-          distorted by how hard you happened to be pushing -- applied automatically whenever that fit clears its own
-          quality bar. The flat multiplier below is a fallback for any category the fit has no entry for, or a
-          manual override if you'd rather not rely on the fit at all.
+          Extra cost for unpaved/technical terrain, per surface category. Fit automatically from your past runs
+          below. The flat multiplier is a fallback or manual override.
         </p>
         {values.surfaceCostMultipliers && Object.keys(values.surfaceCostMultipliers).length > 0 && (
           <p className="field-group-note">
@@ -708,10 +676,7 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
         )}
         <details>
           <summary>Advanced: flat fallback / manual override</summary>
-          <p className="field-group-help">
-            Only change this if you know how much slower you personally move on technical terrain and don't want to
-            rely on the per-category fit above.
-          </p>
+          <p className="field-group-help">Only change if you don't want to rely on the fit above.</p>
           <p className="field-group-note">
             Current: {values.unpavedCostMultiplier.toFixed(2)}x (
             {((values.unpavedCostMultiplier - 1) * 100).toFixed(0)}% slower on unpaved terrain).
@@ -730,11 +695,7 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
 
       <fieldset>
         <legend>Heart rate zones</legend>
-        <p className="field-group-help">
-          Reference/display only -- this app's ceiling model is power/pace-based, not HR-based, so these zone
-          boundaries aren't fed into any calculation (the HR-effort calibration below is the one place HR actually
-          drives a number, and it's kept separate from these zones).
-        </p>
+        <p className="field-group-help">Reference only -- not used in any calculation.</p>
         <label className="field">
           <span className="field__label">Zone model</span>
           <select
@@ -795,10 +756,8 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
       <fieldset>
         <legend>Walk / run</legend>
         <p className="field-group-help">
-          There's no fixed grade where everyone switches to walking — it falls out of the model naturally: running
-          gets metabolically expensive on steep climbs, while walking is capped at a max speed. Once your target
-          pace would need faster walking than that cap allows, running becomes faster and wins. Max walk speed sets
-          that cap; force-walk overrides it for grades you know you'd never run anyway.
+          Max walk speed sets your walking cap; the model switches to running once that's faster. Force-walk
+          overrides this for grades you'd never run.
         </p>
         <SpeedField
           label="Max walk speed"
@@ -843,10 +802,8 @@ export function FuelingFields({ values, onChange }: FieldsProps) {
       <fieldset>
         <legend>Fueling</legend>
         <p className="field-group-help">
-          Your fueling plan for this race, and your body's carb tank. The model assumes everything you plan to take
-          in gets absorbed and used — it doesn't enforce a gut-absorption ceiling itself, so don't plan for much more
-          than a real gut can handle: roughly 60 g/h for glucose-only products, up to ~90 g/h with glucose+fructose
-          mixes (common in modern gels/drinks). Planning above that overstates how much carb you're actually getting.
+          Assumes everything you enter gets absorbed -- don't exceed ~60 g/h (glucose-only) or ~90 g/h
+          (glucose+fructose), a real gut's limit.
         </p>
         <NumberField
           label="Carb intake"
@@ -868,9 +825,8 @@ export function FuelingFields({ values, onChange }: FieldsProps) {
           ≈ {resolveGlycogenStoreG(values).toFixed(0)} g total at {values.bodyMassKg} kg body mass.
         </p>
         <p className="field-group-help">
-          ~7-8 g/kg (liver + muscle glycogen) is typical for a fed, trained endurance athlete. Carb-loading in the
-          days before a big race can push this higher; starting already fasted, tapered off carbs, or fatigued from
-          back-to-back hard days should push it lower.
+          ~7-8 g/kg is typical for a fed, trained athlete. Carb-loading pushes it higher; fasted or fatigued pushes
+          it lower.
         </p>
       </fieldset>
     </div>
@@ -886,11 +842,7 @@ export function CourseProcessingFields({ values, onChange }: FieldsProps) {
     <div className="inputs-panel">
       <fieldset>
         <legend>Course processing</legend>
-        <p className="field-group-help">
-          How the raw GPS track gets cleaned up before the model uses it: elevation is smoothed and distance is
-          resampled to fixed-length segments so noisy GPS points don't produce a jagged, unrealistic gradient. Fine
-          to leave at the defaults unless your course has unusually sparse or noisy GPS data.
-        </p>
+        <p className="field-group-help">Cleans up noisy GPS data. Leave at defaults unless your course is unusually sparse/noisy.</p>
         <NumberField
           label="Segment length"
           hint="m, resample spacing"

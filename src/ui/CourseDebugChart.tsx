@@ -39,15 +39,34 @@ export function CourseDebugChart({
 }: CourseDebugChartProps) {
   const [containerRef, width] = useContainerWidth<HTMLDivElement>();
 
+  // Plotted against each series' own % of ITS total distance, not raw km --
+  // raw and processed accumulate distance differently (resampling cuts
+  // corners on turns/switchbacks, see the help text below), so at a shared
+  // km value the two lines are actually looking at different physical
+  // points on the course. That divergence compounds over the run, which
+  // reads as the two lines sliding further apart -- as if one had been
+  // shifted sideways -- worse the more switchbacks a course has. Normalizing
+  // to % keeps both lines anchored at the same start (0%) and finish
+  // (100%), which is what "compare these two shapes" actually needs. Reuses
+  // the `distanceKm` field name (now holding a 0-100 percentage, not km) so
+  // useDomainZoom -- shared with several other charts -- needs no change.
+  const rawTotalM = raw.distanceM;
   const rawData = downsample(
-    raw.series.map((p) => ({ distanceKm: p.distanceM / 1000, elevation: p.elevation })),
+    raw.series.map((p) => ({ distanceKm: rawTotalM > 0 ? (100 * p.distanceM) / rawTotalM : 0, elevation: p.elevation })),
     800,
   );
-  const processedData = downsample(processed, 800);
-  // Brush drives a shared km domain (see useDomainZoom) rather than
-  // Brush's own index-slicing, since raw/processed are two independent
-  // data arrays with different lengths -- a domain applies to both no
-  // matter which array each Line was given.
+  const processedTotalKm = processedDistanceM / 1000;
+  const processedData = downsample(
+    processed.map((p) => ({
+      distanceKm: processedTotalKm > 0 ? (100 * p.distanceKm) / processedTotalKm : 0,
+      elevationM: p.elevationM,
+    })),
+    800,
+  );
+  // Brush drives a shared % domain (see useDomainZoom) rather than Brush's
+  // own index-slicing, since raw/processed are two independent data arrays
+  // with different lengths -- a domain applies to both no matter which
+  // array each Line was given.
   const { startIndex, endIndex, isZoomed, domain, onBrushChange, reset } = useDomainZoom(processedData);
 
   return (
@@ -61,12 +80,9 @@ export function CourseDebugChart({
         )}
       </div>
       <p className="field-group-help">
-        Raw GPS/barometric elevation (dashed) vs. what the model actually uses after your Segment
-        length / Smoothing window settings (solid). Total elevation gain is naturally scale-sensitive
-        on rough terrain — there's no single "true" number, more resolution always finds more gain —
-        so treat it as a reference point, not a target to hit. Distance is different: it shrinks in a
-        straight line as segment length grows, because longer segments cut corners on turns and
-        switchbacks, and that directly moves your predicted finish time.
+        Raw GPS elevation (dashed) vs. what the model uses after processing (solid), plotted by % of
+        each line's own distance so the two shapes line up. Use the table below, not the chart, to
+        compare actual distance/gain numbers.
       </p>
       <div className="chart__canvas" ref={containerRef}>
         {width > 0 && (
@@ -83,13 +99,13 @@ export function CourseDebugChart({
               domain={domain ?? [0, "dataMax"]}
               allowDataOverflow={isZoomed}
               tickFormatter={(v: number) => v.toFixed(0)}
-              label={{ value: "km", position: "insideBottomRight", offset: -4 }}
+              label={{ value: "% of distance", position: "insideBottomRight", offset: -4 }}
               allowDuplicatedCategory={false}
             />
             <YAxis label={{ value: "m", angle: -90, position: "insideLeft" }} />
             <Tooltip
               formatter={(value, name) => [`${Number(value).toFixed(0)} m`, name]}
-              labelFormatter={(v) => `${Number(v).toFixed(2)} km`}
+              labelFormatter={(v) => `${Number(v).toFixed(0)}%`}
             />
             <Legend />
             <Line
@@ -152,11 +168,8 @@ export function CourseDebugChart({
         </tbody>
       </table>
       <p className="field-group-help">
-        What actually drives your predicted pace and bonk point — the energy cost integrated over
-        the whole course — stays comparatively stable across a wide range of smoothing settings,
-        even though the gain number above swings a lot. If the distance row looks short of what you
-        know the course to be, try a smaller segment length; just keep the smoothing window at a
-        real value (not near 0) so the gradient calculation stays protected from GPS noise.
+        If distance looks too short, lower the segment length -- but keep the smoothing window well
+        above 0 so gradient stays protected from GPS noise.
       </p>
     </div>
   );

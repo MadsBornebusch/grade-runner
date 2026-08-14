@@ -28,7 +28,6 @@ import {
   type HrEffortCalibration,
 } from "../model/hrCalibration";
 import { sustainableFraction } from "../model/ceiling";
-import { filterRunsSinceDate, shouldFetchNextBackfillPage, toStoredRunSummaryInput, type BackfillPage } from "../model/stravaBackfill";
 import { estimateVo2MaxFromRun, isEstimableEffort } from "../model/vo2MaxEstimate";
 import {
   addStoredRun,
@@ -39,14 +38,14 @@ import {
   setStoredRunRaceTags,
   setStoredRunSurfaceEdges,
   setVo2MaxEstimability,
-  upsertStoredRunSummary,
   type StoredRun,
 } from "../storage/runLibrary";
 import { looksLikeGenericStravaTitle } from "../model/raceCandidates";
-import { fitPacingMarginAcrossRaces, type PacingMarginFitResult } from "../model/pacingMarginFit";
+import { fitPacingMarginAcrossRaces, MIN_MARGIN_FIT_RACES, type PacingMarginFitResult } from "../model/pacingMarginFit";
 import { resolveCeilingParams, resolveGlycogenStoreG, resolveLt1Lt2Fractions, type FormInputs, type Vo2MaxEntry } from "./formInputs";
 import { StravaImport } from "./StravaImport";
 import { ensurePointsForRun, getAutoFetchStatus, runAutoFetchBatch, subscribeToAutoFetch } from "./autoFetchRuns";
+import { getBackfillStatus, runBackfillBatch, subscribeToBackfill } from "./backfillRuns";
 import { fetchSurfaceEdges } from "./surfaceLookup";
 import { useStravaSession } from "./useStravaSession";
 
@@ -64,10 +63,6 @@ interface RunLibraryPanelProps {
    * about Planning mode's course or the solver. */
   onRacesFitted?: (races: EffortTrendPoint[][], raceDates: (Date | null)[]) => void;
 }
-
-const BACKFILL_MAX_PAGES = 50;
-const BACKFILL_PER_PAGE = 100;
-const BACKFILL_PAGE_DELAY_MS = 300;
 
 /** suggestRunsForFit's own default (10 per bucket) is deliberately small --
  * it exists to keep a MANUAL review list short (see that file's own doc:
@@ -232,8 +227,9 @@ export function RunLibraryPanel({
   const [halfLifeDays, setHalfLifeDays] = useState(DEFAULT_HALF_LIFE_DAYS);
 
   const [backfillFrom, setBackfillFrom] = useState(() => loadLastBackfillDate() ?? oneYearAgoDateInput());
-  const [backfilling, setBackfilling] = useState(false);
-  const [backfillProgress, setBackfillProgress] = useState<string | null>(null);
+  // Module-level (see backfillRuns.ts's own doc) -- survives closing and
+  // reopening Settings mid-backfill instead of silently losing progress.
+  const backfillStatus = useSyncExternalStore(subscribeToBackfill, getBackfillStatus);
 
   const refresh = useCallback(() => {
     listStoredRuns().then(setRuns).catch((err) => setError(String(err)));
@@ -255,16 +251,18 @@ export function RunLibraryPanel({
     const freshRuns = await listStoredRuns();
     const { kept } = dedupeStoredRuns(freshRuns);
     const suggestions = suggestRunsForFit(kept, AUTO_FETCH_CANDIDATE_COUNT);
-    // namedRace goes FIRST -- a real race is small in number and far more
-    // valuable to the fits below (see raceCandidates.ts) than another
-    // vo2max/durability/spread pick, so it should never lose a slot to them.
-    const interleaved = interleave([suggestions.namedRace, suggestions.vo2max, suggestions.durability, suggestions.durationSpread]);
+    // namedRace gets its OWN budget, additive to AUTO_FETCH_TOTAL_CAP below
+    // rather than competing for a slot inside it -- real races are a small
+    // (typically well under a dozen), categorically more valuable
+    // population than another vo2max/durability/spread pick, so adding
+    // this bucket must never shrink how many of THOSE get fetched.
+    const interleaved = interleave([suggestions.vo2max, suggestions.durability, suggestions.durationSpread]);
     const byId = new Map<string, StoredRun>();
-    for (const r of interleaved) {
+    for (const r of suggestions.namedRace) byId.set(r.id, r);
+    for (const r of interleaved.slice(0, AUTO_FETCH_TOTAL_CAP)) {
       if (!byId.has(r.id)) byId.set(r.id, r);
     }
     const candidateIds = [...byId.values()]
-      .slice(0, AUTO_FETCH_TOTAL_CAP)
       .filter((r) => !r.wantsFullData)
       .map((r) => r.id);
     if (candidateIds.length > 0) await markRunsWantedForFetch(candidateIds);
@@ -375,30 +373,13 @@ export function RunLibraryPanel({
     }
   };
 
-  const runBackfill = useCallback(async () => {
-    setBackfilling(true);
+  // Idempotent (backfillRuns.ts no-ops a call while one's already running),
+  // so it's safe to call on every click without tracking "is one already
+  // in flight" here -- same discipline as markNewFetchCandidates/
+  // runAutoFetchBatch elsewhere in this file.
+  const runBackfill = useCallback(() => {
     setError(null);
-    const targetStartDate = new Date(backfillFrom);
-    let page = 1;
-    let imported = 0;
-    try {
-      for (;;) {
-        setBackfillProgress(`Fetching page ${page}…`);
-        const res = await fetch(`/api/strava/activities?page=${page}&per_page=${BACKFILL_PER_PAGE}`);
-        const body = await res.json();
-        if (!res.ok) throw new Error(body.error ?? "Backfill failed.");
-        const pageResult = body as BackfillPage;
-
-        for (const run of filterRunsSinceDate(pageResult.runs, targetStartDate)) {
-          await upsertStoredRunSummary(toStoredRunSummaryInput(run));
-          imported++;
-        }
-
-        if (!shouldFetchNextBackfillPage(pageResult, page, targetStartDate, BACKFILL_MAX_PAGES)) break;
-        page++;
-        await new Promise((r) => setTimeout(r, BACKFILL_PAGE_DELAY_MS));
-      }
-      setBackfillProgress(`Imported ${imported} run${imported === 1 ? "" : "s"} since ${backfillFrom}.`);
+    void runBackfillBatch(backfillFrom, () => {
       // Advances the saved date to today on ANY successful completion (even
       // zero new runs) -- it means everything up to today has now been
       // checked, so the next click (with no date change needed) only looks
@@ -410,13 +391,8 @@ export function RunLibraryPanel({
       // Decides which of the just-imported summaries are worth fetching
       // full data for, ONCE, right here -- not left to be re-derived
       // reactively later (see markNewFetchCandidates' own doc).
-      await markNewFetchCandidates();
-      refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Backfill failed.");
-    } finally {
-      setBackfilling(false);
-    }
+      void markNewFetchCandidates().then(refresh);
+    });
   }, [backfillFrom, markNewFetchCandidates, refresh]);
 
   const ceilingParams = resolveCeilingParams(formInputs);
@@ -815,6 +791,10 @@ export function RunLibraryPanel({
     if (autoFetchStatus.error) setError(autoFetchStatus.error);
   }, [autoFetchStatus.error]);
 
+  useEffect(() => {
+    if (backfillStatus.error) setError(backfillStatus.error);
+  }, [backfillStatus.error]);
+
   const readyCount = dedupedRuns.filter((r) => r.points !== null).length;
 
   return (
@@ -828,16 +808,7 @@ export function RunLibraryPanel({
         )}
       </div>
       <p className="field-group-help">
-        Store past runs here, then fit your whole athlete model at once from them -- pacing fade, terrain cost,
-        HR-effort calibration, and pacing margin. Flow: backfill from a date below, wait for runs to download,
-        confirm which downloaded runs were real races, then hit the fit button. On tau specifically: pooling races is
-        mainly about robustness -- one tau has to flatten every
-        race's own effort trend simultaneously, not just one run's idiosyncrasies. It doesn't separately identify f0
-        or fInf: that needs races spanning a much wider range of durations than a typical library, plus an anchor on
-        the ceiling's absolute level that this fit doesn't have. Every stored run with full GPS data and a recorded
-        timestamp is considered automatically -- no manual curation needed -- but runs under{" "}
-        {(DURABILITY_MIN_DURATION_S / 60).toFixed(0)} minutes are left out of the fit itself (too short to say
-        anything real about fatigue decay at ultra scale; see the note below if any were).
+        1) Backfill from a date below. 2) Wait for runs to download. 3) Confirm your races. 4) Hit the fit button.
       </p>
 
       <label className="gpx-upload__control">
@@ -858,16 +829,12 @@ export function RunLibraryPanel({
           <div className="strava-import__link-row">
             <span>Backfill runs since</span>
             <input type="date" value={backfillFrom} onChange={(e) => setBackfillFrom(e.target.value)} />
-            <button type="button" className="fatox-add" onClick={() => void runBackfill()} disabled={backfilling}>
-              {backfilling ? "Backfilling…" : "Backfill"}
+            <button type="button" className="fatox-add" onClick={runBackfill} disabled={backfillStatus.running}>
+              {backfillStatus.running ? "Fetching…" : "Backfill"}
             </button>
           </div>
           <p className="field-group-help">
-            Pulls a lightweight summary (distance, duration, elevation, avg heart rate/power) for every run since
-            this date, then automatically fetches full GPS data for whichever of those are actually useful for the
-            fits below (races, hard efforts, longest runs, duration spread) -- no manual selection needed. After a
-            successful run, this date advances to today, so clicking the same button again only checks for
-            whatever's genuinely new since then -- the same button doubles as an update check.
+            Click again later to check for new runs since your last backfill.
           </p>
         </>
       )}
@@ -875,13 +842,12 @@ export function RunLibraryPanel({
       {error && <p className="gpx-upload__error">{error}</p>}
 
       <p className="run-library__status">
-        {backfilling ? (
-          backfillProgress ?? "Fetching your run history…"
+        {backfillStatus.running ? (
+          backfillStatus.progress ?? "Fetching your run history…"
         ) : autoFetchStatus.running ? (
           <>
             Downloading full data for your races and other useful runs
-            {autoFetchStatus.progress ? ` — ${autoFetchStatus.progress.done} of ${autoFetchStatus.progress.total}…` : "…"} Keeps
-            running in the background even if you close Settings.
+            {autoFetchStatus.progress ? ` — ${autoFetchStatus.progress.done} of ${autoFetchStatus.progress.total}…` : "…"}
           </>
         ) : pendingFetchRuns.length > 0 ? (
           `${pendingFetchRuns.length} run${pendingFetchRuns.length === 1 ? "" : "s"} queued to download…`
@@ -903,9 +869,8 @@ export function RunLibraryPanel({
         <div className="run-library__experimental-fit">
           <p className="field-group-note">Confirm your races</p>
           <p className="field-group-help">
-            Check the ones that were a continuous, all-out effort. Leave workouts and stop-start formats (e.g. a
-            backyard ultra's run-then-rest-till-the-hour loops) unchecked -- only checked runs feed the pacing-margin
-            curve below.
+            Check continuous, all-out efforts. Leave workouts and stop-start formats (e.g. backyard ultra loops)
+            unchecked.
           </p>
           <table className="run-library__race-tag-table">
             <tbody>
@@ -948,11 +913,36 @@ export function RunLibraryPanel({
               : `Fit full athlete model from ${readyCount} downloaded run${readyCount === 1 ? "" : "s"}`}
           </button>
           <p className="field-group-help">
-            One click fits everything below at once: tau/f_inf (pacing fade), terrain surface cost, HR-effort
-            calibration, and the pacing-margin curve (chosen vs. best-demonstrated effort) -- each shown separately
-            further down.
+            Fits and applies tau/f_inf, terrain cost, HR calibration, and pacing margin all at once.
           </p>
         </>
+      )}
+
+      {dedupedRuns.length > 0 && (
+        <div className="run-library__applied-summary">
+          <p className="field-group-note">Currently applied</p>
+          <ul>
+            <li>
+              Pacing fade: f0 {formInputs.f0.toFixed(2)}, f_inf {formInputs.fInf.toFixed(2)}, tau{" "}
+              {formInputs.tauMin.toFixed(0)} min
+            </li>
+            <li>
+              Terrain cost:{" "}
+              {formInputs.surfaceCostMultipliers && Object.keys(formInputs.surfaceCostMultipliers).length > 0
+                ? Object.entries(formInputs.surfaceCostMultipliers)
+                    .map(([c, m]) => `${c} ${m!.toFixed(2)}x`)
+                    .join(", ")
+                : "not fit yet"}
+            </li>
+            <li>HR calibration: {formInputs.hrEffortCalibrationSlope !== null ? "fit" : "not fit yet"}</li>
+            <li>
+              Pacing margin:{" "}
+              {formInputs.pacingMargin
+                ? `f_inf ${formInputs.pacingMargin.marginFInf.toFixed(2)}, tau ${formInputs.pacingMargin.marginTauHours.toFixed(1)}h`
+                : `not fit yet -- confirm ${MIN_MARGIN_FIT_RACES}+ races above`}
+            </li>
+          </ul>
+        </div>
       )}
 
       {fitRan && transitGapCount > 0 && (
@@ -1013,11 +1003,7 @@ export function RunLibraryPanel({
           <button type="button" onClick={handleEstimateTauCI} disabled={computingTauCI}>
             {computingTauCI ? "Estimating…" : "Estimate tau confidence interval"}
           </button>
-          <p className="field-group-help">
-            A bootstrap confidence interval on tau itself: how much tau would vary if fit on a slightly different
-            sample of your own runs. Not a real-world guarantee -- it doesn't account for physiological changes over
-            time, just how well this specific set of runs pins tau down.
-          </p>
+          <p className="field-group-help">How much tau would vary on a slightly different sample of your runs.</p>
           {tauCI === "insufficient" && (
             <p className="warning">
               Not enough informative runs to estimate a confidence interval -- the same support bar the tau fit above
@@ -1039,11 +1025,8 @@ export function RunLibraryPanel({
         <div className="run-library__experimental-fit">
           <p className="field-group-note">Experimental: joint fInf/tau fit (PLAN.md §11)</p>
           <p className="field-group-help">
-            Fits fInf and tau together from the same runs above, holding VO2max and f0 fixed -- fixing f0 is
-            what makes this well-posed rather than an unbounded search (verified with a synthetic recovery test, not
-            just assumed). This does <strong>not</strong> independently verify VO2max or f0: fInf comes out relative
-            to whatever those currently are, and absorbs error in both. Treat this as "the fit is runnable," not "fInf
-            is now a trustworthy, independently-measured number."
+            Fits fInf and tau together, holding VO2max and f0 fixed. Doesn't independently verify VO2max or f0 --
+            fInf absorbs any error in both.
           </p>
           <p className={fInfFitResult.durationDiversityRatio < 2 ? "warning" : "field-group-note"}>
             Duration range across these races: {fInfFitResult.durationDiversityRatio.toFixed(1)}x (longest ÷
@@ -1091,14 +1074,8 @@ export function RunLibraryPanel({
         <div className="run-library__experimental-fit">
           <p className="field-group-note">Terrain surface cost</p>
           <p className="field-group-help">
-            One cost multiplier per surface category, applied while actually moving across it -- an instantaneous
-            effect with no carryover to paved segments afterward, unlike a durability/fatigue term. Fit by
-            conditioning on your own recorded heart rate as the effort signal, then asking how much slower you move
-            at the SAME effort on each surface -- unlike a finish-time fit against the solver's theoretical ceiling,
-            this doesn't assume you race at max sustainable effort with zero margin, so it isn't distorted by that
-            assumption the way a flat multiplier fit against real finish times was. Surface fetched via a public
-            OpenStreetMap map-matching lookup per run (fails silently and just leaves a run out if that lookup
-            doesn't succeed). Every run with heart rate and surface data contributes, not just races -- this fit
+            One cost multiplier per surface category, from how much slower you move at the same heart rate on each
+            surface. Every run with heart rate and surface data contributes, not just races -- this fit
             doesn't need race pacing to be valid.
           </p>
           <p className="field-group-note">
@@ -1138,11 +1115,8 @@ export function RunLibraryPanel({
         <div className="run-library__experimental-fit">
           <p className="field-group-note">HR-effort calibration -- from your training history (PLAN.md §11)</p>
           <p className="field-group-help">
-            A per-athlete mapping from heart rate to effort fraction, fit from the early (roughly first 65%) portion
-            of each race where cardiac drift is smallest -- HR climbing at constant true output from rising core
-            temperature/dehydration, not increased intensity, typically 10-15bpm over a long aerobic effort and worse
-            in heat. Doesn't feed pace/power-based predictions at all; it exists so a heart-rate reading can be
-            converted to an effort estimate wherever that's useful (e.g. the Power &amp; HR chart in Analysis mode).
+            Maps heart rate to effort fraction, fit from each race's early portion (least cardiac drift). Doesn't
+            affect pace/power predictions -- used for HR-based effort estimates elsewhere (e.g. Analysis mode).
           </p>
           <p className="field-group-note">
             Best fit: effort fraction ≈ {hrCalibrationFitResult.intercept.toFixed(3)} +{" "}
@@ -1176,11 +1150,8 @@ export function RunLibraryPanel({
         <div className="run-library__experimental-fit">
           <p className="field-group-note">Pacing margin -- chosen effort vs. race length</p>
           <p className="field-group-help">
-            findSustainableTheta's own search returns 100% of your fitted ceiling for any race under ~6-8h (fuel
-            never becomes the binding constraint that short) -- but your own heart rate during a race shows you don't
-            actually run at that: this curve is fit from your confirmed races' own HR-implied effort, early-window
-            only, so it isn't distorted by end-of-race cardiac drift. It's the "chosen pacing" number shown alongside
-            your predicted finish time -- separate from, and layered UNDER, the theoretical ceiling.
+            How much of your fitted ceiling you actually hold, by race length -- fit from your confirmed races' own
+            heart rate. Drives the "Chosen pacing" number shown with your predicted finish time.
           </p>
           <p className="field-group-note">
             Fit from {pacingMarginFitResult.raceCount} confirmed race{pacingMarginFitResult.raceCount === 1 ? "" : "s"}, spanning{" "}
@@ -1219,11 +1190,7 @@ export function RunLibraryPanel({
           return (
             <div className="run-library__experimental-fit">
               <p className="field-group-note">Derived vs. entered heart rate</p>
-              <p className="field-group-help">
-                What the training-history calibration above predicts at your own LT1/LT2 effort levels, compared
-                against the heart rate you actually entered for them -- a direct check of whether your training data
-                and your lab thresholds agree.
-              </p>
+              <p className="field-group-help">Checks whether the calibration above agrees with your entered LT1/LT2 heart rate.</p>
               <ul className="run-library__fit-notes">
                 {labAnchors.map((a) => {
                   const derivedHr = predictHeartRateFromEffortFraction(a.effortFraction, hrCalibrationFitResult);
@@ -1245,10 +1212,7 @@ export function RunLibraryPanel({
         <div className="run-library__experimental-fit">
           <p className="field-group-note">HR-effort calibration -- from your LT1/LT2/fat-ox thresholds</p>
           <p className="field-group-help">
-            Same effort fraction ≈ intercept + slope × heart-rate mapping as above, but fit directly from your own
-            lab-measured thresholds (LT1/LT2 heart rate, and any fat-ox curve points with heart rate entered above)
-            instead of pooled training-run data -- no terrain noise, no warm-up transient, no race-duration decay
-            confound, since these are controlled measurements rather than real-world GPS data.
+            Same mapping as above, but fit from your lab-measured LT1/LT2/fat-ox thresholds instead of training runs.
           </p>
           <p className="field-group-note">
             Best fit: effort fraction ≈ {thresholdHrCalibrationFitResult.intercept.toFixed(3)} +{" "}
@@ -1291,13 +1255,8 @@ export function RunLibraryPanel({
         <div className="run-library__vo2max-estimates">
           <p className="field-group-note">Estimated VO2max from recent hard efforts</p>
           <p className="field-group-help">
-            Derived from each run's own average effort relative to the current ceiling model (PLAN.md §12), among
-            already-fetched runs long enough to trust as a genuine near-maximal effort (roughly 20-90 minutes). Only
-            the {MAX_VO2MAX_ESTIMATES_SHOWN} highest estimates are shown, highest first: an easy run in this window
-            can only <em>underestimate</em> VO2max, so the strongest readings are the ones most likely to reflect a
-            real hard effort rather than a recovery jog that happens to be this long. Review before adding --
-            accepted entries land in your VO2max history as a "race"-sourced measurement, weighted less than a lab
-            test but more than a bare guess.
+            From near-maximal 20-90 minute efforts. Top {MAX_VO2MAX_ESTIMATES_SHOWN} shown, highest first. Review
+            before adding -- accepted entries are weighted like a "race" source.
           </p>
           <div className="fatox-rows">
             {vo2MaxEstimates.map((candidate) => {
