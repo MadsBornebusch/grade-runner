@@ -586,6 +586,25 @@
   overflow-x: auto;
 }
 
+.split-table__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.split-table__length-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+.split-table__length-control input {
+  width: 60px;
+}
+
 .debug-stats-table {
   margin: 12px 0;
   font-size: 13px;

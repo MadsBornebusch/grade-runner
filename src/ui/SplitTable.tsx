@@ -5,15 +5,36 @@ import { computeSplits } from "./splits";
 interface SplitTableProps {
   points: ChartPoint[];
   splitLengthKm?: number;
+  /** Present iff the split length should be user-editable right here --
+   * omit for a read-only table at the default length. */
+  onSplitLengthChange?: (km: number) => void;
 }
 
-export function SplitTable({ points, splitLengthKm = 5 }: SplitTableProps) {
+export function SplitTable({ points, splitLengthKm = 5, onSplitLengthChange }: SplitTableProps) {
   const splits = computeSplits(points, splitLengthKm);
   const hasHrEstimate = splits.some((s) => s.avgEstimatedHeartRateBpm !== null);
 
   return (
     <div className="split-table">
-      <h3>Splits</h3>
+      <div className="split-table__header">
+        <h3>Splits</h3>
+        {onSplitLengthChange && (
+          <label className="split-table__length-control">
+            every
+            <input
+              type="number"
+              min={0.1}
+              step={0.5}
+              value={splitLengthKm}
+              onChange={(e) => {
+                const v = e.target.valueAsNumber;
+                if (v > 0) onSplitLengthChange(v);
+              }}
+            />
+            km
+          </label>
+        )}
+      </div>
       <table>
         <thead>
           <tr>

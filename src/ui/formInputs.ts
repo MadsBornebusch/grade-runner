@@ -115,6 +115,8 @@ export interface FormInputs {
   pacingMargin: { marginFInf: number; marginTauHours: number; bestUpsideOffset: number } | null;
   segmentLengthM: number;
   smoothingWindowM: number;
+  /** Split-table row length, km. */
+  splitLengthKm: number;
   /** Measured (pace, fat-oxidation) points. Non-empty overrides LT1/LT2 for the fuel/substrate split. */
   fatOxPoints: FatOxPoint[];
   /** Display-only unit for the max walk speed field; the value is always stored as walkMaxMs. */
@@ -166,6 +168,7 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   pacingMargin: null,
   segmentLengthM: 50,
   smoothingWindowM: 150,
+  splitLengthKm: 5,
   fatOxPoints: [],
   walkSpeedDisplayUnit: "ms",
   fatOxSpeedDisplayUnit: "minkm",

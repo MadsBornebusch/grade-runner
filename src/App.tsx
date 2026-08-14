@@ -437,7 +437,11 @@ function App() {
                           <>
                             <ElevationProfileChart points={chartPoints} />
                             <FuelChart points={chartPoints} />
-                            <SplitTable points={chartPoints} />
+                            <SplitTable
+                              points={chartPoints}
+                              splitLengthKm={formInputs.splitLengthKm}
+                              onSplitLengthChange={(splitLengthKm) => setFormInputs((prev) => ({ ...prev, splitLengthKm }))}
+                            />
                           </>
                         )}
                       </>
@@ -486,7 +490,11 @@ function App() {
                             )}
                             <FuelChart points={analysisChartPoints} />
                             <SubstrateChart points={substratePoints} />
-                            <SplitTable points={analysisChartPoints} />
+                            <SplitTable
+                              points={analysisChartPoints}
+                              splitLengthKm={formInputs.splitLengthKm}
+                              onSplitLengthChange={(splitLengthKm) => setFormInputs((prev) => ({ ...prev, splitLengthKm }))}
+                            />
                           </>
                         )}
                       </>
