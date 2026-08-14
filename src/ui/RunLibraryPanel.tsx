@@ -891,37 +891,26 @@ export function RunLibraryPanel({
         <div className="run-library__experimental-fit">
           <p className="field-group-note">Confirm your races</p>
           <p className="field-group-help">
-            The pacing-margin curve below (how much of your fitted ceiling you actually hold, vs. a race's length --
-            see the "Chosen pacing" note further down) is only fit from races you confirm here, never guessed from
-            the activity name alone. Listed: downloaded runs with a non-generic title (Strava auto-titles an
-            unrenamed upload "Morning Run" etc. -- a real race is almost always renamed, but not everything renamed
-            is a race: a club workout or an enforced-rest format like a backyard ultra isn't a continuous effort
-            either, so check each one).
+            Check the ones that were a continuous, all-out effort. Leave workouts and stop-start formats (e.g. a
+            backyard ultra's run-then-rest-till-the-hour loops) unchecked -- only checked runs feed the pacing-margin
+            curve below.
           </p>
           <table className="run-library__race-tag-table">
             <tbody>
               {raceCandidates.map((r) => (
                 <tr key={r.id}>
-                  <td>{r.name}</td>
-                  <td className="run-library__race-tag-date">{runDate(r)?.toISOString().slice(0, 10) ?? ""}</td>
                   <td>
-                    <button
-                      type="button"
-                      className={r.raceTag === "race" ? "run-library__race-tag-btn run-library__race-tag-btn--active" : "run-library__race-tag-btn"}
-                      disabled={raceTagSaving}
-                      onClick={() => void setRaceTag(r.id, "race")}
-                    >
-                      Race
-                    </button>
-                    <button
-                      type="button"
-                      className={r.raceTag === "notRace" ? "run-library__race-tag-btn run-library__race-tag-btn--active" : "run-library__race-tag-btn"}
-                      disabled={raceTagSaving}
-                      onClick={() => void setRaceTag(r.id, "notRace")}
-                    >
-                      Not a race
-                    </button>
+                    <label className="run-library__race-tag-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={r.raceTag === "race"}
+                        disabled={raceTagSaving}
+                        onChange={(e) => void setRaceTag(r.id, e.target.checked ? "race" : "notRace")}
+                      />
+                      {r.name}
+                    </label>
                   </td>
+                  <td className="run-library__race-tag-date">{runDate(r)?.toISOString().slice(0, 10) ?? ""}</td>
                 </tr>
               ))}
             </tbody>

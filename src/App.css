@@ -408,21 +408,15 @@
   white-space: nowrap;
 }
 
-.run-library__race-tag-btn {
-  border: 1px solid var(--border);
-  background: none;
-  color: var(--text-h);
-  border-radius: 5px;
-  padding: 2px 8px;
-  font-size: 12px;
+.run-library__race-tag-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   cursor: pointer;
-  margin-right: 6px;
 }
 
-.run-library__race-tag-btn--active {
-  background: var(--accent);
-  color: var(--bg);
-  border-color: transparent;
+.run-library__race-tag-checkbox input {
+  width: auto;
 }
 
 .run-library-row {
