@@ -311,6 +311,13 @@
   margin: 0;
 }
 
+.run-library__status {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-h);
+  margin: 4px 0 12px;
+}
+
 .fatox-rows {
   display: flex;
   flex-direction: column;

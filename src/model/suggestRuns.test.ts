@@ -149,4 +149,23 @@ describe("suggestRunsForFit", () => {
       expect(suggestions.durationSpread.map((r) => r.id)).toEqual(["ultra", "shortB"]);
     });
   });
+
+  describe("namedRace", () => {
+    it("suggests non-generic-titled runs regardless of duration", () => {
+      const shortRace = makeRun({ id: "race", name: "Askerspurten 10 km", durationS: 25 * 60 });
+      const genericLong = makeRun({ id: "generic", name: "Morning Trail Run", durationS: 5 * 3600 });
+      const suggestions = suggestRunsForFit([shortRace, genericLong]);
+      expect(suggestions.namedRace.map((r) => r.id)).toEqual(["race"]);
+    });
+
+    it("still excludes runs that already have full points fetched", () => {
+      const fetchedRace = makeRun({ id: "race", name: "Ecotrail 80", points: [] });
+      expect(suggestRunsForFit([fetchedRace]).namedRace).toEqual([]);
+    });
+
+    it("caps at candidateCount", () => {
+      const races = Array.from({ length: 5 }, (_, i) => makeRun({ id: `race-${i}`, name: `Race ${i}` }));
+      expect(suggestRunsForFit(races, 2).namedRace).toHaveLength(2);
+    });
+  });
 });

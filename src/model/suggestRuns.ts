@@ -6,6 +6,7 @@
 // invite fetching all of them.
 
 import type { StoredRun } from "../storage/runLibrary";
+import { looksLikeGenericStravaTitle } from "./raceCandidates";
 import { MAX_ESTIMABLE_DURATION_MIN, MIN_ESTIMABLE_DURATION_MIN } from "./vo2MaxEstimate";
 
 /** Shares its window with vo2MaxEstimate.ts's isEstimableEffort -- these
@@ -75,6 +76,18 @@ export interface RunSuggestions {
    * so the fit (once buildable) has real duration range to separate the
    * three parameters instead of races clustered at one length. */
   durationSpread: StoredRun[];
+  /** Summaries whose title ISN'T one of Strava's auto-generated "Morning
+   * Run" style titles -- almost always a real race (an event either
+   * renames the upload or the athlete does). Deliberately no duration
+   * floor, unlike the buckets above: a real check found the other three
+   * buckets can all miss a short race entirely (a 10km effort scores on
+   * none of vo2max's duration window, durability's length, or
+   * durationSpread's own candidate logic reliably), leaving the
+   * race-tagging list (raceCandidates.ts) with nothing to show for it even
+   * though the athlete actually ran it. This is what guarantees a real
+   * race gets fetched, not just runs that happen to be long/hard/spread-
+   * filling. */
+  namedRace: StoredRun[];
 }
 
 function avgSpeedKmh(run: StoredRun): number {
@@ -203,5 +216,7 @@ export function suggestRunsForFit(runs: StoredRun[], candidateCount = DEFAULT_CA
 
   const durationSpread = findDurationSpreadCandidates(unfetched, candidateCount);
 
-  return { vo2max, durability, durationSpread };
+  const namedRace = unfetched.filter((r) => !looksLikeGenericStravaTitle(r.name)).slice(0, candidateCount);
+
+  return { vo2max, durability, durationSpread, namedRace };
 }

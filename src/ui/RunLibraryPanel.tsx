@@ -255,7 +255,10 @@ export function RunLibraryPanel({
     const freshRuns = await listStoredRuns();
     const { kept } = dedupeStoredRuns(freshRuns);
     const suggestions = suggestRunsForFit(kept, AUTO_FETCH_CANDIDATE_COUNT);
-    const interleaved = interleave([suggestions.vo2max, suggestions.durability, suggestions.durationSpread]);
+    // namedRace goes FIRST -- a real race is small in number and far more
+    // valuable to the fits below (see raceCandidates.ts) than another
+    // vo2max/durability/spread pick, so it should never lose a slot to them.
+    const interleaved = interleave([suggestions.namedRace, suggestions.vo2max, suggestions.durability, suggestions.durationSpread]);
     const byId = new Map<string, StoredRun>();
     for (const r of interleaved) {
       if (!byId.has(r.id)) byId.set(r.id, r);
@@ -825,8 +828,10 @@ export function RunLibraryPanel({
         )}
       </div>
       <p className="field-group-help">
-        Store past runs here and fit one shared fade time constant (tau) across several of them at once, instead of
-        just this course's recording. Pooling races is mainly about robustness -- one tau has to flatten every
+        Store past runs here, then fit your whole athlete model at once from them -- pacing fade, terrain cost,
+        HR-effort calibration, and pacing margin. Flow: backfill from a date below, wait for runs to download,
+        confirm which downloaded runs were real races, then hit the fit button. On tau specifically: pooling races is
+        mainly about robustness -- one tau has to flatten every
         race's own effort trend simultaneously, not just one run's idiosyncrasies. It doesn't separately identify f0
         or fInf: that needs races spanning a much wider range of durations than a typical library, plus an anchor on
         the ceiling's absolute level that this fit doesn't have. Every stored run with full GPS data and a recorded
@@ -860,25 +865,32 @@ export function RunLibraryPanel({
           <p className="field-group-help">
             Pulls a lightweight summary (distance, duration, elevation, avg heart rate/power) for every run since
             this date, then automatically fetches full GPS data for whichever of those are actually useful for the
-            fits below (hard efforts, longest runs, duration spread) -- no manual selection needed. After a
+            fits below (races, hard efforts, longest runs, duration spread) -- no manual selection needed. After a
             successful run, this date advances to today, so clicking the same button again only checks for
             whatever's genuinely new since then -- the same button doubles as an update check.
           </p>
-          {backfillProgress && <p className="field-group-note">{backfillProgress}</p>}
         </>
       )}
 
       {error && <p className="gpx-upload__error">{error}</p>}
 
-      {autoFetchStatus.running && (
-        <p className="field-group-note">
-          Fetching full data for recommended runs (hard efforts, longest runs, duration spread)
-          {autoFetchStatus.progress ? ` -- ${autoFetchStatus.progress.done} of ${autoFetchStatus.progress.total}…` : "…"}
-          {" "}Keeps running in the background even if you close Settings.
-        </p>
-      )}
-
-      {dedupedRuns.length === 0 && <p className="placeholder">No runs stored yet.</p>}
+      <p className="run-library__status">
+        {backfilling ? (
+          backfillProgress ?? "Fetching your run history…"
+        ) : autoFetchStatus.running ? (
+          <>
+            Downloading full data for your races and other useful runs
+            {autoFetchStatus.progress ? ` — ${autoFetchStatus.progress.done} of ${autoFetchStatus.progress.total}…` : "…"} Keeps
+            running in the background even if you close Settings.
+          </>
+        ) : pendingFetchRuns.length > 0 ? (
+          `${pendingFetchRuns.length} run${pendingFetchRuns.length === 1 ? "" : "s"} queued to download…`
+        ) : readyCount > 0 ? (
+          `✓ ${readyCount} run${readyCount === 1 ? "" : "s"} downloaded and ready. Confirm your races below, then fit.`
+        ) : dedupedRuns.length === 0 ? (
+          "No runs stored yet."
+        ) : null}
+      </p>
 
       {!formInputs.pacingCurveEnabled && (
         <p className="field-group-note">
@@ -931,8 +943,15 @@ export function RunLibraryPanel({
             <span>days -- older runs count for less</span>
           </div>
           <button type="button" className="fatox-add" onClick={() => void runFit()} disabled={readyCount === 0 || fitting}>
-            {fitting ? "Fitting…" : `Fit tau from ${readyCount} downloaded run${readyCount === 1 ? "" : "s"}`}
+            {fitting
+              ? "Fitting…"
+              : `Fit full athlete model from ${readyCount} downloaded run${readyCount === 1 ? "" : "s"}`}
           </button>
+          <p className="field-group-help">
+            One click fits everything below at once: tau/f_inf (pacing fade), terrain surface cost, HR-effort
+            calibration, and the pacing-margin curve (chosen vs. best-demonstrated effort) -- each shown separately
+            further down.
+          </p>
         </>
       )}
 
