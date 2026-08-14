@@ -475,9 +475,9 @@ function App() {
                               <PacingFitPanel
                                 points={pacingFitPoints}
                                 ceilingParams={analysisInputs.ceilingParams ?? {}}
-                                onApplyTau={(tauMin) => setFormInputs({ ...formInputs, tauMin })}
+                                onApplyTau={(tauMin) => setFormInputs((prev) => ({ ...prev, tauMin }))}
                                 onApplyDrift={(durabilityDriftPerHour) =>
-                                  setFormInputs({ ...formInputs, durabilityDriftPerHour })
+                                  setFormInputs((prev) => ({ ...prev, durabilityDriftPerHour }))
                                 }
                               />
                             )}
@@ -501,20 +501,20 @@ function App() {
         onClose={() => setSettingsOpen(false)}
         formInputs={formInputs}
         onChange={setFormInputs}
-        onApplyTau={(tauMin) => setFormInputs({ ...formInputs, tauMin })}
-        onApplyFInf={(fInf) => setFormInputs({ ...formInputs, fInf })}
-        onApplySurfaceCostMultipliers={(surfaceCostMultipliers) => setFormInputs({ ...formInputs, surfaceCostMultipliers })}
+        onApplyTau={(tauMin) => setFormInputs((prev) => ({ ...prev, tauMin }))}
+        onApplyFInf={(fInf) => setFormInputs((prev) => ({ ...prev, fInf }))}
+        onApplySurfaceCostMultipliers={(surfaceCostMultipliers) => setFormInputs((prev) => ({ ...prev, surfaceCostMultipliers }))}
         onApplyHrCalibration={(hrEffortCalibrationSlope, hrEffortCalibrationIntercept) =>
-          setFormInputs({ ...formInputs, hrEffortCalibrationSlope, hrEffortCalibrationIntercept })
+          setFormInputs((prev) => ({ ...prev, hrEffortCalibrationSlope, hrEffortCalibrationIntercept }))
         }
         onApplyPacingMargin={(fit) =>
-          setFormInputs({
-            ...formInputs,
+          setFormInputs((prev) => ({
+            ...prev,
             pacingMargin: { marginFInf: fit.marginFInf, marginTauHours: fit.marginTauHours, bestUpsideOffset: fit.bestUpsideOffset },
-          })
+          }))
         }
         onAddVo2MaxEntry={(entry: Vo2MaxEntry) =>
-          setFormInputs({ ...formInputs, vo2MaxHistory: [...formInputs.vo2MaxHistory, entry] })
+          setFormInputs((prev) => ({ ...prev, vo2MaxHistory: [...prev.vo2MaxHistory, entry] }))
         }
         onRacesFitted={(races, raceDates) => setFittedRaces({ races, raceDates })}
       />

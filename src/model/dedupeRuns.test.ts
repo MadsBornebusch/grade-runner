@@ -79,6 +79,14 @@ describe("dedupeStoredRuns", () => {
     expect(result.duplicateGroups).toHaveLength(0);
   });
 
+  it("keeps the race-tagged copy even when the other duplicate would otherwise win on metadata richness", () => {
+    const manual = gpxRun({ id: "manual-uuid-2", raceTag: "race" });
+    const stravaWithPoints = summaryRun({ id: "strava:2", stravaId: 2, points: manual.points });
+    const result = dedupeStoredRuns([manual, stravaWithPoints]);
+    expect(result.kept).toHaveLength(1);
+    expect(result.kept[0].id).toBe("manual-uuid-2");
+  });
+
   it("does not merge two same-day runs with meaningfully different distance", () => {
     const runA = summaryRun({ id: "strava:1", distanceKm: 10 });
     const runB = summaryRun({ id: "strava:2", stravaId: 2, distanceKm: 25 });

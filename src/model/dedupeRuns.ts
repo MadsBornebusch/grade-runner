@@ -56,10 +56,13 @@ function signaturesMatch(a: RunSignature, b: RunSignature): boolean {
 }
 
 /** Ranks how complete a run's stored data is, to pick which duplicate to
- * keep -- prefers full points over summary-only, then Strava-sourced
- * (richer metadata: elevation, avg HR/power) over a bare manual upload. */
+ * keep -- a user-confirmed race tag outranks everything else (explicit
+ * intent beats any heuristic; losing it silently to a duplicate would
+ * undo a manual action with no visible cause), then prefers full points
+ * over summary-only, then Strava-sourced (richer metadata: elevation, avg
+ * HR/power) over a bare manual upload. */
 function completenessScore(run: StoredRun): number {
-  return (run.points !== null ? 2 : 0) + (run.stravaId !== undefined ? 1 : 0);
+  return (run.raceTag !== undefined ? 4 : 0) + (run.points !== null ? 2 : 0) + (run.stravaId !== undefined ? 1 : 0);
 }
 
 export interface DedupeResult {
