@@ -1,32 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { CourseSegment, GpxPoint, SurfaceCategory } from "../gpx/pipeline";
+import type { SurfaceCategory } from "../gpx/pipeline";
 import { parseGpx, runPipeline } from "../gpx/pipeline";
 import { analyzeRun } from "../model/analysis";
 import {
   bootstrapTauConfidenceInterval,
-  buildEffortTrendPoints,
-  fitSurfaceCostMultipliersFromIntensity,
-  fitTauFInfWithSupportGate,
   MIN_INFORMATIVE_RACES,
   suggestFitImprovements,
   type EffortTrendPoint,
-  type FInfTauFitResult,
-  type MultiRaceTauFitResult,
-  type SafeFitResult,
-  type SurfaceCostMultiplierFitResult,
   type TauConfidenceInterval,
 } from "../model/pacingFit";
-import { buildSegmentLibrary } from "../model/segmentLibrary";
 import { DURABILITY_MIN_DURATION_S, suggestRunsForFit } from "../model/suggestRuns";
 import { dedupeStoredRuns } from "../model/dedupeRuns";
-import { attachSurfaceData } from "../model/surfaceExposure";
 import { splitAtTransitGaps } from "../gpx/transitGap";
-import {
-  fitHrToEffortCalibrationAcrossRaces,
-  fitHrToEffortCalibrationFromThresholds,
-  predictHeartRateFromEffortFraction,
-  type HrEffortCalibration,
-} from "../model/hrCalibration";
+import { fitHrToEffortCalibrationFromThresholds, predictHeartRateFromEffortFraction } from "../model/hrCalibration";
 import { sustainableFraction } from "../model/ceiling";
 import { estimateVo2MaxFromRun, isEstimableEffort } from "../model/vo2MaxEstimate";
 import {
@@ -36,17 +22,25 @@ import {
   listStoredRuns,
   markRunsWantedForFetch,
   setStoredRunRaceTags,
-  setStoredRunSurfaceEdges,
   setVo2MaxEstimability,
   type StoredRun,
 } from "../storage/runLibrary";
 import { looksLikeGenericStravaTitle } from "../model/raceCandidates";
-import { fitPacingMarginAcrossRaces, MIN_MARGIN_FIT_RACES, type PacingMarginFitResult } from "../model/pacingMarginFit";
+import { MIN_MARGIN_FIT_RACES, type PacingMarginFitResult } from "../model/pacingMarginFit";
 import { resolveCeilingParams, resolveGlycogenStoreG, resolveLt1Lt2Fractions, type FormInputs, type Vo2MaxEntry } from "./formInputs";
 import { StravaImport } from "./StravaImport";
-import { ensurePointsForRun, getAutoFetchStatus, runAutoFetchBatch, subscribeToAutoFetch } from "./autoFetchRuns";
+import { getAutoFetchStatus, runAutoFetchBatch, subscribeToAutoFetch } from "./autoFetchRuns";
 import { getBackfillStatus, runBackfillBatch, subscribeToBackfill } from "./backfillRuns";
-import { fetchSurfaceEdges } from "./surfaceLookup";
+import {
+  getRunFitStatus,
+  MIN_HR_CALIBRATION_R_SQUARED,
+  MIN_LEG_DISTANCE_KM,
+  MIN_SURFACE_FIT_RUNS,
+  resetRunFitStatus,
+  runDate,
+  runFitBatch,
+  subscribeToRunFit,
+} from "./runFitBatch";
 import { useStravaSession } from "./useStravaSession";
 
 interface RunLibraryPanelProps {
@@ -91,20 +85,6 @@ const DEFAULT_HALF_LIFE_DAYS = 75;
 /** Only the strongest few estimates are shown -- see vo2MaxEstimates below
  * for why sorting by estimate descending is itself the intensity filter. */
 const MAX_VO2MAX_ESTIMATES_SHOWN = 3;
-
-/** A starting heuristic, not a tuned optimum -- at least half the variance
- * in this athlete's effort explained by HR alone before auto-applying the
- * HR-effort calibration. Below this, HR just isn't a reliable enough proxy
- * to trust automatically (still shown, and still manually applicable). */
-const MIN_HR_CALIBRATION_R_SQUARED = 0.5;
-
-/** A starting heuristic, not a tuned optimum -- same role as
- * MIN_INFORMATIVE_RACES for the tau/fInf fits, but scaled up: this fit
- * pools individual runs (not just races) into a single regression, so a
- * handful of runs isn't enough to trust the per-category split even though
- * the regression itself won't refuse to return a result. Below this, still
- * shown, still manually applicable, just not auto-applied. */
-const MIN_SURFACE_FIT_RUNS = 10;
 
 function oneYearAgoDateInput(): string {
   const d = new Date();
@@ -153,28 +133,6 @@ function saveLastBackfillDate(dateInput: string): void {
  * below; the two fit objects themselves are still shown in full for
  * diagnostics regardless of which one was actually applied. */
 
-/** A run's own calendar date, for recency-weighting the multi-race fit --
- * Strava summaries carry it directly; GPX-derived runs (manual upload, or a
- * Strava run whose points have already been fetched) fall back to the
- * first point's own timestamp. Null if neither is available. */
-function runDate(run: StoredRun): Date | null {
-  if (run.date) return new Date(run.date);
-  const firstPointTime = run.points?.[0]?.time;
-  return firstPointTime ?? null;
-}
-
-/** A watch left running across a train/bus/car leg can hide a transit hop
- * inside an otherwise-real run (see gpx/transitGap.ts) -- fed straight into
- * a fit, that shows up as impossible pace and can badly distort tau/fInf
- * (found via a real 2025-10-19 activity: a ~56km "run" that was actually two
- * genuine ~10-15km running legs either side of two train rides). Splits at
- * any detected gap and processes each leg as its own course. Below
- * MIN_LEG_DISTANCE_KM only applies when a split actually happened -- an
- * unsplit run is used regardless of its own length, unchanged from prior
- * behavior, since a short *recorded* run isn't the problem this guards
- * against. */
-const MIN_LEG_DISTANCE_KM = 5;
-
 /** Round-robin across several lists (one pick from each in turn) instead of
  * concatenating them -- used to combine the three suggestion buckets before
  * truncating to AUTO_FETCH_TOTAL_CAP, so a bucket with a big pool (e.g.
@@ -204,26 +162,30 @@ export function RunLibraryPanel({
   const { connected: stravaConnected } = useStravaSession();
   const [runs, setRuns] = useState<StoredRun[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [fitResult, setFitResult] = useState<MultiRaceTauFitResult | null>(null);
-  const [fInfFitResult, setFInfFitResult] = useState<FInfTauFitResult | null>(null);
-  const [surfaceCostMultiplierFitResult, setSurfaceCostMultiplierFitResult] = useState<SurfaceCostMultiplierFitResult | null>(
-    null,
-  );
-  const [hrCalibrationFitResult, setHrCalibrationFitResult] = useState<HrEffortCalibration | null>(null);
-  const [pacingMarginFitResult, setPacingMarginFitResult] = useState<PacingMarginFitResult | null>(null);
-  const [safeFitTier, setSafeFitTier] = useState<SafeFitResult["tier"] | null>(null);
-  const [fitRan, setFitRan] = useState(false);
-  const [fitting, setFitting] = useState(false);
-  const [transitGapCount, setTransitGapCount] = useState(0);
-  const [excludedForDurationCount, setExcludedForDurationCount] = useState(0);
-  // Kept locally (not just forwarded via onRacesFitted) so the tau
-  // confidence-interval button below can reuse the exact same training
-  // data without needing a Planning course or the parent's help.
-  const [lastFittedRaces, setLastFittedRaces] = useState<{ races: EffortTrendPoint[][]; raceDates: (Date | null)[] } | null>(
-    null,
-  );
-  const [tauCI, setTauCI] = useState<TauConfidenceInterval | "insufficient" | null>(null);
+  // Module-level (see runFitBatch.ts's own doc) -- survives closing and
+  // reopening Settings mid-fit instead of silently losing progress, and
+  // stops a second concurrent fit from starting if the button gets
+  // clicked again while one's already running.
+  const runFitStatus = useSyncExternalStore(subscribeToRunFit, getRunFitStatus);
+  const fitting = runFitStatus.running;
+  const fitRan = runFitStatus.result !== null;
+  const fitResult = runFitStatus.result?.fitResult ?? null;
+  const fInfFitResult = runFitStatus.result?.fInfFitResult ?? null;
+  const surfaceCostMultiplierFitResult = runFitStatus.result?.surfaceFit ?? null;
+  const hrCalibrationFitResult = runFitStatus.result?.hrCalibrationFit ?? null;
+  const pacingMarginFitResult = runFitStatus.result?.marginFit ?? null;
+  const safeFitTier = runFitStatus.result?.safeFitTier ?? null;
+  const transitGapCount = runFitStatus.result?.transitGapCount ?? 0;
+  const excludedForDurationCount = runFitStatus.result?.excludedForDurationCount ?? 0;
+  const lastFittedRaces = runFitStatus.result
+    ? { races: runFitStatus.result.races, raceDates: runFitStatus.result.raceDates }
+    : null;
+  // A manual re-estimate (button below) overrides the auto-computed one --
+  // bootstrap resampling is random, so re-clicking gives a fresh read on
+  // the same underlying data without re-running the whole fit.
+  const [manualTauCI, setManualTauCI] = useState<TauConfidenceInterval | "insufficient" | null>(null);
   const [computingTauCI, setComputingTauCI] = useState(false);
+  const tauCI = manualTauCI ?? runFitStatus.result?.tauCI ?? null;
   const [halfLifeDays, setHalfLifeDays] = useState(DEFAULT_HALF_LIFE_DAYS);
 
   const [backfillFrom, setBackfillFrom] = useState(() => loadLastBackfillDate() ?? oneYearAgoDateInput());
@@ -358,13 +320,7 @@ export function RunLibraryPanel({
     setError(null);
     try {
       await clearStoredRuns();
-      setFitResult(null);
-      setFInfFitResult(null);
-      setSurfaceCostMultiplierFitResult(null);
-      setHrCalibrationFitResult(null);
-      setTransitGapCount(0);
-      setExcludedForDurationCount(0);
-      setFitRan(false);
+      resetRunFitStatus();
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to clear the run library.");
@@ -520,214 +476,27 @@ export function RunLibraryPanel({
     setAddedVo2MaxRunIds((prev) => new Set(prev).add(candidate.id));
   };
 
-  /** Fetches and persists full points for a summary-only row; a no-op if
-   * they're already present. */
-  /** Fetches and caches Valhalla surface classification for a run; a no-op
-   * if already cached. Returns null on any failure (or if this run has no
-   * stable id to cache against) -- callers treat that exactly like "no
-   * surface data available", never as an error to surface to the user (see
-   * surfaceLookup.ts's own contract). A prior failed attempt is naturally
-   * retried here too, since it's never cached as a permanent result. */
-  const ensureSurfaceData = async (run: StoredRun, points: GpxPoint[]) => {
-    if (run.surfaceEdges) return run.surfaceEdges;
-    const edges = await fetchSurfaceEdges(points);
-    if (edges && edges.length > 0) await setStoredRunSurfaceEdges(run.id, edges);
-    return edges;
-  };
-
-  const runFit = async () => {
+  /** The fit pipeline itself lives in runFitBatch.ts now (see that file's
+   * own doc for why) -- idempotent (a call while one's already running is a
+   * no-op), so it's safe to call on every click without tracking "is one
+   * already in flight" here. */
+  const runFit = () => {
     // Automatic: every stored run with full GPS data already fetched is a
     // CANDIDATE for the fit, no manual curation needed -- runs still
     // summary-only (backfilled but not fetched) are simply left out until
     // fetched via the suggestions below or a direct import. Candidates
-    // themselves are still filtered by duration below (DURABILITY_MIN_DURATION_S)
-    // before actually feeding the pooled fits -- "no manual curation" means
-    // the user never has to pick which runs count, not that every fetched
-    // run automatically qualifies.
+    // themselves are still filtered by duration inside runFitBatch
+    // (DURABILITY_MIN_DURATION_S) before actually feeding the pooled fits.
     const readyRuns = dedupedRuns.filter((r) => r.points !== null);
-
-    setFitting(true);
     setError(null);
-    try {
-      const races: EffortTrendPoint[][] = [];
-      const raceDates: (Date | null)[] = [];
-      // Every leg with usable segments contributes here, NOT just the ones
-      // long/race-paced enough for the tau/fInf pool below -- unlike the
-      // flat multiplier this replaced, fitSurfaceCostMultipliersFromIntensity
-      // conditions on the athlete's own recorded heart rate as the effort
-      // signal rather than the solver's max-sustainable-effort assumption,
-      // so an easy run's own paved-vs-unpaved segments are still valid,
-      // matched-intensity information -- more data, not contamination (see
-      // that function's own doc).
-      const libraryInputs: { runId: string; segments: CourseSegment[] }[] = [];
-      // Unlike races/raceDates below, deliberately NOT gated on
-      // DURABILITY_MIN_DURATION_S -- the pacing-margin curve specifically
-      // needs its SHORT end (a 10km race anchors near theta=1, the whole
-      // reason a margin curve rather than a flat scalar is worth fitting;
-      // see pacingMarginFit.ts's own doc). Only ever populated from
-      // user-confirmed races (raceTag === "race"), never a name heuristic.
-      const confirmedRaceTrendPoints: EffortTrendPoint[][] = [];
-      const confirmedRaceNames: string[] = [];
-      let detectedTransitGaps = 0;
-      let excludedForDuration = 0;
-      for (const run of readyRuns) {
-        const points = await ensurePointsForRun(run);
-        const pointLegs = splitAtTransitGaps(points);
-        detectedTransitGaps += pointLegs.length - 1;
-        // Cached surface edges were fetched (and are indexed by cumulative
-        // distance) against the run's FULL point sequence -- they don't
-        // decompose per leg, so a split run is treated as having no surface
-        // data at all rather than risk misattributing edges from one leg
-        // onto another's segments. Split runs are rare (most have no
-        // transit gap at all, see transitGap.ts), so this only costs the
-        // surface-cost fit a little data in the uncommon case.
-        const surfaceEdges = pointLegs.length === 1 ? await ensureSurfaceData(run, points) : null;
-        for (let i = 0; i < pointLegs.length; i++) {
-          const legPoints = pointLegs[i];
-          const course = runPipeline(legPoints);
-          if (!course.hasTimestamps) continue;
-          if (pointLegs.length > 1 && course.totalDistance3D / 1000 < MIN_LEG_DISTANCE_KM) continue;
-          const segments = surfaceEdges ? attachSurfaceData(course.segments, surfaceEdges) : course.segments;
-          libraryInputs.push({ runId: pointLegs.length > 1 ? `${run.id}-leg${i + 1}` : run.id, segments });
-          const analysis = analyzeRun(segments, {
-            bodyMassKg: formInputs.bodyMassKg,
-            ceilingParams,
-            fueling: { intakeGPerH: formInputs.intakeGPerH },
-            glycogenStoreG: resolveGlycogenStoreG(formInputs),
-            walkMaxMs: formInputs.walkMaxMs,
-            altitudeAdjustment: formInputs.altitudeAdjustment,
-          });
-          if (run.raceTag === "race") {
-            confirmedRaceTrendPoints.push(buildEffortTrendPoints(segments, analysis.segments, formInputs.altitudeAdjustment));
-            confirmedRaceNames.push(pointLegs.length > 1 ? `${run.name} (leg ${i + 1})` : run.name);
-          }
-          // Below DURABILITY_MIN_DURATION_S, a run can't span a meaningful
-          // fraction of any realistic tau -- pooling it in anyway doesn't
-          // just fail to help (the "unresponsive" flag already tries to
-          // catch that after the fact), it can actively distort the search:
-          // enough near-flat short runs pooled alongside a handful of long
-          // races can pull tau toward an implausibly small value that
-          // trivially "fits" the short runs' near-zero slope without
-          // reflecting real fatigue-decay behavior at all. suggestRuns.ts
-          // already uses this same bar to decide which summary-only runs
-          // are worth fetching for this fit -- applying it here too closes
-          // the gap where an already-fetched short run (uploaded directly,
-          // or fetched for some other reason) could still sneak into the
-          // pool uncurated.
-          if (analysis.totalMovingTimeS < DURABILITY_MIN_DURATION_S) {
-            excludedForDuration++;
-            continue;
-          }
-          races.push(buildEffortTrendPoints(segments, analysis.segments, formInputs.altitudeAdjustment));
-          raceDates.push(pointLegs.length > 1 ? (legPoints[0]?.time ?? runDate(run)) : runDate(run));
-        }
-      }
-      setTransitGapCount(detectedTransitGaps);
-      setExcludedForDurationCount(excludedForDuration);
-      const safeFit = fitTauFInfWithSupportGate(races, ceilingParams, { raceDates, halfLifeDays });
-      setFitResult(safeFit.tauFit);
-      setFInfFitResult(safeFit.fInfFit);
-      setSafeFitTier(safeFit.tier);
-
-      // Per-category surface cost, conditioned on recorded heart rate as the
-      // effort signal instead of the solver's own max-sustainable-effort
-      // assumption -- see fitSurfaceCostMultipliersFromIntensity's own doc
-      // for why this replaced the flat unpavedCostMultiplier finish-time fit
-      // that used to run here. Cheap relative to that: a single regression
-      // over the whole library, no per-candidate solver simulation.
-      const library = buildSegmentLibrary(libraryInputs, { bodyMassKg: formInputs.bodyMassKg, ceilingParams });
-      const surfaceFit = fitSurfaceCostMultipliersFromIntensity(library);
-      setSurfaceCostMultiplierFitResult(surfaceFit);
-      if (surfaceFit && surfaceFit.runCount >= MIN_SURFACE_FIT_RUNS) {
-        onApplySurfaceCostMultipliers(surfaceFit.surfaceCostMultipliers);
-      }
-
-      // HR-to-effort calibration (PLAN.md §11 stage 3): pools (HR, effort)
-      // points across the same races, restricted internally to each race's
-      // own early/low-drift window. Cheap (no solver simulation needed,
-      // unlike the multiplier fit above) -- operates on the same trend
-      // points already built for tau/fInf. Auto-apply is gated on rSquared,
-      // not just point count (already enforced inside the fit itself) --
-      // a low rSquared is a legitimate result (HR may just not track this
-      // athlete's effort well), not a reason to lower the bar until it
-      // passes.
-      const hrCalibrationFit = fitHrToEffortCalibrationAcrossRaces(races, safeFit.ceilingParams, { raceDates, halfLifeDays });
-      setHrCalibrationFitResult(hrCalibrationFit);
-      if (hrCalibrationFit && hrCalibrationFit.rSquared >= MIN_HR_CALIBRATION_R_SQUARED) {
-        onApplyHrCalibration(hrCalibrationFit.slope, hrCalibrationFit.intercept);
-      }
-
-      // Pacing-margin curve (pacingMarginFit.ts): needs its OWN HR
-      // calibration reading, not necessarily hrCalibrationFit above --
-      // reuses it when available since refitting per-athlete HR-effort
-      // slope/intercept from the same pool would just reproduce it, but
-      // falls back to the lab-threshold calibration (if the athlete has
-      // entered LT1/LT2 heart rate) so this can still run for someone whose
-      // race-pool calibration didn't clear MIN_HR_CALIBRATION_R_SQUARED.
-      const marginCalibration =
-        hrCalibrationFit ??
-        fitHrToEffortCalibrationFromThresholds(
-          {
-            lt1Fraction: formInputs.lt1Fraction,
-            lt2Fraction: formInputs.lt2Fraction,
-            lt1HeartRateBpm: formInputs.lt1HeartRateBpm,
-            lt2HeartRateBpm: formInputs.lt2HeartRateBpm,
-            fatOxPoints: formInputs.fatOxPoints,
-            walkMaxMs: formInputs.walkMaxMs,
-          },
-          safeFit.ceilingParams,
-        );
-      const marginFit = marginCalibration
-        ? fitPacingMarginAcrossRaces(confirmedRaceTrendPoints, confirmedRaceNames, marginCalibration)
-        : null;
-      setPacingMarginFitResult(marginFit);
-      if (marginFit) {
-        onApplyPacingMargin(marginFit);
-      }
-      // Auto-apply once fitTauFInfWithSupportGate picks a well-supported,
-      // internally-consistent (fInf, tau) pair -- so "select a date, click
-      // to fit" is one step instead of fit-then-separately-click-apply.
-      // Deliberately NOT applying tauFit/fInfFit independently here: they're
-      // two different searches (one holds fInf fixed, the other floats it),
-      // so a tauMin from one paired with an fInf from the other is a
-      // combination neither fit actually produced. Manual Apply buttons
-      // below still apply either fit's own value on its own if you want to
-      // override this choice.
-      // CeilingParams' fields are optional in the type (defaults apply
-      // elsewhere), but resolveCeilingParams always fills tauMin/fInf from
-      // FormInputs' own non-optional fields -- the `?? formInputs...`
-      // fallbacks below are for TypeScript, not because the fit could
-      // actually omit them for a tier that claims to have applied them.
-      if (safeFit.tier === "joint") {
-        onApplyTau(safeFit.ceilingParams.tauMin ?? formInputs.tauMin);
-        onApplyFInf(safeFit.ceilingParams.fInf ?? formInputs.fInf);
-      } else if (safeFit.tier === "tauOnly") {
-        onApplyTau(safeFit.ceilingParams.tauMin ?? formInputs.tauMin);
-      }
-      setFitRan(true);
-      setLastFittedRaces({ races, raceDates });
-      onRacesFitted?.(races, raceDates);
-      refresh();
-
-      // Auto-estimate the tau range right after the fit, using the races
-      // computed just above directly (not the `lastFittedRaces` state,
-      // which won't reflect this update until the next render) -- so the
-      // range appears as part of the normal fit flow instead of requiring
-      // a separate manual click. Still one bounded async step chained onto
-      // an already-multi-second operation, not a live/reactive recompute.
-      setComputingTauCI(true);
-      setTauCI(null);
-      try {
-        const ci = await bootstrapTauConfidenceInterval(races, raceDates, ceilingParams);
-        setTauCI(ci ?? "insufficient");
-      } finally {
-        setComputingTauCI(false);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Fit failed.");
-    } finally {
-      setFitting(false);
-    }
+    void runFitBatch(readyRuns, formInputs, ceilingParams, halfLifeDays, {
+      onApplyTau,
+      onApplyFInf,
+      onApplySurfaceCostMultipliers,
+      onApplyHrCalibration,
+      onApplyPacingMargin,
+      onRacesFitted,
+    }).then(refresh);
   };
 
   /** On-demand, not a live recompute -- ~100 sequential tau refits is too
@@ -736,10 +505,10 @@ export function RunLibraryPanel({
   const handleEstimateTauCI = async () => {
     if (!lastFittedRaces) return;
     setComputingTauCI(true);
-    setTauCI(null);
+    setManualTauCI(null);
     try {
       const ci = await bootstrapTauConfidenceInterval(lastFittedRaces.races, lastFittedRaces.raceDates, ceilingParams);
-      setTauCI(ci ?? "insufficient");
+      setManualTauCI(ci ?? "insufficient");
     } finally {
       setComputingTauCI(false);
     }
@@ -795,6 +564,10 @@ export function RunLibraryPanel({
     if (backfillStatus.error) setError(backfillStatus.error);
   }, [backfillStatus.error]);
 
+  useEffect(() => {
+    if (runFitStatus.error) setError(runFitStatus.error);
+  }, [runFitStatus.error]);
+
   const readyCount = dedupedRuns.filter((r) => r.points !== null).length;
 
   return (
@@ -842,7 +615,9 @@ export function RunLibraryPanel({
       {error && <p className="gpx-upload__error">{error}</p>}
 
       <p className="run-library__status">
-        {backfillStatus.running ? (
+        {fitting ? (
+          "Fitting your athlete model — tau/f_inf, terrain cost, HR calibration, pacing margin…"
+        ) : backfillStatus.running ? (
           backfillStatus.progress ?? "Fetching your run history…"
         ) : autoFetchStatus.running ? (
           <>
@@ -907,7 +682,7 @@ export function RunLibraryPanel({
             />
             <span>days -- older runs count for less</span>
           </div>
-          <button type="button" className="fatox-add" onClick={() => void runFit()} disabled={readyCount === 0 || fitting}>
+          <button type="button" className="fatox-add" onClick={runFit} disabled={readyCount === 0 || fitting}>
             {fitting
               ? "Fitting…"
               : `Fit full athlete model from ${readyCount} downloaded run${readyCount === 1 ? "" : "s"}`}
