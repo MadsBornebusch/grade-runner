@@ -66,6 +66,21 @@ export interface StoredRun {
    * of silently re-testing the same negative result over and over.
    */
   vo2MaxEstimable?: boolean;
+  /**
+   * User-confirmed: was this genuinely a race run to real effort, as
+   * opposed to a training run, structured workout, or an enforced-rest
+   * format (backyard ultra loops) that only LOOKS like a long sustained
+   * effort? Deliberately NOT auto-detected from the activity name alone --
+   * a real check this session found a name heuristic (non-generic title)
+   * misclassified a club interval session as a race, and would have
+   * conflated a backyard-ultra loop format with a continuous effort too.
+   * The pacing-margin curve fit (pacingMarginFit.ts) is built from a
+   * handful of races where getting this one label right matters far more
+   * than it does for the "pool everything, duration alone gates it" fits
+   * elsewhere in this app -- undefined = not yet reviewed (candidate,
+   * shown for tagging but not yet included either way).
+   */
+  raceTag?: "race" | "notRace";
 }
 
 export interface StravaRunSummaryInput {
@@ -222,6 +237,26 @@ export async function setVo2MaxEstimability(results: { id: string; estimable: bo
       getReq.onsuccess = () => {
         const existing = getReq.result as StoredRun | undefined;
         if (existing) store.put({ ...existing, vo2MaxEstimable: estimable });
+      };
+    }
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/** Same one-transaction batch pattern as setVo2MaxEstimability -- persists a
+ * user's race/not-race calls from the tagging list in one write. */
+export async function setStoredRunRaceTags(tags: { id: string; raceTag: "race" | "notRace" }[]): Promise<void> {
+  if (tags.length === 0) return;
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    for (const { id, raceTag } of tags) {
+      const getReq = store.get(id);
+      getReq.onsuccess = () => {
+        const existing = getReq.result as StoredRun | undefined;
+        if (existing) store.put({ ...existing, raceTag });
       };
     }
     tx.oncomplete = () => resolve();

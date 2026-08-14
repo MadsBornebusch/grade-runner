@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { GpxPoint } from "./gpx/pipeline";
 import { rawCourseStats, runPipeline } from "./gpx/pipeline";
-import { findSustainableTheta, type SolverInputs } from "./model/solver";
+import { findFlatPacedFinishTime, findSustainableTheta, type SolverInputs } from "./model/solver";
+import { predictBestDemonstratedTheta, predictMarginTheta } from "./model/pacingMarginFit";
 import { analyzeRun, type AnalysisInputs } from "./model/analysis";
 import { ceilingPower } from "./model/ceiling";
 import { predictEffortFractionFromHr } from "./model/hrCalibration";
@@ -163,6 +164,25 @@ function App() {
     if (!solverInputs) return null;
     return findSustainableTheta(solverInputs);
   }, [solverInputs]);
+
+  // "Chosen pacing" and "best demonstrated" -- the two grounded numbers
+  // shown alongside solverResult's own zero-margin theoretical ceiling (see
+  // ResultsSummary). Both reuse findFlatPacedFinishTime's self-consistent
+  // duration solve, just with the target fraction scaled by the athlete's
+  // OWN fitted pacing-margin curve (pacingMarginFit.ts) instead of 100% of
+  // the fitted ceiling -- undefined pacingMargin (not yet fit; needs
+  // MIN_MARGIN_FIT_RACES confirmed races) means neither renders.
+  const chosenPacingResult = useMemo(() => {
+    if (!solverInputs || !formInputs.pacingMargin) return null;
+    const margin = formInputs.pacingMargin;
+    return findFlatPacedFinishTime(solverInputs, { marginCurve: (h) => predictMarginTheta(h, margin) });
+  }, [solverInputs, formInputs.pacingMargin]);
+
+  const bestDemonstratedResult = useMemo(() => {
+    if (!solverInputs || !formInputs.pacingMargin) return null;
+    const margin = formInputs.pacingMargin;
+    return findFlatPacedFinishTime(solverInputs, { marginCurve: (h) => predictBestDemonstratedTheta(h, margin) });
+  }, [solverInputs, formInputs.pacingMargin]);
 
   // Same shape predictFinishTimeRange needs (everything findSustainableTheta
   // needs except segments/ceilingParams, both of which vary per bootstrap
@@ -397,6 +417,8 @@ function App() {
                           theta={solverResult.theta}
                           result={solverResult.result}
                           totalDistanceM={courseResult.totalDistance3D}
+                          chosenPacing={chosenPacingResult}
+                          bestDemonstrated={bestDemonstratedResult}
                         />
                         {solverInputs && solverBaseInputs && (
                           <FinishTimeRangePanel
@@ -484,6 +506,12 @@ function App() {
         onApplySurfaceCostMultipliers={(surfaceCostMultipliers) => setFormInputs({ ...formInputs, surfaceCostMultipliers })}
         onApplyHrCalibration={(hrEffortCalibrationSlope, hrEffortCalibrationIntercept) =>
           setFormInputs({ ...formInputs, hrEffortCalibrationSlope, hrEffortCalibrationIntercept })
+        }
+        onApplyPacingMargin={(fit) =>
+          setFormInputs({
+            ...formInputs,
+            pacingMargin: { marginFInf: fit.marginFInf, marginTauHours: fit.marginTauHours, bestUpsideOffset: fit.bestUpsideOffset },
+          })
         }
         onAddVo2MaxEntry={(entry: Vo2MaxEntry) =>
           setFormInputs({ ...formInputs, vo2MaxHistory: [...formInputs.vo2MaxHistory, entry] })

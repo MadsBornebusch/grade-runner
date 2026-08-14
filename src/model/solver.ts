@@ -381,6 +381,17 @@ export interface FlatPacingOptions {
   hiMultiplier?: number;
   scanSteps?: number;
   iterations?: number;
+  /**
+   * PLAN.md pacing-margin follow-up, HR-driven curve: when set, called with
+   * the candidate total duration (hours) at each step of the self-
+   * consistent search and multiplied into the flat target fraction --
+   * target = marginCurve(candidateHours) * sustainableFraction(candidateMin).
+   * Lets a fitted, HR-derived margin curve (pacingMarginFit.ts) replace the
+   * implicit "100% of the fitted ceiling is holdable" assumption this
+   * function made before the option existed. Undefined (the default) is
+   * byte-for-byte identical to before -- see the test that pins this down.
+   */
+  marginCurve?: (candidateHours: number) => number;
 }
 
 export interface FlatPacedResult {
@@ -441,7 +452,8 @@ export function findFlatPacedFinishTime(inputs: SolverInputs, opts: FlatPacingOp
     result.segments.length > 0 ? result.segments[result.segments.length - 1].cumulativeDistance3D : 0;
 
   const actualMinutesFor = (candidateMin: number): { minutes: number; result: SimulationResult } => {
-    const result = simulate(1, inputs, { flatDurationMin: candidateMin });
+    const theta = opts.marginCurve ? opts.marginCurve(candidateMin / 60) : 1;
+    const result = simulate(theta, inputs, { flatDurationMin: candidateMin });
     return { minutes: result.feasible ? result.finishTimeS / 60 : Infinity, result };
   };
 
@@ -484,10 +496,13 @@ export function findFlatPacedFinishTime(inputs: SolverInputs, opts: FlatPacingOp
     prevE = curE;
   }
 
+  const targetFractionAt = (candidateMin: number): number =>
+    (opts.marginCurve ? opts.marginCurve(candidateMin / 60) : 1) * sustainableFraction(candidateMin, inputs.ceilingParams);
+
   if (bracketLo === null || bracketHi === null) {
     return {
       totalDurationMin: bestFallbackT,
-      targetFraction: sustainableFraction(bestFallbackT, inputs.ceilingParams),
+      targetFraction: targetFractionAt(bestFallbackT),
       result: bestFallbackResult,
       selfConsistent: false,
     };
@@ -508,7 +523,7 @@ export function findFlatPacedFinishTime(inputs: SolverInputs, opts: FlatPacingOp
   const finalT = (lo + hi) / 2;
   return {
     totalDurationMin: finalT,
-    targetFraction: sustainableFraction(finalT, inputs.ceilingParams),
+    targetFraction: targetFractionAt(finalT),
     result: actualMinutesFor(finalT).result,
     selfConsistent: true,
   };

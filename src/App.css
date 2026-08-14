@@ -390,6 +390,41 @@
   margin-top: 4px;
 }
 
+.run-library__race-tag-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin: 8px 0;
+}
+
+.run-library__race-tag-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.run-library__race-tag-date {
+  color: var(--text-m);
+  white-space: nowrap;
+}
+
+.run-library__race-tag-btn {
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-h);
+  border-radius: 5px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-right: 6px;
+}
+
+.run-library__race-tag-btn--active {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: transparent;
+}
+
 .run-library-row {
   display: flex;
   align-items: center;
@@ -449,6 +484,19 @@
   font-size: 28px;
   font-weight: 600;
   color: var(--text-h);
+}
+
+.results-summary__sublabel {
+  font-size: 11px;
+  opacity: 0.6;
+  margin-top: 2px;
+}
+
+.results-summary__margin-note {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 13px;
+  opacity: 0.8;
 }
 
 .results-summary__warning {

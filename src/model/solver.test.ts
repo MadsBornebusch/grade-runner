@@ -230,6 +230,26 @@ describe("findFlatPacedFinishTime (pacing-margin follow-up)", () => {
     expect(targetFraction).toBeLessThanOrEqual(0.94); // f0 default ceiling
   });
 
+  it("is byte-for-byte unchanged when marginCurve is omitted", () => {
+    const course = baseInputs({ segments: makeSegments(3000, 50, 0), fueling: { intakeGPerH: 90 }, glycogenStoreG: 3000 });
+    expect(findFlatPacedFinishTime(course, {})).toEqual(findFlatPacedFinishTime(course));
+  });
+
+  it("marginCurve scales the target fraction, producing a slower self-consistent finish than the unmargined curve", () => {
+    const course = baseInputs({ segments: makeSegments(3000, 50, 0), fueling: { intakeGPerH: 90 }, glycogenStoreG: 3000 });
+    const unmargined = findFlatPacedFinishTime(course);
+    const margined = findFlatPacedFinishTime(course, { marginCurve: () => 0.7 });
+    expect(unmargined.selfConsistent).toBe(true);
+    expect(margined.selfConsistent).toBe(true);
+    expect(margined.result.finishTimeS).toBeGreaterThan(unmargined.result.finishTimeS);
+    // targetFraction reports the MARGIN-ADJUSTED fraction, not the raw
+    // sustainableFraction -- roughly 0.7x the unmargined one (not exact,
+    // since the two self-consistent durations differ slightly, which
+    // shifts sustainableFraction's own duration-decay term too).
+    expect(margined.targetFraction).toBeLessThan(unmargined.targetFraction * 0.75);
+    expect(margined.targetFraction).toBeGreaterThan(unmargined.targetFraction * 0.6);
+  });
+
   it("barely diverges from the theta-based model for a short race (duration well under tau)", () => {
     // Default 10km flat course finishes in well under an hour -- tiny
     // relative to tau's default 250min, so the duration-decay curve has

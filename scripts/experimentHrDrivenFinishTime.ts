@@ -122,8 +122,29 @@ async function main() {
   }
   console.log(`Activities used: ${runs.length}`);
 
-  const targetIndices = runs.map((_, i) => i).filter((i) => runs[i].isSustainedEffort);
-  console.log(`Sustained-effort targets: ${targetIndices.length}\n`);
+  // Named-race targeting: the sustained-effort GATE (duration-shaped
+  // heuristic) let 14 of 17 generic-titled training runs through while
+  // excluding several genuine short races entirely (Askerspurten 10km,
+  // Sommerafslutning) -- a real activity NAME is a much more direct signal
+  // of "this was actually a race" than any duration/fit-quality proxy.
+  // Excludes "Evening Intervals" (a structured workout, not a race) and
+  // "Langt Og Langsomt" ("long and slow" in Norwegian -- self-labeled easy).
+  const RACE_NAMES = new Set([
+    "Askerspurten 10 km",
+    "Ecotrail 80",
+    'Oslo Trail Challenge "55" km',
+    "Oslo Trail Challenge 55 km",
+    "Saksumdal 17",
+    "Sommerafslutning i den Danske Løbeklub 🇩🇰",
+    "Soria Moria til Verdens Ende",
+    "Ås Backyard ultra",
+    "2.5 km loop every hour",
+  ]);
+  const useNamedRaces = process.argv.includes("--namedRaces");
+  const targetIndices = useNamedRaces
+    ? runs.map((_, i) => i).filter((i) => RACE_NAMES.has(runs[i].name))
+    : runs.map((_, i) => i).filter((i) => runs[i].isSustainedEffort);
+  console.log(`${useNamedRaces ? "Named-race" : "Sustained-effort"} targets: ${targetIndices.length}\n`);
 
   interface FoldResult {
     name: string;

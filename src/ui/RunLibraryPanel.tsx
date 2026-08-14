@@ -36,11 +36,14 @@ import {
   deleteStoredRun,
   listStoredRuns,
   markRunsWantedForFetch,
+  setStoredRunRaceTags,
   setStoredRunSurfaceEdges,
   setVo2MaxEstimability,
   upsertStoredRunSummary,
   type StoredRun,
 } from "../storage/runLibrary";
+import { looksLikeGenericStravaTitle } from "../model/raceCandidates";
+import { fitPacingMarginAcrossRaces, type PacingMarginFitResult } from "../model/pacingMarginFit";
 import { resolveCeilingParams, resolveGlycogenStoreG, resolveLt1Lt2Fractions, type FormInputs, type Vo2MaxEntry } from "./formInputs";
 import { StravaImport } from "./StravaImport";
 import { ensurePointsForRun, getAutoFetchStatus, runAutoFetchBatch, subscribeToAutoFetch } from "./autoFetchRuns";
@@ -53,6 +56,7 @@ interface RunLibraryPanelProps {
   onApplyFInf: (fInf: number) => void;
   onApplySurfaceCostMultipliers: (multipliers: Partial<Record<SurfaceCategory, number>>) => void;
   onApplyHrCalibration: (slope: number, intercept: number) => void;
+  onApplyPacingMargin: (fit: PacingMarginFitResult) => void;
   onAddVo2MaxEntry: (entry: Vo2MaxEntry) => void;
   /** Reports the races/raceDates behind the just-completed fit up to the
    * parent -- lets the Results tab's finish-time-range feature reuse the
@@ -197,6 +201,7 @@ export function RunLibraryPanel({
   onApplyTau,
   onApplyFInf,
   onApplySurfaceCostMultipliers,
+  onApplyPacingMargin,
   onApplyHrCalibration,
   onAddVo2MaxEntry,
   onRacesFitted,
@@ -210,6 +215,7 @@ export function RunLibraryPanel({
     null,
   );
   const [hrCalibrationFitResult, setHrCalibrationFitResult] = useState<HrEffortCalibration | null>(null);
+  const [pacingMarginFitResult, setPacingMarginFitResult] = useState<PacingMarginFitResult | null>(null);
   const [safeFitTier, setSafeFitTier] = useState<SafeFitResult["tier"] | null>(null);
   const [fitRan, setFitRan] = useState(false);
   const [fitting, setFitting] = useState(false);
@@ -272,6 +278,29 @@ export function RunLibraryPanel({
   // from `dedupedRuns`, not `runs`, so a duplicate can't silently double-
   // count in the run list, a fit, the suggestions, or the diagnostic.
   const { kept: dedupedRuns, duplicateGroups } = useMemo(() => dedupeStoredRuns(runs), [runs]);
+
+  // Candidates for the race-tagging list below: fetched (points !== null,
+  // so there's something to fit from) runs whose Strava title ISN'T one of
+  // the auto-generated "Morning Run" style titles -- a real race is almost
+  // always renamed. A suggestion only: pacingMarginFit.ts only ever uses
+  // whatever the athlete explicitly confirms via raceTag, never this
+  // heuristic directly (see raceCandidates.ts's own doc on why -- a real
+  // check this session found the heuristic alone misclassified a club
+  // interval session as a race).
+  const raceCandidates = useMemo(
+    () => dedupedRuns.filter((r) => r.points !== null && !looksLikeGenericStravaTitle(r.name)),
+    [dedupedRuns],
+  );
+  const [raceTagSaving, setRaceTagSaving] = useState(false);
+  const setRaceTag = async (id: string, raceTag: "race" | "notRace") => {
+    setRaceTagSaving(true);
+    try {
+      await setStoredRunRaceTags([{ id, raceTag }]);
+      refresh();
+    } finally {
+      setRaceTagSaving(false);
+    }
+  };
 
   // Silently cleans up duplicates as soon as they're found -- no button, no
   // warning banner. dedupedRuns already excludes them from every list/fit/
@@ -552,6 +581,14 @@ export function RunLibraryPanel({
       // matched-intensity information -- more data, not contamination (see
       // that function's own doc).
       const libraryInputs: { runId: string; segments: CourseSegment[] }[] = [];
+      // Unlike races/raceDates below, deliberately NOT gated on
+      // DURABILITY_MIN_DURATION_S -- the pacing-margin curve specifically
+      // needs its SHORT end (a 10km race anchors near theta=1, the whole
+      // reason a margin curve rather than a flat scalar is worth fitting;
+      // see pacingMarginFit.ts's own doc). Only ever populated from
+      // user-confirmed races (raceTag === "race"), never a name heuristic.
+      const confirmedRaceTrendPoints: EffortTrendPoint[][] = [];
+      const confirmedRaceNames: string[] = [];
       let detectedTransitGaps = 0;
       let excludedForDuration = 0;
       for (const run of readyRuns) {
@@ -581,6 +618,10 @@ export function RunLibraryPanel({
             walkMaxMs: formInputs.walkMaxMs,
             altitudeAdjustment: formInputs.altitudeAdjustment,
           });
+          if (run.raceTag === "race") {
+            confirmedRaceTrendPoints.push(buildEffortTrendPoints(segments, analysis.segments, formInputs.altitudeAdjustment));
+            confirmedRaceNames.push(pointLegs.length > 1 ? `${run.name} (leg ${i + 1})` : run.name);
+          }
           // Below DURABILITY_MIN_DURATION_S, a run can't span a meaningful
           // fraction of any realistic tau -- pooling it in anyway doesn't
           // just fail to help (the "unresponsive" flag already tries to
@@ -635,6 +676,34 @@ export function RunLibraryPanel({
       setHrCalibrationFitResult(hrCalibrationFit);
       if (hrCalibrationFit && hrCalibrationFit.rSquared >= MIN_HR_CALIBRATION_R_SQUARED) {
         onApplyHrCalibration(hrCalibrationFit.slope, hrCalibrationFit.intercept);
+      }
+
+      // Pacing-margin curve (pacingMarginFit.ts): needs its OWN HR
+      // calibration reading, not necessarily hrCalibrationFit above --
+      // reuses it when available since refitting per-athlete HR-effort
+      // slope/intercept from the same pool would just reproduce it, but
+      // falls back to the lab-threshold calibration (if the athlete has
+      // entered LT1/LT2 heart rate) so this can still run for someone whose
+      // race-pool calibration didn't clear MIN_HR_CALIBRATION_R_SQUARED.
+      const marginCalibration =
+        hrCalibrationFit ??
+        fitHrToEffortCalibrationFromThresholds(
+          {
+            lt1Fraction: formInputs.lt1Fraction,
+            lt2Fraction: formInputs.lt2Fraction,
+            lt1HeartRateBpm: formInputs.lt1HeartRateBpm,
+            lt2HeartRateBpm: formInputs.lt2HeartRateBpm,
+            fatOxPoints: formInputs.fatOxPoints,
+            walkMaxMs: formInputs.walkMaxMs,
+          },
+          safeFit.ceilingParams,
+        );
+      const marginFit = marginCalibration
+        ? fitPacingMarginAcrossRaces(confirmedRaceTrendPoints, confirmedRaceNames, marginCalibration)
+        : null;
+      setPacingMarginFitResult(marginFit);
+      if (marginFit) {
+        onApplyPacingMargin(marginFit);
       }
       // Auto-apply once fitTauFInfWithSupportGate picks a well-supported,
       // internally-consistent (fInf, tau) pair -- so "select a date, click
@@ -816,6 +885,48 @@ export function RunLibraryPanel({
           The pacing curve is off (Settings -- Pacing curve). Fitting and applying tau/f_inf below still works, but
           won't affect your plan until it's back on.
         </p>
+      )}
+
+      {raceCandidates.length > 0 && (
+        <div className="run-library__experimental-fit">
+          <p className="field-group-note">Confirm your races</p>
+          <p className="field-group-help">
+            The pacing-margin curve below (how much of your fitted ceiling you actually hold, vs. a race's length --
+            see the "Chosen pacing" note further down) is only fit from races you confirm here, never guessed from
+            the activity name alone. Listed: downloaded runs with a non-generic title (Strava auto-titles an
+            unrenamed upload "Morning Run" etc. -- a real race is almost always renamed, but not everything renamed
+            is a race: a club workout or an enforced-rest format like a backyard ultra isn't a continuous effort
+            either, so check each one).
+          </p>
+          <table className="run-library__race-tag-table">
+            <tbody>
+              {raceCandidates.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.name}</td>
+                  <td className="run-library__race-tag-date">{runDate(r)?.toISOString().slice(0, 10) ?? ""}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className={r.raceTag === "race" ? "run-library__race-tag-btn run-library__race-tag-btn--active" : "run-library__race-tag-btn"}
+                      disabled={raceTagSaving}
+                      onClick={() => void setRaceTag(r.id, "race")}
+                    >
+                      Race
+                    </button>
+                    <button
+                      type="button"
+                      className={r.raceTag === "notRace" ? "run-library__race-tag-btn run-library__race-tag-btn--active" : "run-library__race-tag-btn"}
+                      disabled={raceTagSaving}
+                      onClick={() => void setRaceTag(r.id, "notRace")}
+                    >
+                      Not a race
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {dedupedRuns.length > 0 && (
@@ -1050,6 +1161,38 @@ export function RunLibraryPanel({
               ? "Applied automatically -- R² cleared the bar for trusting HR as an effort proxy for this athlete."
               : "Not applied automatically -- see the note above; you can still apply it manually if you trust it."}
           </p>
+        </div>
+      )}
+
+      {pacingMarginFitResult && (
+        <div className="run-library__experimental-fit">
+          <p className="field-group-note">Pacing margin -- chosen effort vs. race length</p>
+          <p className="field-group-help">
+            findSustainableTheta's own search returns 100% of your fitted ceiling for any race under ~6-8h (fuel
+            never becomes the binding constraint that short) -- but your own heart rate during a race shows you don't
+            actually run at that: this curve is fit from your confirmed races' own HR-implied effort, early-window
+            only, so it isn't distorted by end-of-race cardiac drift. It's the "chosen pacing" number shown alongside
+            your predicted finish time -- separate from, and layered UNDER, the theoretical ceiling.
+          </p>
+          <p className="field-group-note">
+            Fit from {pacingMarginFitResult.raceCount} confirmed race{pacingMarginFitResult.raceCount === 1 ? "" : "s"}, spanning{" "}
+            {pacingMarginFitResult.minDurationHours.toFixed(1)}-{pacingMarginFitResult.maxDurationHours.toFixed(1)}h. Predictions
+            for a race outside that range are an extrapolation, not something any confirmed race actually tested.
+          </p>
+          <table className="run-library__race-tag-table">
+            <tbody>
+              {pacingMarginFitResult.perRace.map((p) => (
+                <tr key={p.name}>
+                  <td>{p.name}</td>
+                  <td className="run-library__race-tag-date">{p.durationHours.toFixed(2)}h</td>
+                  <td className="run-library__race-tag-date">
+                    {p.chosenTheta !== null ? `chosen ${(p.chosenTheta * 100).toFixed(0)}%` : "no HR data"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="field-group-note">Applied automatically -- {pacingMarginFitResult.raceCount} confirmed races cleared the minimum to fit this curve.</p>
         </div>
       )}
 

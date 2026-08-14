@@ -105,6 +105,14 @@ export interface FormInputs {
    * grossPowerWPerKg every other calculation already uses. */
   hrEffortCalibrationSlope: number | null;
   hrEffortCalibrationIntercept: number | null;
+  /** Fitted pacing-margin curve (pacingMarginFit.ts) -- how much of the
+   * fitted aerobic ceiling this athlete actually holds, as a function of a
+   * race's own total duration, from user-confirmed races only. null = not
+   * yet fit (needs MIN_MARGIN_FIT_RACES confirmed races). Only the two
+   * curve parameters plus the best-demonstrated upside offset are kept
+   * here -- perRace detail is ephemeral UI display data, reconstructed by
+   * RunLibraryPanel each time it fits rather than persisted. */
+  pacingMargin: { marginFInf: number; marginTauHours: number; bestUpsideOffset: number } | null;
   segmentLengthM: number;
   smoothingWindowM: number;
   /** Measured (pace, fat-oxidation) points. Non-empty overrides LT1/LT2 for the fuel/substrate split. */
@@ -155,6 +163,7 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   customHrZones: null,
   hrEffortCalibrationSlope: null,
   hrEffortCalibrationIntercept: null,
+  pacingMargin: null,
   segmentLengthM: 50,
   smoothingWindowM: 150,
   fatOxPoints: [],

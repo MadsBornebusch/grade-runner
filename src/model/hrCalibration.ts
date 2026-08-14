@@ -41,8 +41,11 @@ import { paceToGrossPowerWPerKg } from "./substrate";
 /** Fraction of each race's own duration considered "early enough" to trust
  * HR as an effort proxy -- PLAN.md's own cardiac-drift research puts
  * meaningful drift onset around 25km into a marathon-length effort, i.e.
- * roughly the back third of a several-hour race. */
-const EARLY_WINDOW_FRACTION = 0.65;
+ * roughly the back third of a several-hour race. Exported for reuse by
+ * pacingMarginFit.ts, which needs the SAME restriction for the same reason
+ * (a chosen-effort estimate built from drift-elevated late-race HR would
+ * read as artificially high effort, not a genuine margin measurement). */
+export const EARLY_WINDOW_FRACTION = 0.65;
 
 /** Trailing window (seconds) over which power is smoothed before
  * regressing against HR -- see this file's header doc for the real-data
