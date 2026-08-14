@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { CourseSegment } from "../gpx/pipeline";
 import type { CeilingParams } from "../model/ceiling";
 import { predictFinishTimeRange, type FinishTimeRangeResult } from "../model/finishTimeRange";
@@ -28,6 +28,17 @@ const HIGH_SKIP_RATE_WARNING_THRESHOLD = 0.4;
 export function FinishTimeRangePanel({ fittedRaces, ceilingParams, solverBaseInputs, targetSegments }: FinishTimeRangePanelProps) {
   const [result, setResult] = useState<FinishTimeRangeResult | "insufficient" | null>(null);
   const [computing, setComputing] = useState(false);
+
+  // Deliberately expensive-and-on-demand (see this component's own doc),
+  // not live -- but a stale cached result silently showing after tau/fInf
+  // changed (e.g. a fresh full-model fit, or a manual override) was
+  // reported as disagreeing with the Theoretical ceiling stat right next
+  // to it, with nothing indicating the number was out of date. Clearing
+  // (not recomputing) on change keeps the "explicit click" cost model
+  // while never showing a number that no longer matches current settings.
+  useEffect(() => {
+    setResult(null);
+  }, [fittedRaces, ceilingParams]);
 
   if (!fittedRaces) {
     return (

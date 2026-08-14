@@ -74,6 +74,29 @@ export function costOfWalking(i: number): number {
 const DESCENT_LIMIT_ONSET_GRADE = -0.1;
 
 /**
+ * Grade at which the descent-control ramp BEGINS -- shallower than this,
+ * still genuinely unlimited (a gentle downhill has no real control issue).
+ * Real terrain oscillates across any single hard threshold constantly (a
+ * technical descent's grade wanders back and forth through -8% to -12%
+ * segment to segment), and the ONSET grade used to be that single
+ * threshold: maxDescentSpeedMs jumped straight from Infinity to
+ * DESCENT_LIMIT_SPEED_AT_ONSET_MS the instant grade crossed it, so a real
+ * course crossing back and forth produced a predicted pace that slammed
+ * between "uncapped, often fast" and "hard-capped ~6min/km" every other
+ * segment -- a real, reported symptom, not a hypothetical one. Ramping
+ * from here down to DESCENT_LIMIT_SPEED_AT_ONSET_MS at the onset grade
+ * keeps the cap smooth exactly where real predicted paces (2-5 m/s) live,
+ * without changing the calibrated onset anchor itself.
+ */
+const DESCENT_LIMIT_RAMP_START_GRADE = -0.04;
+
+/** Cap at the ramp's start -- deliberately generous (comfortably faster
+ * than realistic sustained trail-running speed, ~3:02/km) so it's not
+ * really a new claimed limit, just a smooth approach into the one that
+ * matters. Chosen for continuity, not a second calibration point. */
+const DESCENT_LIMIT_SPEED_AT_RAMP_START_MS = 5.5;
+
+/**
  * Max controllable running speed right at the onset grade, m/s. Braking
  * (eccentric quad control), footing/balance, and technical terrain -- none
  * captured by Minetti -- cap real descending speed well below what a power
@@ -96,12 +119,20 @@ const DESCENT_LIMIT_SPEED_AT_CLAMP_MS = 1.0;
 /**
  * Max running speed on a descent, independent of metabolic cost -- reflects
  * biomechanical/technical control limits rather than energy availability.
- * No limit above the onset grade (mild downhill is genuinely both cheap and
- * fast; the metabolic-cost model already governs there correctly). Returns
- * `Infinity` on flat/uphill.
+ * No limit above the ramp-start grade (mild downhill is genuinely both
+ * cheap and fast; the metabolic-cost model already governs there
+ * correctly). Returns `Infinity` on flat/uphill. Smoothly ramps from the
+ * ramp-start grade down to the onset grade (see
+ * DESCENT_LIMIT_RAMP_START_GRADE's own doc for why this is two linear
+ * pieces, not one step), then continues the original, separately
+ * calibrated onset-to-clamp line unchanged.
  */
 export function maxDescentSpeedMs(i: number): number {
-  if (i >= DESCENT_LIMIT_ONSET_GRADE) return Infinity;
+  if (i >= DESCENT_LIMIT_RAMP_START_GRADE) return Infinity;
+  if (i >= DESCENT_LIMIT_ONSET_GRADE) {
+    const t = (i - DESCENT_LIMIT_RAMP_START_GRADE) / (DESCENT_LIMIT_ONSET_GRADE - DESCENT_LIMIT_RAMP_START_GRADE);
+    return DESCENT_LIMIT_SPEED_AT_RAMP_START_MS + (DESCENT_LIMIT_SPEED_AT_ONSET_MS - DESCENT_LIMIT_SPEED_AT_RAMP_START_MS) * t;
+  }
   const clamped = Math.max(-GRADE_CLAMP, i);
   const t = (clamped - DESCENT_LIMIT_ONSET_GRADE) / (-GRADE_CLAMP - DESCENT_LIMIT_ONSET_GRADE);
   return DESCENT_LIMIT_SPEED_AT_ONSET_MS + (DESCENT_LIMIT_SPEED_AT_CLAMP_MS - DESCENT_LIMIT_SPEED_AT_ONSET_MS) * t;
