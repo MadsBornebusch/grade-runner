@@ -9,6 +9,8 @@ import { predictEffortFractionFromHr } from "./model/hrCalibration";
 import { attachSurfaceData, type ValhallaSurfaceEdge } from "./model/surfaceExposure";
 import { fetchSurfaceEdges } from "./ui/surfaceLookup";
 import { GpxUpload } from "./ui/GpxUpload";
+import { CourseLibraryPanel } from "./ui/CourseLibraryPanel";
+import { saveCourse } from "./storage/courseLibrary";
 import { CourseProcessingFields, FuelingFields } from "./ui/InputsPanel";
 import { PageCarousel } from "./ui/PageCarousel";
 import { ElevationProfileChart } from "./ui/ElevationProfileChart";
@@ -59,6 +61,10 @@ function App() {
 
   const [rawPoints, setRawPoints] = useState<GpxPoint[] | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
+  // Bumped after every saveCourse() to trigger CourseLibraryPanel's own
+  // reload -- it doesn't own the save (App.tsx already has points/name in
+  // hand right where upload/import land), so it needs an external signal.
+  const [courseLibraryVersion, setCourseLibraryVersion] = useState(0);
 
   // Planned-finish-time mode: when set, Results shows the plan for THIS
   // target instead of the theoretical zero-margin ceiling -- an alternate
@@ -371,16 +377,27 @@ function App() {
             label: "Course",
             content: (
               <>
-                <GpxUpload
-                  onLoaded={(points, name) => {
+                <CourseLibraryPanel
+                  refreshKey={courseLibraryVersion}
+                  onSelect={(points, name) => {
                     setRawPoints(points);
                     setFileName(name);
                   }}
                 />
-                <StravaImport
-                  onImport={(points, name) => {
+                <GpxUpload
+                  onLoaded={(points, name) => {
                     setRawPoints(points);
                     setFileName(name);
+                    void saveCourse(name, points).then(() => setCourseLibraryVersion((v) => v + 1));
+                  }}
+                />
+                <StravaImport
+                  onImport={(points, name, stravaId) => {
+                    setRawPoints(points);
+                    setFileName(name);
+                    void saveCourse(name, points, stravaId !== undefined ? `strava:${stravaId}` : undefined).then(() =>
+                      setCourseLibraryVersion((v) => v + 1),
+                    );
                   }}
                 />
                 {fileName && <p className="course-name">{fileName}</p>}
