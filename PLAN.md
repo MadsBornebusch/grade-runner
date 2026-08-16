@@ -239,6 +239,47 @@ them. A finer segment length (e.g. 20-25m) paired with an adequately large smoot
 window (not near 0) gets closer to true distance *and* keeps the cost calculation
 stable; only pushing smoothing down near 0 is what actually risks bad predictions.
 
+**Update: defaults re-tuned from 50m/150m to 25m/20m**, after a user asked "why does
+it need to be as high as 50/150" and the honest answer, checked properly, was that it
+didn't. Two things changed the picture from the original research above:
+
+1. **The 150m smoothing default was never itself tuned for accuracy** — its own doc
+   comment says it was chosen to behavior-preserve a fresh install's default course
+   at the moment smoothing changed from a (buggy) point-count radius to a real
+   distance window, not derived from any noise measurement.
+2. **Measuring the actual raw elevation noise** (point-to-point `|eleDelta|` on raw,
+   unresampled GPX points) across the OTC 55 2024 course plus 9 other cached
+   activities spanning different dates/likely different devices: median 0.0-0.4m,
+   p90 0.2-1.0m, consistently — small and consistent enough to indicate Strava's API
+   serves DEM-corrected elevation, not raw noisy GPS/barometric altitude. Checked
+   that fine smoothing wasn't just missing isolated noise spikes too: the course's
+   own max-grade segment (a genuine -49% pitch) builds up as a smooth multi-segment
+   ramp at every window from 10m to 150m, not an isolated spike — real noise would
+   look like a lone outlier, not a sustained ramp.
+
+Given that noise floor, re-ran the smoothing sweep at finer granularity
+(segmentLengthM=50 fixed): work integral is flat to within ~0.1% from 5-20m
+smoothing (212,805 → 213,004 J/kg), only starting to erode past ~30m (212,826) and
+50m (212,390). 20m sits inside the flat, noise-suppression-only zone; the old 150m
+default was ~7.5x past where any accuracy benefit stops.
+
+Segment length doesn't have an equivalent flat zone — pushed it down to 2m on the
+same course and distance kept climbing smoothly with no plateau (56.05km at 20m →
+57.13km at 2m), the same coastline-paradox behavior as raw elevation gain. So there's
+no data-driven optimum for segment length, only a soft floor: below the GPS's own
+point spacing/positional accuracy (median ~2-14m raw spacing across the courses
+checked, varying with recording rate and pace), finer segments stop resolving real
+switchback corners and start resolving GPS position jitter instead. Landed on 25m —
+this session's own re-confirmation of the 20-25m figure already suggested (but never
+applied to the shipped default) in the original research above.
+
+Both new defaults live in `gpx/pipeline.ts`'s `DEFAULT_SEGMENT_LENGTH_M`/
+`DEFAULT_SMOOTHING_WINDOW_M` and `ui/formInputs.ts`'s `DEFAULT_FORM_INPUTS` (kept in
+sync manually — see each file's own doc comment for this same reasoning). Existing
+users' saved settings are untouched (these are just the fresh-install defaults);
+anyone who wants the new values on a course they've already tuned needs to change
+the Course processing fields themselves.
+
 ---
 
 ## 6. Walk ⇄ run transition — research + recommendation
@@ -367,7 +408,7 @@ validity). Dropped in favor of three checks that don't share that flaw:
 | FO_peak (fat rate ceiling) | 0.55 g/min | ~1.0 for elites |
 | Resting metabolism | 1.2 W/kg | net→gross bridge |
 | Walk max speed / force-walk grade | 2.0 m/s / off | Settings |
-| Smoothing window / segment length | 150 m / 50 m | Course page; see §5 GPX pipeline note re: why 150, not 40 |
+| Smoothing window / segment length | 20 m / 25 m | Course page; see §5 GPX pipeline note re: why not 150/50 |
 | Altitude adjustment | on | Cerretelli per-segment |
 | Durability drift | off | Settings; decay Ė_sus over hours |
 

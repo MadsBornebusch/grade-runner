@@ -98,17 +98,36 @@ export interface PipelineResult {
   hasPower: boolean;
 }
 
-const DEFAULT_SEGMENT_LENGTH_M = 50;
 /**
- * 150, not 40 -- chosen to behavior-preserve the default at the moment
- * smoothing changed from a point-count radius to a real distance window
- * (see smoothMedianByDistance). The old (50, 40) combo floored to a 1-point
- * median radius, which at 50m spacing spanned 150m in practice regardless of
- * the "40" label; 150 keeps that same real-world smoothing extent now that
- * the number means what it says, rather than silently changing what a
- * fresh install's default course looks like.
+ * 25, not 50 -- re-tuned from real cached Strava data (PLAN.md §5 update):
+ * distance has no plateau as segmentLengthM shrinks (same coastline-paradox
+ * behavior as raw elevation gain -- it kept climbing smoothly all the way
+ * to 2m with no knee), so there's no data-driven optimum here, only a soft
+ * floor: below the GPS's own point spacing/positional accuracy (median ~4m
+ * raw spacing on the courses checked), finer segments stop resolving real
+ * switchback corners and start resolving GPS jitter instead. 25m catches
+ * real corner-cutting (50m measurably undercounts distance on tight
+ * switchbacks) while staying well clear of that floor.
  */
-const DEFAULT_SMOOTHING_WINDOW_M = 150;
+const DEFAULT_SEGMENT_LENGTH_M = 25;
+/**
+ * 20, not 150 -- also re-tuned (PLAN.md §5 update). The previous 150 was
+ * never itself chosen for accuracy; it was chosen to behavior-preserve the
+ * default at the moment smoothing changed from a point-count radius to a
+ * real distance window (see smoothMedianByDistance's own doc) -- the old
+ * (50, 40) combo floored to a 1-point median radius that spanned 150m in
+ * practice regardless of the "40" label, and 150 just kept that same
+ * real-world extent rather than silently changing a fresh install's
+ * default course. Measuring the actual raw elevation noise across several
+ * cached Strava activities (median point-to-point |eleDelta| 0.0-0.4m,
+ * p90 0.2-1.0m -- Strava's API already serves DEM-corrected elevation, not
+ * raw noisy GPS altitude) shows the work integral (Σ cost(gradient)·
+ * distance3D, the thing that actually drives predicted effort/finish time)
+ * is flat to within ~0.1% from 5-20m smoothing, only starting to erode real
+ * terrain detail past ~30m. 20m sits inside that flat, noise-suppression-
+ * only zone instead of 7.5x past it for no accuracy benefit.
+ */
+const DEFAULT_SMOOTHING_WINDOW_M = 20;
 const DEFAULT_PAUSE_SPEED_MS = 0.5;
 
 function attr(tagAttrs: string, name: string): string | null {

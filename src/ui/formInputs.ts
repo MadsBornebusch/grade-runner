@@ -166,8 +166,10 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   hrEffortCalibrationSlope: null,
   hrEffortCalibrationIntercept: null,
   pacingMargin: null,
-  segmentLengthM: 50,
-  smoothingWindowM: 150,
+  // See gpx/pipeline.ts's DEFAULT_SEGMENT_LENGTH_M/DEFAULT_SMOOTHING_WINDOW_M
+  // for the measured reasoning behind these two numbers (PLAN.md §5 update).
+  segmentLengthM: 25,
+  smoothingWindowM: 20,
   splitLengthKm: 5,
   fatOxPoints: [],
   walkSpeedDisplayUnit: "ms",
