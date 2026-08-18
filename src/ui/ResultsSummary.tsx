@@ -37,6 +37,24 @@ function formatOrBonk(r: SimulationResult): string {
 
 const TARGET_MATCH_TOLERANCE_S = 60;
 
+interface StatProps {
+  label: string;
+  value: string;
+  sublabel: string;
+  title: string;
+  headline: boolean;
+}
+
+function Stat({ label, value, sublabel, title, headline }: StatProps) {
+  return (
+    <div className={`results-summary__stat${headline ? " results-summary__stat--headline" : ""}`} title={title}>
+      <span className="results-summary__label">{label}</span>
+      <span className="results-summary__value">{value}</span>
+      <span className="results-summary__sublabel">{sublabel}</span>
+    </div>
+  );
+}
+
 export function ResultsSummary({
   theta,
   result,
@@ -56,60 +74,77 @@ export function ResultsSummary({
   // still finishes SLOWER than what was asked for.
   const targetTooFast = target && !targetMatched && target.result.finishTimeS > target.targetTimeS;
 
+  // Lead with whatever's most useful to actually plan around: the athlete's
+  // own explicit target when they've set one, else their fitted realistic
+  // pacing (grounded in real race heart rate), else the theoretical
+  // ceiling -- the only number available before any race history is fit,
+  // and one nobody has ever actually run. Which stat is "first and biggest"
+  // changes; its own meaning/tooltip never does.
+  const headline: "target" | "chosen" | "ceiling" = target ? "target" : chosenPacing ? "chosen" : "ceiling";
+
+  const ceilingStat = (
+    <Stat
+      key="ceiling"
+      headline={headline === "ceiling"}
+      label="Theoretical ceiling"
+      value={formatOrBonk(result)}
+      sublabel={`${(theta * 100).toFixed(0)}% effort — never actually achieved`}
+      title="Theoretical upper bound, not a realistic target — you've never come within 15% of it, even on your best race."
+    />
+  );
+
+  const targetStat = target && (
+    <Stat
+      key="target"
+      headline={headline === "target"}
+      label="Target"
+      value={formatOrBonk(target.result)}
+      sublabel={
+        targetMatched
+          ? `${(target.theta * 100).toFixed(0)}% effort`
+          : targetTooFast
+            ? "not achievable — showing fastest sustainable pace"
+            : "closest achievable pace"
+      }
+      title={
+        targetMatched
+          ? "The pacing needed to hit your target finish time."
+          : targetTooFast
+            ? "Your target isn't reachable without bonking — this is your fastest sustainable pace instead."
+            : "Your target is slower than this course's gentlest sustainable pace — this is the closest match."
+      }
+    />
+  );
+
+  const chosenStat = chosenPacing && (
+    <Stat
+      key="chosen"
+      headline={headline === "chosen"}
+      label="Chosen pacing"
+      value={formatOrBonk(chosenPacing.result)}
+      sublabel="from your own race history"
+      title="What you'd likely run, based on your heart rate in past confirmed races."
+    />
+  );
+
   return (
     <div className={`results-summary ${result.feasible ? "results-summary--ok" : "results-summary--warn"}`}>
-      <div
-        className="results-summary__stat"
-        title="Theoretical upper bound, not a realistic target — you've never come within 15% of it, even on your best race."
-      >
-        <span className="results-summary__label">Theoretical ceiling</span>
-        <span className="results-summary__value">{formatOrBonk(result)}</span>
-        <span className="results-summary__sublabel">{(theta * 100).toFixed(0)}% effort — never actually achieved</span>
-      </div>
+      {headline === "target" && targetStat}
+      {headline === "chosen" && chosenStat}
+      {headline === "ceiling" && ceilingStat}
 
-      {target && (
-        <div
-          className="results-summary__stat"
-          title={
-            targetMatched
-              ? "The pacing needed to hit your target finish time."
-              : targetTooFast
-                ? "Your target isn't reachable without bonking — this is your fastest sustainable pace instead."
-                : "Your target is slower than this course's gentlest sustainable pace — this is the closest match."
-          }
-        >
-          <span className="results-summary__label">Target</span>
-          <span className="results-summary__value">{formatOrBonk(target.result)}</span>
-          <span className="results-summary__sublabel">
-            {targetMatched
-              ? `${(target.theta * 100).toFixed(0)}% effort`
-              : targetTooFast
-                ? "not achievable — showing fastest sustainable pace"
-                : "closest achievable pace"}
-          </span>
-        </div>
-      )}
-
-      {chosenPacing && (
-        <div
-          className="results-summary__stat"
-          title="What you'd likely run, based on your heart rate in past confirmed races."
-        >
-          <span className="results-summary__label">Chosen pacing</span>
-          <span className="results-summary__value">{formatOrBonk(chosenPacing.result)}</span>
-          <span className="results-summary__sublabel">from your own race history</span>
-        </div>
-      )}
+      {headline !== "target" && targetStat}
+      {headline !== "chosen" && chosenStat}
+      {headline !== "ceiling" && ceilingStat}
 
       {bestDemonstrated && (
-        <div
-          className="results-summary__stat"
+        <Stat
+          headline={false}
+          label="Best demonstrated"
+          value={formatOrBonk(bestDemonstrated.result)}
+          sublabel="your best day, this duration"
           title="What's possible if you execute like your best confirmed race, this length."
-        >
-          <span className="results-summary__label">Best demonstrated</span>
-          <span className="results-summary__value">{formatOrBonk(bestDemonstrated.result)}</span>
-          <span className="results-summary__sublabel">your best day, this duration</span>
-        </div>
+        />
       )}
 
       {(summaryStats.avgPaceMinPerKm !== null || summaryStats.avgHrBpm !== null) && (

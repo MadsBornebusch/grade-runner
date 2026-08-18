@@ -42,9 +42,7 @@ export function FinishTimeRangePanel({ fittedRaces, ceilingParams, solverBaseInp
 
   if (!fittedRaces) {
     return (
-      <p className="field-group-note">
-        Fit tau (or fInf/tau) from your run library on the Athlete tab to unlock a predicted finish-time range here.
-      </p>
+      <p className="field-group-note">Fit your race history on the Athlete tab to unlock a predicted finish-time range here.</p>
     );
   }
 

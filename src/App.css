@@ -601,7 +601,7 @@
 }
 
 .results-summary__value {
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 600;
   color: var(--text-h);
 }
@@ -610,6 +610,21 @@
   font-size: 11px;
   opacity: 0.6;
   margin-top: 2px;
+}
+
+/* The one number worth planning around, promoted above the rest -- see
+   ResultsSummary.tsx's own doc on how "headline" is picked (the athlete's
+   target, else their fitted realistic pacing, else the ceiling as a last
+   resort). Everything else stays available as smaller reference stats
+   alongside it, not removed -- this is emphasis, not hiding information. */
+.results-summary__stat--headline {
+  background: var(--accent-bg);
+  border-radius: 8px;
+  padding: 8px 14px;
+}
+
+.results-summary__stat--headline .results-summary__value {
+  font-size: 38px;
 }
 
 .results-summary__margin-note {
