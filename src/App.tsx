@@ -400,27 +400,29 @@ function App() {
                     );
                   }}
                 />
-                {fileName && <p className="course-name">{fileName}</p>}
-                {courseResult && !courseResult.hasElevation && (
-                  <p className="warning">No elevation data found — treating the course as flat.</p>
-                )}
                 {courseResult && (
-                  <p className="course-stats">
-                    {(courseResult.totalDistance3D / 1000).toFixed(1)} km &middot;{" "}
-                    {courseResult.totalElevationGain.toFixed(0)} m gain
-                  </p>
-                )}
-                <CourseProcessingFields values={formInputs} onChange={setFormInputs} />
-                <FuelingFields values={formInputs} onChange={setFormInputs} />
-                {formInputs.showCourseDebug && rawStats && (
-                  <CourseDebugChart
-                    raw={rawStats}
-                    processed={debugProcessedPoints}
-                    processedDistanceM={courseResult?.totalDistance3D ?? 0}
-                    processedElevationGain={courseResult?.totalElevationGain ?? 0}
-                    segmentLengthM={formInputs.segmentLengthM}
-                    smoothingWindowM={formInputs.smoothingWindowM}
-                  />
+                  <>
+                    {fileName && <p className="course-name">{fileName}</p>}
+                    {!courseResult.hasElevation && (
+                      <p className="warning">No elevation data found — treating the course as flat.</p>
+                    )}
+                    <p className="course-stats">
+                      {(courseResult.totalDistance3D / 1000).toFixed(1)} km &middot;{" "}
+                      {courseResult.totalElevationGain.toFixed(0)} m gain
+                    </p>
+                    <CourseProcessingFields values={formInputs} onChange={setFormInputs} />
+                    <FuelingFields values={formInputs} onChange={setFormInputs} />
+                    {formInputs.showCourseDebug && rawStats && (
+                      <CourseDebugChart
+                        raw={rawStats}
+                        processed={debugProcessedPoints}
+                        processedDistanceM={courseResult.totalDistance3D}
+                        processedElevationGain={courseResult.totalElevationGain}
+                        segmentLengthM={formInputs.segmentLengthM}
+                        smoothingWindowM={formInputs.smoothingWindowM}
+                      />
+                    )}
+                  </>
                 )}
               </>
             ),
