@@ -7,7 +7,6 @@ interface GpxUploadProps {
 
 export function GpxUpload({ onLoaded }: GpxUploadProps) {
   const [error, setError] = useState<string | null>(null);
-  const [fileName, setFileName] = useState<string | null>(null);
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -19,7 +18,6 @@ export function GpxUpload({ onLoaded }: GpxUploadProps) {
           setError("No track points found in this GPX file.");
           return;
         }
-        setFileName(file.name);
         onLoaded(points, file.name);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to parse GPX file.");
@@ -31,7 +29,7 @@ export function GpxUpload({ onLoaded }: GpxUploadProps) {
   return (
     <div className="gpx-upload">
       <label className="gpx-upload__control">
-        <span>{fileName ?? "Upload course GPX"}</span>
+        <span>Upload course GPX</span>
         <input
           type="file"
           accept=".gpx"
