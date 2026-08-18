@@ -189,6 +189,66 @@ describe("fitHrToEffortCalibrationAcrossRaces", () => {
     expect(result!.slope).toBeCloseTo(trueSlope, 2);
     expect(result!.raceCount).toBe(2);
   });
+
+  it("pulls the near-LT2 end of the line toward a lab-measured threshold anchor the long-race-only pool can't see", () => {
+    // Two long races (both clear the 250min reference bar) sit at moderate
+    // effort (0.5-0.6) -- exactly the scenario in the real bug report this
+    // fixes: an ultra-focused athlete's confirmed races are all long, so a
+    // linear extrapolation of ONLY that data out to near-LT2 effort
+    // (relevant for a short race) can land far from the athlete's actual
+    // measured LT2 heart rate. The anchor should pull the fit's own
+    // prediction at the anchor's HR meaningfully closer to the anchor's
+    // effort fraction, without needing the anchor to fully override what
+    // the races show at their own, lower effort levels.
+    const trueSlope = 0.01;
+    const trueIntercept = -1.0;
+    const longRaceA = makeHrRace(5, trueSlope, trueIntercept, { targetEffortFraction: 0.5, noise: (i) => 0.05 * Math.sin(i / 3) });
+    const longRaceB = makeHrRace(6, trueSlope, trueIntercept, { targetEffortFraction: 0.55, noise: (i) => 0.05 * Math.cos(i / 4) });
+
+    const raceOnly = fitHrToEffortCalibrationAcrossRaces([longRaceA, longRaceB], baseParams);
+    expect(raceOnly).not.toBeNull();
+
+    // A real near-LT2 measurement the race-only linear fit doesn't
+    // reproduce: effortFraction should read close to 1.0 at this HR (LT2 by
+    // construction, see fitHrToEffortCalibrationFromThresholds's own doc),
+    // but the pure race-only fit above puts it well below that.
+    const anchorHr = 165;
+    const anchorEffortFraction = 1.0;
+    const raceOnlyPrediction = predictEffortFractionFromHr(anchorHr, raceOnly!);
+    expect(raceOnlyPrediction).toBeLessThan(anchorEffortFraction - 0.15); // confirms the gap this test is closing
+
+    const blended = fitHrToEffortCalibrationAcrossRaces([longRaceA, longRaceB], baseParams, {
+      thresholdAnchors: [{ hr: anchorHr, effortFraction: anchorEffortFraction }],
+    });
+    expect(blended).not.toBeNull();
+    const blendedPrediction = predictEffortFractionFromHr(anchorHr, blended!);
+    expect(blendedPrediction).toBeGreaterThan(raceOnlyPrediction);
+    // Pulled meaningfully closer to the anchor, but not simply overwritten
+    // by it -- a handful of anchor points shouldn't outvote real race data.
+    expect(blendedPrediction).toBeLessThan(anchorEffortFraction);
+  });
+
+  it("does not let a threshold anchor consistent with the true relationship weaken the long-race-vs-many-short-races protection", () => {
+    const trueSlope = 0.01;
+    const trueIntercept = -1.0;
+    const misleadingSlope = 0.03;
+    const misleadingIntercept = -3.5;
+    const longRaceA = makeHrRace(5, trueSlope, trueIntercept, { targetEffortFraction: 0.55, noise: (i) => 0.1 * Math.sin(i / 3) });
+    const longRaceB = makeHrRace(6, trueSlope, trueIntercept, { targetEffortFraction: 0.6, noise: (i) => 0.1 * Math.cos(i / 4) });
+    const manyShortRaces = Array.from({ length: 100 }, (_, i) =>
+      makeHrRace(1, misleadingSlope, misleadingIntercept, { targetEffortFraction: 0.4, noise: (j) => 0.05 * Math.sin((i + j) / 2) }),
+    );
+    // Anchor consistent with the TRUE relationship at a higher effort
+    // fraction than any race reaches (near-LT2) -- should reinforce, not
+    // distort, the long-race-only result.
+    const anchorHr = (0.95 - trueIntercept) / trueSlope;
+    const result = fitHrToEffortCalibrationAcrossRaces([longRaceA, longRaceB, ...manyShortRaces], baseParams, {
+      thresholdAnchors: [{ hr: anchorHr, effortFraction: 0.95 }],
+    });
+    expect(result).not.toBeNull();
+    expect(result!.slope).toBeCloseTo(trueSlope, 2);
+    expect(result!.raceCount).toBe(2);
+  });
 });
 
 describe("fitHrToEffortCalibrationFromThresholds", () => {

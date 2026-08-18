@@ -3413,6 +3413,72 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    candidate-selection layer no longer silently drops known-informative
    long races regardless of how generous the per-bucket count is set.
 
+   **Follow-up (2026-08-18): blended the lab-threshold anchor directly
+   into the race-pooled fit, instead of the two only ever competing as an
+   either/or fallback.** Prompted by a real user report: predicting a 10k
+   (Askerspurten, actual 42min) gave 47min at an estimated 157bpm, well
+   below the user's own entered LT2 (4:10/km @ 165bpm) — while a longer
+   race (Saksumdal) predicted believably. Root cause: by this point
+   `runFitBatch.ts` had evolved (undocumented here at the time) from the
+   "two separate calibrations, athlete picks which" UI described above
+   into a single auto-applied pipeline where `fitHrToEffortCalibrationFromThresholds`
+   only ever ran as a fallback (`hrCalibrationFit ?? fromThresholds(...)`)
+   for an athlete with NO usable race-pooled fit at all. For this athlete
+   — plenty of confirmed races, several long enough to clear the 250min
+   reference bar — the race-pooled fit always won outright, so the
+   lab-measured LT2 anchor (exactly the near-threshold/short-race
+   information the race pool structurally can't have, per the "long
+   races only" restriction above) never touched the calibration actually
+   applied.
+
+   Also found and fixed a second, compounding bug on the same code path:
+   the threshold-fallback call was reading `formInputs.lt1Fraction`/
+   `lt2Fraction` directly — the raw fields, which stay at their 0.65/0.85
+   defaults whenever the athlete entered LT1/LT2 as pace instead (as this
+   user had: `lt2PaceMinPerKm` set, pace+HR entry mode). Only
+   `resolveLt1Lt2Fractions` honors that override. Even if the fallback
+   HAD fired, it would have anchored the wrong effortFraction at the
+   user's real LT2 heart rate.
+
+   **Fix:** `buildThresholdAnchorPoints` (factored out of
+   `fitHrToEffortCalibrationFromThresholds`, now shared) is always
+   computed from the RESOLVED lt1Fraction/lt2Fraction and passed into
+   `fitHrToEffortCalibrationAcrossRaces` as a new `thresholdAnchors`
+   option, blended into the SAME weighted regression as the pooled race
+   data — one calibration, not a chooser between two. Anchor points get
+   a bounded total weight (`THRESHOLD_ANCHOR_WEIGHT_FRACTION = 0.25`× the
+   race pool's own total weight, split evenly across however many anchor
+   points exist), added only AFTER the existing `MIN_FIT_POINTS` gate on
+   real race data — a handful of lab points can pull an already-qualifying
+   fit toward the athlete's own measured threshold, but can never let a
+   fit through (or dominate one) that real race history couldn't support
+   on its own. This directly targets the reported failure (the near-LT2/
+   short-race end of the line was pure extrapolation from lower-effort
+   long-race data) without reopening the original swamping bug the
+   long-race restriction exists to prevent (a handful of anchor points
+   can't outvote dozens of short races the way the short races themselves
+   could). `fitHrToEffortCalibrationFromThresholds` itself is unchanged
+   and still used standalone as the last-resort fallback for an athlete
+   with too little race data to fit at all.
+
+   Two new regression tests: one confirms a threshold anchor measurably
+   pulls the fit's prediction at the anchor's own HR toward the anchor
+   (without fully overriding what the race data shows at its own, lower
+   effort levels); the other re-runs the original "2 long races vs. 100
+   misleading short races" regression test with a truth-consistent anchor
+   added, confirming the long-race protection still holds (`raceCount`
+   stays 2, slope unaffected). All 463 project tests pass.
+
+   Separately (not a calibration bug, but found while tracing the same
+   report): `App.tsx`'s `activeResult` — which drives the Results page's
+   avg pace/GAP/HR row and elevation-pace chart — fell straight from the
+   user's target time to the zero-margin theoretical ceiling, with no
+   path through the fitted pacing-margin curve at all. Whenever "Chosen
+   pacing" was the promoted headline stat, everything below it was still
+   silently describing the ceiling plan instead. Fixed to follow the same
+   priority ResultsSummary uses for its headline (target > chosen pacing >
+   ceiling).
+
 ### Open questions
 
 **Resolved with the user (2026-07-23):** segmentation also breaks on a

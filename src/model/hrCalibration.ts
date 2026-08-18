@@ -130,6 +130,18 @@ function effortFractionForHrPoint(p: EffortTrendPoint, smoothedPowerWPerKg: numb
 }
 
 /**
+ * Total weight given to the lab-threshold anchor points (see
+ * `buildThresholdAnchorPoints`) as a fraction of the race-pooled data's own
+ * total weight, when both are blended into one fit -- see
+ * `fitHrToEffortCalibrationAcrossRaces`'s `thresholdAnchors` option. Bounded
+ * on both sides by construction: split evenly across however many anchor
+ * points exist, so they can meaningfully pull the near-LT2 end of the line
+ * toward a real physiological measurement without a handful of points ever
+ * outvoting the athlete's own race history.
+ */
+const THRESHOLD_ANCHOR_WEIGHT_FRACTION = 0.25;
+
+/**
  * Fits `effortFraction ≈ intercept + slope * heartRateBpm` via weighted
  * least squares, pooling qualifying points (has HR, within the early
  * window of its own race) across every race supplied, weighted by segment
@@ -154,11 +166,28 @@ function effortFractionForHrPoint(p: EffortTrendPoint, smoothedPowerWPerKg: numb
  * alone cut that error by 20-24%; adding the start trim on top improved
  * it further in both held-out races tested (see PLAN.md §14) -- the two
  * fixes are complementary, not redundant.
+ *
+ * Side effect worth knowing: for an athlete whose confirmed races are
+ * mostly long (ultras), this restriction can end up excluding EVERY short
+ * race from the fit, leaving the near-LT2/short-race end of the line pure
+ * extrapolation from long-race (lower effort fraction) data -- exactly the
+ * failure mode `thresholdAnchors` exists to close, not by re-admitting
+ * short races (which would reopen the swamping bug above) but by anchoring
+ * that end with the athlete's own lab-measured LT1/LT2 pace+HR instead.
  */
 export function fitHrToEffortCalibrationAcrossRaces(
   races: EffortTrendPoint[][],
   ceilingParams: CeilingParams,
-  opts: { raceDates?: (Date | null)[]; halfLifeDays?: number; now?: Date } = {},
+  opts: {
+    raceDates?: (Date | null)[];
+    halfLifeDays?: number;
+    now?: Date;
+    /** Lab-measured (hr, effortFraction) anchor points -- see
+     * `buildThresholdAnchorPoints` -- blended into the SAME regression as
+     * the pooled race data, not used as a separate fallback fit. Undefined
+     * or empty is byte-for-byte identical to omitting this option. */
+    thresholdAnchors?: { hr: number; effortFraction: number }[];
+  } = {},
 ): HrEffortCalibration | null {
   const halfLifeDays = opts.halfLifeDays ?? DEFAULT_RECENCY_HALF_LIFE_DAYS;
   const now = opts.now ?? new Date();
@@ -196,6 +225,17 @@ export function fitHrToEffortCalibrationAcrossRaces(
   });
 
   if (samples.length < MIN_FIT_POINTS) return null;
+
+  // Blended in AFTER the MIN_FIT_POINTS gate above -- anchors alone (2-4
+  // points) should never let a fit through that real race data couldn't on
+  // its own; they adjust an already-qualifying fit, not substitute for one.
+  if (opts.thresholdAnchors && opts.thresholdAnchors.length > 0) {
+    const raceWeightTotal = samples.reduce((s, p) => s + p.weight, 0);
+    const anchorWeightEach = (raceWeightTotal * THRESHOLD_ANCHOR_WEIGHT_FRACTION) / opts.thresholdAnchors.length;
+    for (const anchor of opts.thresholdAnchors) {
+      samples.push({ hr: anchor.hr, effortFraction: anchor.effortFraction, weight: anchorWeightEach });
+    }
+  }
 
   const sumW = samples.reduce((s, p) => s + p.weight, 0);
   if (!(sumW > 0)) return null;
@@ -301,12 +341,21 @@ export interface ThresholdCalibrationInputs {
  * pointCount is 3 or more (e.g. a fat-ox curve contributing extra points
  * alongside LT1/LT2).
  */
-export function fitHrToEffortCalibrationFromThresholds(
+/**
+ * Builds the same (hr, effortFraction) anchor points
+ * `fitHrToEffortCalibrationFromThresholds` fits standalone -- factored out
+ * so `fitHrToEffortCalibrationAcrossRaces` can blend them into its own
+ * race-pooled regression instead (see that function's `thresholdAnchors`
+ * option), rather than the two calibrations only ever competing as an
+ * either/or fallback. See that function's own doc for the conversion
+ * reasoning (LT1/LT2 need none; fat-ox needs a Minetti pace->power step).
+ */
+export function buildThresholdAnchorPoints(
   inputs: ThresholdCalibrationInputs,
   ceilingParams: CeilingParams,
-): HrEffortCalibration | null {
+): { hr: number; effortFraction: number }[] {
   const referenceCeilingFraction = sustainableFraction(0, ceilingParams);
-  if (!(referenceCeilingFraction > 0)) return null;
+  if (!(referenceCeilingFraction > 0)) return [];
 
   const points: { hr: number; effortFraction: number }[] = [];
   if (inputs.lt1HeartRateBpm !== null) {
@@ -324,7 +373,14 @@ export function fitHrToEffortCalibrationFromThresholds(
       points.push({ hr: p.heartRateBpm, effortFraction: intensityFraction / referenceCeilingFraction });
     }
   }
+  return points;
+}
 
+export function fitHrToEffortCalibrationFromThresholds(
+  inputs: ThresholdCalibrationInputs,
+  ceilingParams: CeilingParams,
+): HrEffortCalibration | null {
+  const points = buildThresholdAnchorPoints(inputs, ceilingParams);
   if (points.length < 2) return null;
 
   const n = points.length;

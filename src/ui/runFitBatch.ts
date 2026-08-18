@@ -18,6 +18,7 @@ import { splitAtTransitGaps } from "../gpx/transitGap";
 import { analyzeRun } from "../model/analysis";
 import type { CeilingParams } from "../model/ceiling";
 import {
+  buildThresholdAnchorPoints,
   fitHrToEffortCalibrationAcrossRaces,
   fitHrToEffortCalibrationFromThresholds,
   type HrEffortCalibration,
@@ -40,7 +41,7 @@ import { DURABILITY_MIN_DURATION_S } from "../model/suggestRuns";
 import { attachSurfaceData } from "../model/surfaceExposure";
 import { setStoredRunSurfaceEdges, type StoredRun } from "../storage/runLibrary";
 import type { FormInputs } from "./formInputs";
-import { resolveGlycogenStoreG } from "./formInputs";
+import { resolveGlycogenStoreG, resolveLt1Lt2Fractions } from "./formInputs";
 import { ensurePointsForRun } from "./autoFetchRuns";
 import { fetchSurfaceEdges } from "./surfaceLookup";
 
@@ -247,25 +248,56 @@ export async function runFitBatch(
 
     // HR-to-effort calibration: pools (HR, effort) points across the same
     // races, restricted internally to each race's own early/low-drift
-    // window. Auto-apply is gated on rSquared -- a low rSquared is a
-    // legitimate result (HR may just not track this athlete's effort
-    // well), not a reason to lower the bar until it passes.
-    const hrCalibrationFit = fitHrToEffortCalibrationAcrossRaces(races, safeFit.ceilingParams, { raceDates, halfLifeDays });
+    // window, blended with the athlete's own lab-measured LT1/LT2 (+fat-ox)
+    // anchor points when available. The race pool alone can end up
+    // entirely long-race-only for an athlete with several ultras confirmed
+    // (see fitHrToEffortCalibrationAcrossRaces's own doc on why) -- the
+    // near-LT2/short-race end of the line would then be pure extrapolation
+    // from lower-effort long-race data with no anchor of its own. Blending
+    // in the real LT1/LT2 measurement fixes that end without reopening the
+    // short-race-swamping bug the long-race restriction exists to prevent
+    // (a handful of anchor points can't outvote real race history the way
+    // dozens of short races could -- see THRESHOLD_ANCHOR_WEIGHT_FRACTION).
+    // Uses the RESOLVED lt1Fraction/lt2Fraction (honoring a pace-entered
+    // threshold), not the raw formInputs fields directly -- those stay at
+    // their default whenever the athlete entered LT1/LT2 as pace instead of
+    // a fraction, which would silently anchor the wrong point.
+    const { lt1Fraction, lt2Fraction } = resolveLt1Lt2Fractions(formInputs);
+    const thresholdAnchors = buildThresholdAnchorPoints(
+      {
+        lt1Fraction,
+        lt2Fraction,
+        lt1HeartRateBpm: formInputs.lt1HeartRateBpm,
+        lt2HeartRateBpm: formInputs.lt2HeartRateBpm,
+        fatOxPoints: formInputs.fatOxPoints,
+        walkMaxMs: formInputs.walkMaxMs,
+      },
+      safeFit.ceilingParams,
+    );
+    // Auto-apply is gated on rSquared -- a low rSquared is a legitimate
+    // result (HR may just not track this athlete's effort well), not a
+    // reason to lower the bar until it passes.
+    const hrCalibrationFit = fitHrToEffortCalibrationAcrossRaces(races, safeFit.ceilingParams, {
+      raceDates,
+      halfLifeDays,
+      thresholdAnchors,
+    });
     if (hrCalibrationFit && hrCalibrationFit.rSquared >= MIN_HR_CALIBRATION_R_SQUARED) {
       callbacks.onApplyHrCalibration(hrCalibrationFit.slope, hrCalibrationFit.intercept);
     }
 
     // Pacing-margin curve: needs its OWN HR calibration reading, not
     // necessarily hrCalibrationFit above -- reuses it when available, but
-    // falls back to the lab-threshold calibration (if the athlete has
-    // entered LT1/LT2 heart rate) so this can still run for someone whose
-    // race-pool calibration didn't clear MIN_HR_CALIBRATION_R_SQUARED.
+    // falls back to the lab-threshold-only calibration (no race data at
+    // all, or too little to clear MIN_FIT_POINTS even before blending) so
+    // this can still run for someone whose race pool can't support a fit
+    // by itself.
     const marginCalibration =
       hrCalibrationFit ??
       fitHrToEffortCalibrationFromThresholds(
         {
-          lt1Fraction: formInputs.lt1Fraction,
-          lt2Fraction: formInputs.lt2Fraction,
+          lt1Fraction,
+          lt2Fraction,
           lt1HeartRateBpm: formInputs.lt1HeartRateBpm,
           lt2HeartRateBpm: formInputs.lt2HeartRateBpm,
           fatOxPoints: formInputs.fatOxPoints,
