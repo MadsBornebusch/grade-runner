@@ -29,7 +29,7 @@ import { looksLikeGenericStravaTitle } from "../model/raceCandidates";
 import { MIN_MARGIN_FIT_RACES, type PacingMarginFitResult } from "../model/pacingMarginFit";
 import { resolveCeilingParams, resolveGlycogenStoreG, resolveLt1Lt2Fractions, type FormInputs, type Vo2MaxEntry } from "./formInputs";
 import { StravaImport } from "./StravaImport";
-import { getAutoFetchStatus, runAutoFetchBatch, subscribeToAutoFetch } from "./autoFetchRuns";
+import { ensurePointsForRun, getAutoFetchStatus, runAutoFetchBatch, subscribeToAutoFetch } from "./autoFetchRuns";
 import { getBackfillStatus, runBackfillBatch, subscribeToBackfill } from "./backfillRuns";
 import {
   getRunFitStatus,
@@ -242,26 +242,46 @@ export function RunLibraryPanel({
   // count in the run list, a fit, the suggestions, or the diagnostic.
   const { kept: dedupedRuns, duplicateGroups } = useMemo(() => dedupeStoredRuns(runs), [runs]);
 
-  // Candidates for the race-tagging list below: fetched (points !== null,
-  // so there's something to fit from) runs whose Strava title ISN'T one of
-  // the auto-generated "Morning Run" style titles -- a real race is almost
-  // always renamed. A suggestion only: pacingMarginFit.ts only ever uses
-  // whatever the athlete explicitly confirms via raceTag, never this
-  // heuristic directly (see raceCandidates.ts's own doc on why -- a real
-  // check this session found the heuristic alone misclassified a club
-  // interval session as a race).
+  // Candidates for the race-tagging list below: any backfilled run (points
+  // fetched or not -- a title is all tagging needs) whose Strava title ISN'T
+  // one of the auto-generated "Morning Run" style titles -- a real race is
+  // almost always renamed. Deliberately NOT gated on points !== null: that
+  // used to force waiting for the (slow) heuristic full-data auto-fetch to
+  // finish before a single race could even be reviewed, even though titles
+  // are available straight off the (fast, cheap) backfill summary. A
+  // suggestion only: pacingMarginFit.ts only ever uses whatever the athlete
+  // explicitly confirms via raceTag, never this heuristic directly (see
+  // raceCandidates.ts's own doc on why -- a real check this session found
+  // the heuristic alone misclassified a club interval session as a race).
   const raceCandidates = useMemo(
-    () => dedupedRuns.filter((r) => r.points !== null && !looksLikeGenericStravaTitle(r.name)),
+    () => dedupedRuns.filter((r) => !looksLikeGenericStravaTitle(r.name)),
     [dedupedRuns],
   );
-  const [raceTagSaving, setRaceTagSaving] = useState(false);
-  const setRaceTag = async (id: string, raceTag: "race" | "notRace") => {
-    setRaceTagSaving(true);
-    try {
-      await setStoredRunRaceTags([{ id, raceTag }]);
-      refresh();
-    } finally {
-      setRaceTagSaving(false);
+  // Per-row, not one shared flag -- tagging itself is a cheap local write
+  // (no network), so multiple rows can be tagged back to back without
+  // blocking on each other. Only a row whose points still need fetching
+  // (see setRaceTag below) shows as busy, and only that row.
+  const [fetchingRaceIds, setFetchingRaceIds] = useState<Set<string>>(new Set());
+  const setRaceTag = async (run: StoredRun, raceTag: "race" | "notRace") => {
+    await setStoredRunRaceTags([{ id: run.id, raceTag }]);
+    refresh();
+    // Fetch this run's full data right away, ahead of (not queued behind)
+    // whatever the broader heuristic auto-fetch batch is doing -- a race
+    // the athlete just explicitly confirmed is exactly what the pacing-
+    // margin fit needs, and shouldn't have to wait its turn in a 60-run
+    // speculative batch to become usable.
+    if (raceTag === "race" && run.points === null) {
+      setFetchingRaceIds((prev) => new Set(prev).add(run.id));
+      try {
+        await ensurePointsForRun(run);
+      } finally {
+        setFetchingRaceIds((prev) => {
+          const next = new Set(prev);
+          next.delete(run.id);
+          return next;
+        });
+        refresh();
+      }
     }
   };
 
@@ -581,7 +601,7 @@ export function RunLibraryPanel({
         )}
       </div>
       <p className="field-group-help">
-        1) Backfill from a date below. 2) Wait for runs to download. 3) Confirm your races. 4) Hit the fit button.
+        1) Backfill from a date below. 2) Confirm your races -- this downloads just those. 3) Hit the fit button.
       </p>
 
       <label className="gpx-upload__control">
@@ -627,7 +647,7 @@ export function RunLibraryPanel({
         ) : pendingFetchRuns.length > 0 ? (
           `${pendingFetchRuns.length} run${pendingFetchRuns.length === 1 ? "" : "s"} queued to download…`
         ) : readyCount > 0 ? (
-          `✓ ${readyCount} run${readyCount === 1 ? "" : "s"} downloaded and ready. Confirm your races below, then fit.`
+          `✓ ${readyCount} run${readyCount === 1 ? "" : "s"} downloaded and ready to fit.`
         ) : dedupedRuns.length === 0 ? (
           "No runs stored yet."
         ) : null}
@@ -656,10 +676,11 @@ export function RunLibraryPanel({
                       <input
                         type="checkbox"
                         checked={r.raceTag === "race"}
-                        disabled={raceTagSaving}
-                        onChange={(e) => void setRaceTag(r.id, e.target.checked ? "race" : "notRace")}
+                        disabled={fetchingRaceIds.has(r.id)}
+                        onChange={(e) => void setRaceTag(r, e.target.checked ? "race" : "notRace")}
                       />
                       {r.name}
+                      {fetchingRaceIds.has(r.id) && " (downloading…)"}
                     </label>
                   </td>
                   <td className="run-library__race-tag-date">{runDate(r)?.toISOString().slice(0, 10) ?? ""}</td>
