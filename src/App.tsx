@@ -233,10 +233,16 @@ function App() {
   }, [solverInputs, targetTimeS]);
 
   // Planning mode's detail view (charts/splits/averages) follows whichever
-  // plan is active: the user's target time when set, else the theoretical
-  // ceiling -- see ResultsSummary, which keeps showing the ceiling number
-  // itself as a fixed fact regardless.
-  const activeResult = targetTimeResult ?? solverResult;
+  // plan is active: the user's target time when set, else their own fitted
+  // pacing-margin curve, else the theoretical ceiling as a last resort --
+  // the SAME priority ResultsSummary uses to pick its headline stat. This
+  // used to fall straight from target to the zero-margin ceiling, skipping
+  // chosen pacing entirely -- so whenever "Chosen pacing" was the promoted
+  // headline number, the avg pace/GAP/HR row and elevation-pace chart right
+  // below it were silently describing a DIFFERENT plan (the theoretical
+  // ceiling, never actually achieved) instead of the number the athlete was
+  // actually looking at.
+  const activeResult = targetTimeResult ?? chosenPacingResult ?? solverResult;
 
   const chartPoints = useMemo(() => {
     if (!courseResult || !activeResult) return [];
