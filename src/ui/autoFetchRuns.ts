@@ -13,11 +13,25 @@
 
 import type { GpxPoint } from "../gpx/pipeline";
 import { setStoredRunPoints, type StoredRun } from "../storage/runLibrary";
-import { fetchStravaActivity } from "./stravaClient";
+import { fetchStravaActivity, StravaFetchError } from "./stravaClient";
 
 /** Paces fetches so a large batch doesn't hammer Strava's API all at once
  * and trip its rate limit -- same spirit as backfill's own page delay. */
 const AUTO_FETCH_DELAY_MS = 250;
+
+/**
+ * How long to stay quiet after actually hitting Strava's rate limit (a real
+ * 429, not just any failure) before letting a new batch start. Strava's own
+ * limit window is 15 minutes -- without this, every RunLibraryPanel mount
+ * (i.e. every time Settings is opened) re-fired the whole pending batch
+ * immediately, which just re-hit the same still-active rate limit and
+ * burned through whatever headroom had recovered, so it never actually
+ * cleared. Deliberately longer than Strava's own window so the count has
+ * genuinely reset by the time a retry fires, not just "shortly".
+ */
+const RATE_LIMIT_COOLDOWN_MS = 16 * 60 * 1000;
+
+let rateLimitedUntil = 0;
 
 export interface AutoFetchStatus {
   running: boolean;
@@ -72,25 +86,43 @@ export async function ensurePointsForRun(run: StoredRun): Promise<GpxPoint[]> {
 export async function runAutoFetchBatch(pending: StoredRun[], onDone: () => void): Promise<void> {
   if (status.running) return;
   if (pending.length === 0) return;
+  // Still cooling down from a real 429 last time -- every mount of
+  // RunLibraryPanel calls this unconditionally, so without this guard
+  // reopening Settings during the cooldown would immediately re-fire the
+  // batch, re-hit the still-active limit, and reset the clock forever.
+  if (Date.now() < rateLimitedUntil) return;
 
   const total = pending.length;
   let failures = 0;
+  let rateLimited = false;
   setStatus({ running: true, progress: { done: 0, total }, error: null });
 
   for (let i = 0; i < total; i++) {
     setStatus({ running: true, progress: { done: i, total }, error: null });
     try {
       await ensurePointsForRun(pending[i]);
-    } catch {
+    } catch (err) {
       failures++;
+      if (err instanceof StravaFetchError && err.status === 429) {
+        // No point burning through the rest of the batch -- every remaining
+        // request will hit the same limit.
+        rateLimited = true;
+        break;
+      }
     }
     if (i < total - 1) await new Promise((r) => setTimeout(r, AUTO_FETCH_DELAY_MS));
   }
 
+  if (rateLimited) rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+
   setStatus({
     running: false,
     progress: null,
-    error: failures > 0 ? `Fetched ${total - failures} of ${total} recommended runs -- ${failures} failed (Strava rate limit or a transient error). Try again shortly.` : null,
+    error: rateLimited
+      ? `Fetched ${total - failures} of ${total} recommended runs -- Strava's rate limit kicked in. Paused; retries automatically in about 15 minutes.`
+      : failures > 0
+        ? `Fetched ${total - failures} of ${total} recommended runs -- ${failures} failed. Try again shortly.`
+        : null,
   });
   onDone();
 }

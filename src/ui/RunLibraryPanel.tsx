@@ -684,7 +684,10 @@ export function RunLibraryPanel({
               ? "Fitting…"
               : `Fit full athlete model from ${readyCount} downloaded run${readyCount === 1 ? "" : "s"}`}
           </button>
-          <p className="field-group-help">Updates your whole pacing model from the races confirmed above.</p>
+          <p className="field-group-help">
+            Fits your pacing curve, terrain cost, and HR calibration from every downloaded run above -- confirmed
+            races additionally fit your race-day pacing margin.
+          </p>
         </>
       )}
 

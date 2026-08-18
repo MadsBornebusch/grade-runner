@@ -28,6 +28,10 @@ export default handleErrors(async (req: IncomingMessage, res: ServerResponse) =>
   ]);
 
   if (!detailRes.ok || !streamsRes.ok) {
+    if (detailRes.status === 429 || streamsRes.status === 429) {
+      sendJson(res, 429, { error: "Strava rate limit reached" });
+      return;
+    }
     sendJson(res, 502, { error: "Failed to fetch activity from Strava" });
     return;
   }
