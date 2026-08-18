@@ -588,7 +588,12 @@ export function RunLibraryPanel({
           <div className="strava-import__link-row">
             <span>Sync runs since</span>
             <input type="date" value={backfillFrom} onChange={(e) => setBackfillFrom(e.target.value)} />
-            <button type="button" className="fatox-add" onClick={runBackfill} disabled={backfillStatus.running}>
+            <button
+              type="button"
+              className={readyCount === 0 ? "button-primary" : "fatox-add"}
+              onClick={runBackfill}
+              disabled={backfillStatus.running}
+            >
               {backfillStatus.running ? "Syncing…" : "Sync runs from Strava"}
             </button>
           </div>
@@ -669,14 +674,17 @@ export function RunLibraryPanel({
             />
             <span>days -- older runs count for less</span>
           </div>
-          <button type="button" className="fatox-add" onClick={runFit} disabled={readyCount === 0 || fitting}>
+          <button
+            type="button"
+            className={readyCount > 0 ? "button-primary" : "fatox-add"}
+            onClick={runFit}
+            disabled={readyCount === 0 || fitting}
+          >
             {fitting
               ? "Fitting…"
               : `Fit full athlete model from ${readyCount} downloaded run${readyCount === 1 ? "" : "s"}`}
           </button>
-          <p className="field-group-help">
-            Fits and applies tau/f_inf, terrain cost, HR calibration, and pacing margin all at once.
-          </p>
+          <p className="field-group-help">Updates your whole pacing model from the races confirmed above.</p>
         </>
       )}
 

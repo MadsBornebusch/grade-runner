@@ -7,6 +7,11 @@
   --accent: #aa3bff;
   --accent-bg: rgba(170, 59, 255, 0.12);
   --accent-border: rgba(170, 59, 255, 0.6);
+  /* Text color for content placed ON TOP of a solid --accent fill (e.g. a
+     primary button) -- kept separate from --accent itself since dark mode's
+     accent is a light lavender chosen to read on a dark page background,
+     which would fail contrast if reused as a button fill with white text. */
+  --accent-fg: #fff;
   --warn: #e05252;
   --warn-bg: rgba(224, 82, 82, 0.1);
   --terrain-bg: rgba(150, 100, 40, 0.14);
@@ -34,6 +39,7 @@
     --accent: #c084fc;
     --accent-bg: rgba(192, 132, 252, 0.15);
     --accent-border: rgba(192, 132, 252, 0.5);
+    --accent-fg: #201229;
     --warn: #f28b8b;
     --warn-bg: rgba(242, 139, 139, 0.12);
     --terrain-bg: rgba(210, 160, 90, 0.18);

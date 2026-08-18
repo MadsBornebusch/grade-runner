@@ -526,11 +526,7 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
 
       <fieldset>
         <legend>Pacing curve</legend>
-        <p className="field-group-help">
-          Models how your sustainable effort fades with duration: starts at <strong>f0</strong>, decays to{" "}
-          <strong>f_inf</strong> over <strong>tau</strong> minutes. Fit from your past runs below, or left at
-          defaults.
-        </p>
+        <p className="field-group-help">Fit automatically from your race history below, or leave at the defaults.</p>
         <label className="field field--checkbox">
           <input
             type="checkbox"
@@ -540,9 +536,7 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
           <span>Enable pacing curve</span>
         </label>
         {!values.pacingCurveEnabled && (
-          <p className="field-group-note">
-            Off — plan uses a flat f0 (capped by LT2) for the whole event. f_inf and tau have no effect until back on.
-          </p>
+          <p className="field-group-note">Off — your plan uses a single flat effort level for the whole event.</p>
         )}
         {values.pacingCurveEnabled && (
           <p className="field-group-note">
@@ -551,7 +545,11 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
         )}
         <details>
           <summary>Advanced: override the pacing curve manually</summary>
-          <p className="field-group-help">Only change if you know your own fade rate and don't want the fit below.</p>
+          <p className="field-group-help">
+            Models how your sustainable effort fades with duration: starts at <strong>f0</strong>, decays to{" "}
+            <strong>f_inf</strong> over <strong>tau</strong> minutes. Only change if you know your own fade rate and
+            don't want the fit above.
+          </p>
           <NumberField
             label="f0"
             hint="starting sustainable fraction"
@@ -608,10 +606,7 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
 
       <fieldset>
         <legend>Terrain surface cost</legend>
-        <p className="field-group-help">
-          Extra cost for unpaved/technical terrain, per surface category. Fit automatically from your past runs
-          below. The flat multiplier is a fallback or manual override.
-        </p>
+        <p className="field-group-help">Fit automatically from your past runs below.</p>
         {values.surfaceCostMultipliers && Object.keys(values.surfaceCostMultipliers).length > 0 && (
           <p className="field-group-note">
             Current per-category fit:{" "}
@@ -642,10 +637,7 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
 
       <fieldset>
         <legend>Walk / run</legend>
-        <p className="field-group-help">
-          Max walk speed sets your walking cap; the model switches to running once that's faster. Force-walk
-          overrides this for grades you'd never run.
-        </p>
+        <p className="field-group-help">Your fastest sustainable walk. Force-walk overrides it for grades you'd never run.</p>
         <SpeedField
           label="Max walk speed"
           valueMs={values.walkMaxMs}

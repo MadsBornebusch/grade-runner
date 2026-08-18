@@ -414,6 +414,33 @@
   margin-top: 4px;
 }
 
+/* The single current actionable step in a sequential flow (sync -> confirm
+   races -> fit) -- only one of these should be on screen looking primary at
+   once, so this is applied conditionally by the caller, not to every
+   important button. */
+.button-primary {
+  align-self: flex-start;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-radius: 6px;
+  padding: 8px 16px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.button-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.button-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .run-library__race-tag-table {
   width: 100%;
   border-collapse: collapse;

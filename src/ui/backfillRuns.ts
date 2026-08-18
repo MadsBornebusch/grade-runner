@@ -60,7 +60,7 @@ export async function runBackfillBatch(fromDateInput: string, onDone: (importedC
       setStatus({ running: true, progress: `Fetching page ${page}…`, error: null });
       const res = await fetch(`/api/strava/activities?page=${page}&per_page=${BACKFILL_PER_PAGE}`);
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "Backfill failed.");
+      if (!res.ok) throw new Error(body.error ?? "Sync failed.");
       const pageResult = body as BackfillPage;
 
       for (const run of filterRunsSinceDate(pageResult.runs, targetStartDate)) {
