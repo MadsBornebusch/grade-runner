@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { SurfaceCategory } from "../gpx/pipeline";
-import { parseGpx, runPipeline } from "../gpx/pipeline";
+import { runPipeline } from "../gpx/pipeline";
 import { analyzeRun } from "../model/analysis";
 import {
   bootstrapTauConfidenceInterval,
@@ -16,7 +16,6 @@ import { fitHrToEffortCalibrationFromThresholds, predictHeartRateFromEffortFract
 import { sustainableFraction } from "../model/ceiling";
 import { estimateVo2MaxFromRun, isEstimableEffort } from "../model/vo2MaxEstimate";
 import {
-  addStoredRun,
   clearStoredRuns,
   deleteStoredRun,
   listStoredRuns,
@@ -28,7 +27,6 @@ import {
 import { looksLikeGenericStravaTitle } from "../model/raceCandidates";
 import { MIN_MARGIN_FIT_RACES, type PacingMarginFitResult } from "../model/pacingMarginFit";
 import { resolveCeilingParams, resolveGlycogenStoreG, resolveLt1Lt2Fractions, type FormInputs, type Vo2MaxEntry } from "./formInputs";
-import { StravaImport } from "./StravaImport";
 import { ensurePointsForRun, getAutoFetchStatus, runAutoFetchBatch, subscribeToAutoFetch } from "./autoFetchRuns";
 import { getBackfillStatus, runBackfillBatch, subscribeToBackfill } from "./backfillRuns";
 import {
@@ -312,25 +310,6 @@ export function RunLibraryPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [duplicateGroups]);
 
-  const handleFile = useCallback(
-    async (file: File) => {
-      setError(null);
-      try {
-        const text = await file.text();
-        const points = parseGpx(text);
-        if (points.length === 0) {
-          setError("No track points found in this GPX file.");
-          return;
-        }
-        await addStoredRun(file.name, points);
-        refresh();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to add this run.");
-      }
-    },
-    [refresh],
-  );
-
   const [clearing, setClearing] = useState(false);
   const clearAll = async () => {
     if (!window.confirm("Delete every stored run? This clears the whole local run library and can't be undone.")) {
@@ -601,33 +580,20 @@ export function RunLibraryPanel({
         )}
       </div>
       <p className="field-group-help">
-        1) Backfill from a date below. 2) Confirm your races -- this downloads just those. 3) Hit the fit button.
+        1) Sync runs from Strava below. 2) Confirm your races -- this downloads just those. 3) Hit the fit button.
       </p>
-
-      <label className="gpx-upload__control">
-        <span>Add a run</span>
-        <input
-          type="file"
-          accept=".gpx"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) void handleFile(file);
-          }}
-        />
-      </label>
-      <StravaImport onImport={(points, name, stravaId) => addStoredRun(name, points, stravaId).then(refresh)} />
 
       {stravaConnected && (
         <>
           <div className="strava-import__link-row">
-            <span>Backfill runs since</span>
+            <span>Sync runs since</span>
             <input type="date" value={backfillFrom} onChange={(e) => setBackfillFrom(e.target.value)} />
             <button type="button" className="fatox-add" onClick={runBackfill} disabled={backfillStatus.running}>
-              {backfillStatus.running ? "Fetching…" : "Backfill"}
+              {backfillStatus.running ? "Syncing…" : "Sync runs from Strava"}
             </button>
           </div>
           <p className="field-group-help">
-            Click again later to check for new runs since your last backfill.
+            Click again later to check for new runs since your last sync.
           </p>
         </>
       )}

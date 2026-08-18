@@ -687,17 +687,18 @@ as a direct substitute for the existing %VO2max intensity axis.
    before computing effort fraction, verified with a synthetic test that
    recovers a true slope through large high-frequency power noise a raw
    comparison would be swamped by.
-4. **HR zone inputs on Settings — built.** `hrZoneModel` (%HRmax / %HRR-
-   Karvonen / %LTHR / custom boundaries in bpm), plus the relevant bpm
-   fields per model, mirror the existing LT1/LT2-as-fraction pattern. Zone
-   boundaries are resolved by `resolveHrZones` in `formInputs.ts` (standard
-   5-zone %HRmax/%HRR breakpoints; Garmin's own 6-zone %LTHR scheme, per
-   the same source PLAN.md already cites; user-entered boundaries for
-   `custom`) and shown read-only in a new "Heart rate zones" fieldset in
-   `InputsPanel.tsx`. Reference/display only, same as `lt1/lt2HeartRateBpm`
-   above -- nothing here feeds ceiling or substrate calculations; the
-   calibration in stage 3 is the one place HR actually drives a number,
-   and it's kept deliberately separate from these zone boundaries.
+4. **HR zone inputs on Settings — built, then removed.** `hrZoneModel` (%HRmax
+   / %HRR-Karvonen / %LTHR / custom boundaries in bpm) shipped as a
+   reference-only "Heart rate zones" fieldset -- always documented as not
+   feeding any calculation (see the removed doc comments this replaced).
+   Removed on user request once that "doesn't feed anything" fact was
+   surfaced back to them directly ("remove the heart rate zones stuff if we
+   don't use it") -- confirmed via a repo-wide grep that no model file
+   (`solver.ts`, `ceiling.ts`, `hrCalibration.ts`, etc.) ever referenced
+   `hrZoneModel`/`maxHrBpm`/`restHrBpm`/`thresholdHrBpm`/`customHrZones`
+   before deleting them. The HR-effort calibration in stage 3 below is
+   unaffected -- that's the one place HR actually drives a number, and was
+   always a separate mechanism from these zone boundaries.
 5. **Fat/carb-ox curve reuse — validated, not separately built.**
    `predictEffortFractionFromHr(hr, calibration) * ceilingPower(...)` gives
    a power estimate usable anywhere pace-derived power already is,

@@ -75,6 +75,6 @@ export async function runBackfillBatch(fromDateInput: string, onDone: (importedC
     setStatus({ running: false, progress: `Imported ${imported} run${imported === 1 ? "" : "s"}.`, error: null });
     onDone(imported);
   } catch (err) {
-    setStatus({ running: false, progress: null, error: err instanceof Error ? err.message : "Backfill failed." });
+    setStatus({ running: false, progress: null, error: err instanceof Error ? err.message : "Sync failed." });
   }
 }
