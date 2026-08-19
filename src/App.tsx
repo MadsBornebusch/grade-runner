@@ -171,6 +171,10 @@ function App() {
       altitudeAdjustment: formInputs.altitudeAdjustment,
       unpavedCostMultiplier: formInputs.unpavedCostMultiplier,
       surfaceCostMultipliers: formInputs.surfaceCostMultipliers ?? undefined,
+      anaerobicReserve:
+        formInputs.anaerobicReserveKJPerKg !== null
+          ? { reserveKJPerKg: formInputs.anaerobicReserveKJPerKg }
+          : undefined,
     };
   }, [courseResult, formInputs]);
 

@@ -602,6 +602,32 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
             />
           )}
         </details>
+        <details>
+          <summary>Extra effort for short races</summary>
+          <p className="field-group-help">
+            How much harder you can push for a short, all-out effort before settling into your normal sustainable
+            pace. Leave off if unsure.
+          </p>
+          <label className="field field--checkbox">
+            <input
+              type="checkbox"
+              checked={values.anaerobicReserveKJPerKg !== null}
+              onChange={(e) => set("anaerobicReserveKJPerKg", e.target.checked ? 0.3 : null)}
+            />
+            <span>Enable</span>
+          </label>
+          {values.anaerobicReserveKJPerKg !== null && (
+            <NumberField
+              label="Reserve"
+              hint="kJ/kg -- higher lets you hold a harder effort for longer before it runs out"
+              value={values.anaerobicReserveKJPerKg}
+              step={0.05}
+              min={0}
+              max={2}
+              onChange={(v) => set("anaerobicReserveKJPerKg", v)}
+            />
+          )}
+        </details>
       </fieldset>
 
       <fieldset>

@@ -3479,6 +3479,57 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    priority ResultsSummary uses for its headline (target > chosen pacing >
    ceiling).
 
+   **Follow-up (2026-08-19): bounded, prediction-only anaerobic capacity
+   above LT2 for short events.** Even after the fixes above, the user
+   reported the SAME issue persisting at its root: predicted avg HR for
+   Askerspurten (a hilly 10k, actual finish 42min) came out nearly
+   identical to Saksumdal (~2x longer), despite being able to hold a much
+   higher pulse for an all-out 10k. Traced to `ceiling.ts`'s
+   `sustainableFraction` hard-capping the duration-decay curve at
+   `lt2Fraction` for EVERY duration, including durations far shorter than
+   what LT2 (a ~60-minute-effort concept) represents -- with this
+   athlete's fitted curve (f0=0.94, fInf=0.38, tau=250min,
+   lt2Fraction=0.83), the natural decay from f0 doesn't cross back below
+   lt2Fraction until ~55 minutes in, so any race under that gets capped at
+   essentially the same value. Confirmed via `pacingFit.ts:636-647` that
+   this cap is load-bearing for the tau/fInf FIT itself (letting a
+   candidate fInf reach lt2Fraction makes the fit's search region
+   unidentifiable) -- not a bug to just delete.
+
+   **Fix:** new `src/model/anaerobicReserve.ts` -- a bounded, monotonic
+   (spend-only, no W'-balance recovery/reconstitution modeling) reserve of
+   extra work above the LT2-capped ceiling, in kJ/kg (critical-power-
+   literature convention; W' for a real 70kg runner is typically
+   ~15-30kJ, ~0.2-0.4kJ/kg), gated by a closed-form crossover duration
+   derived from the athlete's own f0/fInf/tau/lt2Fraction. Kept
+   structurally isolated from the fitting pipeline (never imported by, or
+   importing from, `pacingFit.ts`/`hrCalibration.ts`/`workAccumulation.ts`
+   -- same restated-defaults-locally discipline those three already use).
+   Threaded through `solver.ts`'s `simulate()` exactly like glycogen
+   state. All three public entry points
+   (`findSustainableTheta`/`findThetaForTargetTime`/`findFlatPacedFinishTime`)
+   gate on a CLEAN (reserve-stripped) duration estimate first and only use
+   the reserve-enabled inputs when that estimate doesn't exceed the
+   crossover -- verified this needed per-function handling, not one shared
+   gate: `findThetaForTargetTime` calls `simulate()` directly at three
+   points that don't route through `findSustainableTheta`'s own gate, and
+   classifying by a `theta=1` probe (rather than the real converged
+   answer) would misreport a long ultra that bonks quickly at theta=1 as
+   "short." This gives an EXACT guarantee, not just a small-diff one: a
+   long race's result with a reserve configured is byte-identical
+   (`toEqual`) to without one, because the long-race path always resolves
+   to literally re-invoking the same core logic with the field stripped --
+   directly tested (18 new tests across `anaerobicReserve.test.ts`,
+   `solver.test.ts`, and one in `finishTimeRange.test.ts` covering the
+   bootstrap-CI call site), plus manual/Playwright confirmation (a 6.2km
+   test course's Theoretical ceiling sped up from 28:00 to 27:38 with a
+   0.3kJ/kg reserve enabled, "100% effort" sublabel unchanged since theta
+   itself doesn't move, only the ceiling it multiplies). Manual entry only
+   in Settings ("Extra effort for short races", plain-language per this
+   app's copy standard) -- auto-fitting from race data, and full
+   W'-balance recovery modeling for mid-race surges, both explicitly
+   deferred as real but separate future work, not attempted here.
+
 ### Open questions
 
 **Resolved with the user (2026-07-23):** segmentation also breaks on a

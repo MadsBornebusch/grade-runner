@@ -173,4 +173,23 @@ describe("predictFinishTimeRange", () => {
     const fewWidth = few!.highFinishTimeS - few!.lowFinishTimeS;
     expect(manyWidth).toBeLessThan(fewWidth);
   });
+
+  it("is unaffected by anaerobicReserve on a genuinely long target course (solver.ts's own long-race guarantee, exercised through this bootstrap's own findSustainableTheta call)", async () => {
+    const races = [1, 3, 6, 10, 15].map((h) => makeConstantEffortPoints(trueParams, h));
+    const raceDates = races.map(() => null);
+    const longSegments = makeFlatSegments(2000); // 100km, comfortably multi-hour
+    const withoutReserve = await predictFinishTimeRange(races, raceDates, trueParams, solverBaseInputs, longSegments, {
+      rng: seededRng(11),
+      bootstrapSamples: 15,
+    });
+    const withReserve = await predictFinishTimeRange(
+      races,
+      raceDates,
+      trueParams,
+      { ...solverBaseInputs, anaerobicReserve: { reserveKJPerKg: 0.3 } },
+      longSegments,
+      { rng: seededRng(11), bootstrapSamples: 15 },
+    );
+    expect(withReserve).toEqual(withoutReserve);
+  });
 });

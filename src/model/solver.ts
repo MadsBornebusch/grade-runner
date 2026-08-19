@@ -9,6 +9,13 @@ import { grossToNet, netToGross } from "./energetics";
 import { type CeilingParams, ceilingPower, maxAerobicPower, sustainableFraction } from "./ceiling";
 import type { DescentExposureBasis } from "./pacingFit";
 import {
+  type AnaerobicReserveParams,
+  type AnaerobicReserveState,
+  availableReserveBoostWPerKg,
+  reserveCrossoverMin,
+  stepAnaerobicReserve,
+} from "./anaerobicReserve";
+import {
   type FuelingParams,
   type SubstrateParams,
   splitPower,
@@ -68,6 +75,19 @@ export interface SolverInputs {
    * identical to before this field existed.
    */
   surfaceCostMultipliers?: Partial<Record<SurfaceCategory, number>>;
+  /**
+   * PLAN.md follow-up (anaerobicReserve.ts): bounded, prediction-only
+   * capacity above the LT2-capped ceiling, for genuinely short events --
+   * see that file's own doc for why this can't live inside
+   * ceilingParams/sustainableFraction itself (the cap is load-bearing for
+   * the tau/fInf fit). Undefined (the default) is byte-for-byte identical
+   * to before this field existed. findSustainableTheta/findThetaForTargetTime/
+   * findFlatPacedFinishTime each strip this back to undefined internally
+   * whenever a race's own predicted duration exceeds
+   * reserveCrossoverMin -- so a long race's result is provably unaffected,
+   * not just approximately so.
+   */
+  anaerobicReserve?: AnaerobicReserveParams;
 }
 
 export interface SegmentResult {
@@ -159,6 +179,7 @@ export function simulate(theta: number, inputs: SolverInputs, opts: SimulateOpti
   const useAltitude = inputs.altitudeAdjustment ?? true;
 
   let glycogen = { glycogenG: inputs.glycogenStoreG };
+  let reserveState: AnaerobicReserveState = { consumedKJPerKg: 0 };
   let cumulativeTimeS = 0;
   const results: SegmentResult[] = [];
   let bonkIndex: number | null = null;
@@ -204,7 +225,19 @@ export function simulate(theta: number, inputs: SolverInputs, opts: SimulateOpti
       inputs.ceilingParams,
     );
     const targetOverride = opts.targetGrossPowerWPerKgOverride?.(seg.index, elapsedMin, elapsedHours, altitudeM);
-    const targetGrossPowerWPerKg = targetOverride ?? theta * ceilingGross;
+    // Same tMin ceilingGross itself just used above -- not a separately
+    // computed elapsedMin. Using the wrong one would break
+    // findFlatPacedFinishTime's "flat effort matched to a race of this
+    // total duration" model (every segment there shares one fixed
+    // opts.flatDurationMin, not each segment's own real elapsed time) and,
+    // with it, the long-race guarantee that function relies on (see
+    // anaerobicReserve.ts and findFlatPacedFinishTime's own gating).
+    const tMinForReserve = opts.flatDurationMin ?? elapsedMin;
+    const reserveBoost = inputs.anaerobicReserve
+      ? availableReserveBoostWPerKg(tMinForReserve, altitudeM, inputs.ceilingParams ?? {}, reserveState, inputs.anaerobicReserve)
+      : 0;
+    const boostedCeilingGross = ceilingGross + reserveBoost;
+    const targetGrossPowerWPerKg = targetOverride ?? theta * boostedCeilingGross;
     const targetNet = Math.max(0, grossToNet(targetGrossPowerWPerKg));
 
     const perCategoryMultiplier =
@@ -252,6 +285,16 @@ export function simulate(theta: number, inputs: SolverInputs, opts: SimulateOpti
       dt,
       reserveG,
     );
+    if (inputs.anaerobicReserve) {
+      // Delivered power came entirely from the HR-driven override when
+      // set, unrelated to theta/reserveBoost -- don't decrement the
+      // reserve for a boost that was never actually the source of the
+      // power. Scaled by theta (not the full reserveBoost) so a
+      // sub-maximal, margin-curve-scaled prediction draws the reserve
+      // down proportionally slower than an all-out one would.
+      const boostDrawnWPerKg = targetOverride != null ? 0 : theta * reserveBoost;
+      reserveState = stepAnaerobicReserve(reserveState, boostDrawnWPerKg, dt, inputs.anaerobicReserve);
+    }
     const bonked = glycogen.glycogenG <= reserveG;
     cumulativeTimeS += dt;
 
@@ -308,7 +351,7 @@ export interface SolverResult {
  * anyway), then bisects between that point and the next infeasible sample
  * above it, where monotonicity genuinely holds.
  */
-export function findSustainableTheta(
+function findSustainableThetaCore(
   inputs: SolverInputs,
   opts: BisectionOptions & { scanSteps?: number } = {},
 ): SolverResult {
@@ -369,6 +412,28 @@ export function findSustainableTheta(
     }
   }
   return { theta: lo, result: best };
+}
+
+/**
+ * Same as findSustainableThetaCore, but gates anaerobicReserve behind a
+ * long-race guarantee: a genuinely long race's result is byte-identical to
+ * not having a reserve configured at all, not just a small numerical
+ * difference. Computes the clean (reserve-stripped) answer FIRST -- this
+ * is also the ONLY correct way to classify "is this race short enough": a
+ * theta=1 probe can't be used for this (a long ultra bonks quickly at
+ * theta=1, which would misreport its duration as short and wrongly enable
+ * the boost) -- only the real converged, feasible answer tells you how
+ * long the race actually is.
+ */
+export function findSustainableTheta(
+  inputs: SolverInputs,
+  opts: BisectionOptions & { scanSteps?: number } = {},
+): SolverResult {
+  if (!inputs.anaerobicReserve) return findSustainableThetaCore(inputs, opts);
+  const baseline = findSustainableThetaCore({ ...inputs, anaerobicReserve: undefined }, opts);
+  const crossover = reserveCrossoverMin(inputs.ceilingParams ?? {});
+  if (!baseline.result.feasible || baseline.result.finishTimeS / 60 > crossover) return baseline;
+  return findSustainableThetaCore(inputs, opts);
 }
 
 export interface FlatPacingOptions {
@@ -451,19 +516,30 @@ export function findFlatPacedFinishTime(inputs: SolverInputs, opts: FlatPacingOp
   const distanceReached = (result: SimulationResult): number =>
     result.segments.length > 0 ? result.segments[result.segments.length - 1].cumulativeDistance3D : 0;
 
+  // Seed off a CLEAN (reserve-stripped) estimate, always -- this is the
+  // only reliable duration signal to classify "is this race short enough
+  // for the reserve" against (findSustainableTheta already does the same
+  // classification internally, but calling it with inputs.anaerobicReserve
+  // still set here would let a borderline race's seed itself come back
+  // slightly boosted, which could then pull loMin below the crossover for
+  // a race whose true self-consistent duration sits above it -- splitting
+  // the scan/bisection's behavior between boosted and unboosted candidates
+  // inconsistently). Once classified, effectiveInputs is used everywhere
+  // below instead of inputs, so a long race's candidate scan never sees
+  // anaerobicReserve at all -- same byte-identical guarantee as
+  // findSustainableTheta's own gating.
+  const seed = findSustainableTheta({ ...inputs, anaerobicReserve: undefined });
+  const seedMin = seed.result.feasible ? seed.result.finishTimeS / 60 : null;
+  const crossover = inputs.anaerobicReserve ? reserveCrossoverMin(inputs.ceilingParams ?? {}) : 0;
+  const effectiveInputs =
+    inputs.anaerobicReserve && seedMin !== null && seedMin <= crossover ? inputs : { ...inputs, anaerobicReserve: undefined };
+
   const actualMinutesFor = (candidateMin: number): { minutes: number; result: SimulationResult } => {
     const theta = opts.marginCurve ? opts.marginCurve(candidateMin / 60) : 1;
-    const result = simulate(theta, inputs, { flatDurationMin: candidateMin });
+    const result = simulate(theta, effectiveInputs, { flatDurationMin: candidateMin });
     return { minutes: result.feasible ? result.finishTimeS / 60 : Infinity, result };
   };
 
-  // Seed the search range off the existing theta-based estimate -- already
-  // in the right ballpark (this mechanism is meant to close a ~20-30% gap,
-  // not an order of magnitude), and avoids a blind search across durations
-  // that could span minutes to days. Falls back to a wide absolute range
-  // if even that seed isn't feasible at all.
-  const seed = findSustainableTheta(inputs);
-  const seedMin = seed.result.feasible ? seed.result.finishTimeS / 60 : null;
   const loMin = seedMin !== null ? seedMin * (opts.loMultiplier ?? 0.4) : 10;
   const hiMin = seedMin !== null ? seedMin * (opts.hiMultiplier ?? 3) : 4000;
 
@@ -556,7 +632,17 @@ export function findThetaForTargetTime(
   const iterations = opts.iterations ?? 30;
   const scanSteps = opts.scanSteps ?? 20;
 
-  const fastest = findSustainableTheta(inputs, { lo: lo0, hi: hi0, iterations, scanSteps });
+  // Gated directly on the target itself -- a free duration signal, no
+  // extra probe needed. Used for every simulate() call below (this
+  // function calls simulate() directly at three points, not just via its
+  // findSustainableTheta seed, so all three need the same stripped inputs
+  // for a long target to stay byte-identical to before this field
+  // existed).
+  const crossover = inputs.anaerobicReserve ? reserveCrossoverMin(inputs.ceilingParams ?? {}) : 0;
+  const effectiveInputs =
+    inputs.anaerobicReserve && targetTimeS / 60 <= crossover ? inputs : { ...inputs, anaerobicReserve: undefined };
+
+  const fastest = findSustainableTheta(effectiveInputs, { lo: lo0, hi: hi0, iterations, scanSteps });
   if (!fastest.result.feasible || fastest.result.finishTimeS >= targetTimeS) {
     return fastest;
   }
@@ -565,7 +651,7 @@ export function findThetaForTargetTime(
   let gentlestResult: SimulationResult | null = null;
   for (let i = 0; i <= scanSteps; i++) {
     const theta = lo0 + ((fastest.theta - lo0) * i) / scanSteps;
-    const result = simulate(theta, inputs);
+    const result = simulate(theta, effectiveInputs);
     if (result.feasible) {
       gentlestTheta = theta;
       gentlestResult = result;
@@ -584,7 +670,7 @@ export function findThetaForTargetTime(
   let hiTheta = fastest.theta;
   for (let i = 1; i <= scanSteps; i++) {
     const theta = gentlestTheta + ((fastest.theta - gentlestTheta) * i) / scanSteps;
-    const result = simulate(theta, inputs);
+    const result = simulate(theta, effectiveInputs);
     if (!result.feasible) continue; // stay defensive; feasibility is expected contiguous above gentlestTheta
     if (result.finishTimeS <= targetTimeS) {
       hiTheta = theta;
@@ -600,7 +686,7 @@ export function findThetaForTargetTime(
   let bestTheta = loTheta;
   for (let i = 0; i < iterations; i++) {
     const mid = (lo + hi) / 2;
-    const midResult = simulate(mid, inputs);
+    const midResult = simulate(mid, effectiveInputs);
     if (!midResult.feasible) {
       hi = mid;
       continue;
