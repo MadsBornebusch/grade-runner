@@ -84,9 +84,9 @@ const DEFAULT_HALF_LIFE_DAYS = 75;
  * for why sorting by estimate descending is itself the intensity filter. */
 const MAX_VO2MAX_ESTIMATES_SHOWN = 3;
 
-function oneYearAgoDateInput(): string {
+function twoYearsAgoDateInput(): string {
   const d = new Date();
-  d.setFullYear(d.getFullYear() - 1);
+  d.setFullYear(d.getFullYear() - 2);
   return d.toISOString().slice(0, 10);
 }
 
@@ -186,7 +186,7 @@ export function RunLibraryPanel({
   const tauCI = manualTauCI ?? runFitStatus.result?.tauCI ?? null;
   const [halfLifeDays, setHalfLifeDays] = useState(DEFAULT_HALF_LIFE_DAYS);
 
-  const [backfillFrom, setBackfillFrom] = useState(() => loadLastBackfillDate() ?? oneYearAgoDateInput());
+  const [backfillFrom, setBackfillFrom] = useState(() => loadLastBackfillDate() ?? twoYearsAgoDateInput());
   // Module-level (see backfillRuns.ts's own doc) -- survives closing and
   // reopening Settings mid-backfill instead of silently losing progress.
   const backfillStatus = useSyncExternalStore(subscribeToBackfill, getBackfillStatus);
@@ -606,15 +606,13 @@ export function RunLibraryPanel({
           </button>
         )}
       </div>
-      <p className="field-group-help">
-        1) Sync runs from Strava below. 2) Confirm your races -- this downloads just those. 3) Hit the fit button.
-      </p>
-
       {stravaConnected && (
         <>
-          <div className="strava-import__link-row">
-            <span>Sync runs since</span>
-            <input type="date" value={backfillFrom} onChange={(e) => setBackfillFrom(e.target.value)} />
+          <div className="run-library__sync-row">
+            <label className="run-library__sync-date">
+              <span>Sync runs since</span>
+              <input type="date" value={backfillFrom} onChange={(e) => setBackfillFrom(e.target.value)} />
+            </label>
             <button
               type="button"
               className={readyCount === 0 ? "button-primary" : "fatox-add"}

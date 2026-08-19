@@ -197,6 +197,22 @@
   gap: 8px;
 }
 
+/* Stacked (date row, then a full-width button below) rather than inline --
+   reads better on a narrow screen than cramming a label, date picker, and
+   button onto one row. */
+.run-library__sync-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.run-library__sync-date {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .strava-import__link-row input {
   flex: 1;
   min-width: 0;
