@@ -203,10 +203,6 @@ function App() {
       altitudeAdjustment: formInputs.altitudeAdjustment,
       unpavedCostMultiplier: formInputs.unpavedCostMultiplier,
       surfaceCostMultipliers: formInputs.surfaceCostMultipliers ?? undefined,
-      anaerobicReserve:
-        formInputs.anaerobicReserveKJPerKg !== null
-          ? { reserveKJPerKg: formInputs.anaerobicReserveKJPerKg }
-          : undefined,
     };
     lastSolverInputsRef.current = built;
     return built;
@@ -243,7 +239,6 @@ function App() {
     formInputs.altitudeAdjustment,
     formInputs.unpavedCostMultiplier,
     formInputs.surfaceCostMultipliers,
-    formInputs.anaerobicReserveKJPerKg,
   ]);
 
   const solverResult = useMemo(() => {

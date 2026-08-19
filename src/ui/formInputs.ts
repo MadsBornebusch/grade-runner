@@ -114,14 +114,6 @@ export interface FormInputs {
   fatOxRateDisplayUnit: "gmin" | "ghour";
   /** Show the raw-vs-processed course debug chart. */
   showCourseDebug: boolean;
-  /** Bounded, prediction-only capacity above the LT2-capped ceiling for a
-   * short, all-out effort (see src/model/anaerobicReserve.ts) -- kJ/kg,
-   * null = off (default). Never touches the tau/fInf fit or any other
-   * calibration; solver.ts strips this back to undefined internally for
-   * any race whose own predicted duration is long enough that the LT2 cap
-   * would have bound anyway, so it can only ever speed up a genuinely
-   * short prediction. */
-  anaerobicReserveKJPerKg: number | null;
 }
 
 // Deliberately old so a genuinely new entry naturally outweighs it via
@@ -166,7 +158,6 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   fatOxSpeedDisplayUnit: "minkm",
   fatOxRateDisplayUnit: "gmin",
   showCourseDebug: false,
-  anaerobicReserveKJPerKg: null,
 };
 
 const STORAGE_KEY = "grade-runner:inputs";
