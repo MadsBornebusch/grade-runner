@@ -456,7 +456,34 @@ export function RunLibraryPanel({
       estimates: results.sort((a, b) => b.estimateMlPerKgPerMin - a.estimateMlPerKgPerMin).slice(0, MAX_VO2MAX_ESTIMATES_SHOWN),
       newEstimabilityVerdicts,
     };
-  }, [dedupedRuns, formInputs]);
+    // Narrow, explicit field list -- same discipline as
+    // thresholdHrCalibrationFitResult just above -- rather than the whole
+    // formInputs object. This loop runs a full runPipeline+analyzeRun per
+    // downloaded run (hundreds for an established library), so depending
+    // on all of formInputs meant literally any keystroke anywhere in
+    // Settings (a display-unit toggle, a split length, an unrelated field)
+    // re-ran the whole thing -- the actual cause of Settings feeling like
+    // it hangs while typing. Only the fields resolveCeilingParams/
+    // resolveGlycogenStoreG/this loop's own body actually read belong here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    dedupedRuns,
+    formInputs.bodyMassKg,
+    formInputs.vo2MaxHistory,
+    formInputs.lt1Fraction,
+    formInputs.lt2Fraction,
+    formInputs.lt1PaceMinPerKm,
+    formInputs.lt2PaceMinPerKm,
+    formInputs.walkMaxMs,
+    formInputs.f0,
+    formInputs.fInf,
+    formInputs.tauMin,
+    formInputs.pacingCurveEnabled,
+    formInputs.durabilityDriftPerHour,
+    formInputs.intakeGPerH,
+    formInputs.glycogenGPerKg,
+    formInputs.altitudeAdjustment,
+  ]);
 
   const vo2MaxEstimates = vo2MaxComputation.estimates;
 
@@ -718,28 +745,32 @@ export function RunLibraryPanel({
         </div>
       )}
 
-      {fitRan && transitGapCount > 0 && (
-        <p className="field-group-note">
-          Detected and cropped out {transitGapCount} transit gap{transitGapCount === 1 ? "" : "s"} (GPS jumps far
-          faster than running is possible, typically a watch left running across a train/bus/car leg) -- the genuine
-          running before and after each gap was still used, just as separate legs.
-        </p>
-      )}
-
-      {fitRan && excludedForDurationCount > 0 && (
-        <p className="field-group-note">
-          Left out {excludedForDurationCount} run{excludedForDurationCount === 1 ? "" : "s"} under{" "}
-          {(DURABILITY_MIN_DURATION_S / 60).toFixed(0)} minutes -- too short to say anything real about fatigue-decay
-          over an ultra-scale race, and pooling them in anyway can pull tau toward an implausibly small value rather
-          than just having no effect.
-        </p>
-      )}
-
       {fitRan && !fitResult && (
         <p className="warning">
           Not enough moving time across your stored runs to fit a trend -- add longer recordings, or more of them.
         </p>
       )}
+
+      {fitRan && (
+        <details className="run-library__fit-details">
+          <summary>Fit details</summary>
+
+          {transitGapCount > 0 && (
+            <p className="field-group-note">
+              Detected and cropped out {transitGapCount} transit gap{transitGapCount === 1 ? "" : "s"} (GPS jumps far
+              faster than running is possible, typically a watch left running across a train/bus/car leg) -- the
+              genuine running before and after each gap was still used, just as separate legs.
+            </p>
+          )}
+
+          {excludedForDurationCount > 0 && (
+            <p className="field-group-note">
+              Left out {excludedForDurationCount} run{excludedForDurationCount === 1 ? "" : "s"} under{" "}
+              {(DURABILITY_MIN_DURATION_S / 60).toFixed(0)} minutes -- too short to say anything real about
+              fatigue-decay over an ultra-scale race, and pooling them in anyway can pull tau toward an implausibly
+              small value rather than just having no effect.
+            </p>
+          )}
 
       {fitResult && (
         <>
@@ -1048,6 +1079,8 @@ export function RunLibraryPanel({
             })}
           </div>
         </div>
+      )}
+        </details>
       )}
     </div>
   );
