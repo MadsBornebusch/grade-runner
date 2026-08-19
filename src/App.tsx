@@ -172,11 +172,26 @@ function App() {
   // PaceEffortChart), so both need it available at once. Since useMemo is
   // synchronous, switching resultMode itself is still instant -- no
   // re-upload, no spinner.
+  // Settings is a full-screen overlay -- the Results page underneath isn't
+  // visible while it's open, so there's nothing to show a fresh solve to.
+  // Frozen at the last computed value (by reference) while settingsOpen is
+  // true, so this and every downstream memo keyed on solverInputs
+  // (solverResult, chosenPacingResult, bestDemonstratedResult,
+  // targetTimeResult, chartPoints, planSummaryStats) skip the whole
+  // theta-bisection cascade for every keystroke made in Settings, not just
+  // the fields that don't feed it. Catches up in one solve, using
+  // whatever the final formInputs ended up being, the moment Settings
+  // closes (settingsOpen flipping is itself a dependency below).
+  const lastSolverInputsRef = useRef<SolverInputs | null>(null);
   const solverInputs = useMemo<SolverInputs | null>(() => {
-    if (!courseResult || courseResult.segments.length === 0) return null;
+    if (settingsOpen) return lastSolverInputsRef.current;
+    if (!courseResult || courseResult.segments.length === 0) {
+      lastSolverInputsRef.current = null;
+      return null;
+    }
     const { lt1Fraction, lt2Fraction } = resolveLt1Lt2Fractions(formInputs);
     const { x0, k, intensityIsAbsolutePower } = resolveSubstrateAnchors({ ...formInputs, lt1Fraction, lt2Fraction });
-    return {
+    const built: SolverInputs = {
       segments: courseResult.segments,
       bodyMassKg: formInputs.bodyMassKg,
       ceilingParams: resolveCeilingParams(formInputs),
@@ -193,6 +208,8 @@ function App() {
           ? { reserveKJPerKg: formInputs.anaerobicReserveKJPerKg }
           : undefined,
     };
+    lastSolverInputsRef.current = built;
+    return built;
     // Narrow, explicit field list -- the whole solver cascade downstream
     // of this (solverResult, chosenPacingResult, bestDemonstratedResult,
     // targetTimeResult, chartPoints) re-runs whenever this reference
@@ -204,6 +221,7 @@ function App() {
     // resolveGlycogenStoreG).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    settingsOpen,
     courseResult,
     formInputs.bodyMassKg,
     formInputs.vo2MaxHistory,
@@ -264,9 +282,18 @@ function App() {
   // Shared by both chart-point builders below -- undefined (not applied)
   // whenever no HR-effort calibration has been fit yet, so estimated HR
   // simply doesn't appear rather than showing a meaningless number.
+  // Same freeze as solverInputs/analysisInputs above -- feeds chartPoints's
+  // own dependency array, so an unnecessary new reference here would still
+  // re-run buildChartPoints on every keystroke in Settings even with
+  // solverInputs itself frozen.
+  const lastHrEstimateInputsRef = useRef<HrEstimateInputs | undefined>(undefined);
   const hrEstimateInputs = useMemo<HrEstimateInputs | undefined>(() => {
-    if (formInputs.hrEffortCalibrationSlope === null || formInputs.hrEffortCalibrationIntercept === null) return undefined;
-    return {
+    if (settingsOpen) return lastHrEstimateInputsRef.current;
+    if (formInputs.hrEffortCalibrationSlope === null || formInputs.hrEffortCalibrationIntercept === null) {
+      lastHrEstimateInputsRef.current = undefined;
+      return undefined;
+    }
+    const built: HrEstimateInputs = {
       ceilingParams: resolveCeilingParams(formInputs),
       altitudeAdjustment: formInputs.altitudeAdjustment,
       calibration: {
@@ -277,11 +304,12 @@ function App() {
         raceCount: 0,
       },
     };
-    // Narrow field list -- feeds chartPoints's own dependency array, so an
-    // unnecessary new reference here re-runs buildChartPoints on every
-    // keystroke in any unrelated field too.
+    lastHrEstimateInputsRef.current = built;
+    return built;
+    // Narrow field list -- see comment above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    settingsOpen,
     formInputs.hrEffortCalibrationSlope,
     formInputs.hrEffortCalibrationIntercept,
     formInputs.vo2MaxHistory,
@@ -324,18 +352,23 @@ function App() {
 
   const planSummaryStats = useMemo(() => summarizeChartPoints(chartPoints), [chartPoints]);
 
+  // Same "Settings is a full-screen overlay, nothing to show a fresh
+  // rebuild to" freeze as solverInputs above.
+  const lastAnalysisInputsRef = useRef<AnalysisInputs | null>(null);
   const analysisInputs = useMemo<AnalysisInputs | null>(() => {
+    if (settingsOpen) return lastAnalysisInputsRef.current;
     if (
       resultMode !== "analysis" ||
       !courseResult ||
       !courseResult.hasTimestamps ||
       courseResult.segments.length === 0
     ) {
+      lastAnalysisInputsRef.current = null;
       return null;
     }
     const { lt1Fraction, lt2Fraction } = resolveLt1Lt2Fractions(formInputs);
     const { x0, k, intensityIsAbsolutePower } = resolveSubstrateAnchors({ ...formInputs, lt1Fraction, lt2Fraction });
-    return {
+    const built: AnalysisInputs = {
       bodyMassKg: formInputs.bodyMassKg,
       // Full ceilingParams, matching solverInputs below -- analyzeRun's
       // effortFraction calls ceilingPower (not just maxAerobicPower), so it
@@ -355,9 +388,12 @@ function App() {
       unpavedCostMultiplier: formInputs.unpavedCostMultiplier,
       surfaceCostMultipliers: formInputs.surfaceCostMultipliers ?? undefined,
     };
+    lastAnalysisInputsRef.current = built;
+    return built;
     // Narrow field list -- same reasoning as solverInputs above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    settingsOpen,
     resultMode,
     courseResult,
     formInputs.bodyMassKg,
