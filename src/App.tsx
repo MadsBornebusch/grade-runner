@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { GpxPoint } from "./gpx/pipeline";
 import { rawCourseStats, runPipeline } from "./gpx/pipeline";
 import { findFlatPacedFinishTime, findSustainableTheta, findThetaForTargetTime, type SolverInputs } from "./model/solver";
@@ -40,6 +40,7 @@ import {
   type Vo2MaxEntry,
 } from "./ui/formInputs";
 import { useStravaSession } from "./ui/useStravaSession";
+import { getRunFitStatus, subscribeToRunFit } from "./ui/runFitBatch";
 import "./App.css";
 
 type ResultMode = "planning" | "analysis";
@@ -49,6 +50,22 @@ function App() {
   const [formInputs, setFormInputs] = useState(() => loadFormInputs());
   const { connected: stravaConnected } = useStravaSession();
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Fit runs as a module-level process (runFitBatch.ts), independent of
+  // whether Settings/RunLibraryPanel is mounted -- see that file's own
+  // doc. This just surfaces a badge on the gear icon when a fit finished
+  // (success or error) while Settings was closed, so closing it to do
+  // something else doesn't mean losing track of when the result lands.
+  // Read here (App.tsx never unmounts) rather than in SettingsModal
+  // itself, which does unmount when closed.
+  const runFitStatus = useSyncExternalStore(subscribeToRunFit, getRunFitStatus);
+  const [hasUnseenFitResult, setHasUnseenFitResult] = useState(false);
+  const wasFitRunningRef = useRef(runFitStatus.running);
+  useEffect(() => {
+    const justFinished = wasFitRunningRef.current && !runFitStatus.running && (runFitStatus.result || runFitStatus.error);
+    wasFitRunningRef.current = runFitStatus.running;
+    if (justFinished && !settingsOpen) setHasUnseenFitResult(true);
+  }, [runFitStatus, settingsOpen]);
 
   // The races/raceDates behind the Settings modal's most recent tau/fInf
   // fit -- lifted up here (rather than kept local to RunLibraryPanel) so
@@ -374,10 +391,14 @@ function App() {
         <button
           type="button"
           className="app__settings-button"
-          onClick={() => setSettingsOpen(true)}
-          aria-label="Open settings"
+          onClick={() => {
+            setSettingsOpen(true);
+            setHasUnseenFitResult(false);
+          }}
+          aria-label={hasUnseenFitResult ? "Open settings -- your fit result is ready" : "Open settings"}
         >
           ⚙
+          {hasUnseenFitResult && <span className="app__settings-badge" aria-hidden="true" />}
         </button>
       </header>
 
