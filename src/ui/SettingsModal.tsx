@@ -45,15 +45,23 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
+  // Always the latest onClose, without needing it in the effect's own
+  // deps below -- App.tsx passes this as a fresh inline arrow function on
+  // every render, so including it directly used to re-run the effect (and
+  // re-steal focus onto the close button) on every keystroke anywhere in
+  // Settings, not just when the modal actually opened.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!open) return;
     closeButtonRef.current?.focus();
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
