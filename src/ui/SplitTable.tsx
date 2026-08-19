@@ -1,6 +1,7 @@
 import type { ChartPoint } from "./chartData";
 import { formatDuration, formatPace } from "./format";
 import { computeSplits } from "./splits";
+import { useNumberField } from "./useNumberField";
 
 interface SplitTableProps {
   points: ChartPoint[];
@@ -13,6 +14,12 @@ interface SplitTableProps {
 export function SplitTable({ points, splitLengthKm = 5, onSplitLengthChange }: SplitTableProps) {
   const splits = computeSplits(points, splitLengthKm);
   const hasHrEstimate = splits.some((s) => s.avgEstimatedHeartRateBpm !== null);
+  // Only committed once the typed text parses to a positive number -- same
+  // buffering useNumberField exists for -- so clearing the field to retype
+  // it doesn't get reverted mid-edit by the >0 guard rejecting "".
+  const lengthField = useNumberField(splitLengthKm, (v) => {
+    if (v > 0) onSplitLengthChange?.(v);
+  });
 
   return (
     <div className="split-table">
@@ -21,16 +28,7 @@ export function SplitTable({ points, splitLengthKm = 5, onSplitLengthChange }: S
         {onSplitLengthChange && (
           <label className="split-table__length-control">
             every
-            <input
-              type="number"
-              min={0.1}
-              step={0.5}
-              value={splitLengthKm}
-              onChange={(e) => {
-                const v = e.target.valueAsNumber;
-                if (v > 0) onSplitLengthChange(v);
-              }}
-            />
+            <input type="number" min={0.1} step={0.5} {...lengthField} />
             km
           </label>
         )}

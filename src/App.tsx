@@ -193,7 +193,40 @@ function App() {
           ? { reserveKJPerKg: formInputs.anaerobicReserveKJPerKg }
           : undefined,
     };
-  }, [courseResult, formInputs]);
+    // Narrow, explicit field list -- the whole solver cascade downstream
+    // of this (solverResult, chosenPacingResult, bestDemonstratedResult,
+    // targetTimeResult, chartPoints) re-runs whenever this reference
+    // changes, so depending on all of formInputs meant every keystroke in
+    // ANY field -- including ones this doesn't even read, like the
+    // display-only split length on the Results page -- re-ran the full
+    // solver. Only list fields actually read above (directly or via
+    // resolveLt1Lt2Fractions/resolveSubstrateAnchors/resolveCeilingParams/
+    // resolveGlycogenStoreG).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    courseResult,
+    formInputs.bodyMassKg,
+    formInputs.vo2MaxHistory,
+    formInputs.lt1Fraction,
+    formInputs.lt2Fraction,
+    formInputs.lt1PaceMinPerKm,
+    formInputs.lt2PaceMinPerKm,
+    formInputs.walkMaxMs,
+    formInputs.fatOxPoints,
+    formInputs.f0,
+    formInputs.fInf,
+    formInputs.tauMin,
+    formInputs.pacingCurveEnabled,
+    formInputs.durabilityDriftPerHour,
+    formInputs.foPeakGPerMin,
+    formInputs.intakeGPerH,
+    formInputs.glycogenGPerKg,
+    formInputs.forceWalkAboveGrade,
+    formInputs.altitudeAdjustment,
+    formInputs.unpavedCostMultiplier,
+    formInputs.surfaceCostMultipliers,
+    formInputs.anaerobicReserveKJPerKg,
+  ]);
 
   const solverResult = useMemo(() => {
     if (!solverInputs) return null;
@@ -244,7 +277,26 @@ function App() {
         raceCount: 0,
       },
     };
-  }, [formInputs]);
+    // Narrow field list -- feeds chartPoints's own dependency array, so an
+    // unnecessary new reference here re-runs buildChartPoints on every
+    // keystroke in any unrelated field too.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    formInputs.hrEffortCalibrationSlope,
+    formInputs.hrEffortCalibrationIntercept,
+    formInputs.vo2MaxHistory,
+    formInputs.lt1Fraction,
+    formInputs.lt2Fraction,
+    formInputs.lt1PaceMinPerKm,
+    formInputs.lt2PaceMinPerKm,
+    formInputs.walkMaxMs,
+    formInputs.f0,
+    formInputs.fInf,
+    formInputs.tauMin,
+    formInputs.pacingCurveEnabled,
+    formInputs.durabilityDriftPerHour,
+    formInputs.altitudeAdjustment,
+  ]);
 
   const targetTimeS = useMemo(() => parseDurationToSeconds(targetTimeInput), [targetTimeInput]);
 
@@ -303,7 +355,31 @@ function App() {
       unpavedCostMultiplier: formInputs.unpavedCostMultiplier,
       surfaceCostMultipliers: formInputs.surfaceCostMultipliers ?? undefined,
     };
-  }, [resultMode, courseResult, formInputs]);
+    // Narrow field list -- same reasoning as solverInputs above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    resultMode,
+    courseResult,
+    formInputs.bodyMassKg,
+    formInputs.vo2MaxHistory,
+    formInputs.lt1Fraction,
+    formInputs.lt2Fraction,
+    formInputs.lt1PaceMinPerKm,
+    formInputs.lt2PaceMinPerKm,
+    formInputs.walkMaxMs,
+    formInputs.fatOxPoints,
+    formInputs.f0,
+    formInputs.fInf,
+    formInputs.tauMin,
+    formInputs.pacingCurveEnabled,
+    formInputs.durabilityDriftPerHour,
+    formInputs.foPeakGPerMin,
+    formInputs.intakeGPerH,
+    formInputs.glycogenGPerKg,
+    formInputs.altitudeAdjustment,
+    formInputs.unpavedCostMultiplier,
+    formInputs.surfaceCostMultipliers,
+  ]);
 
   const analysisResult = useMemo(() => {
     if (!courseResult || !analysisInputs) return null;
