@@ -3530,6 +3530,115 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    W'-balance recovery modeling for mid-race surges, both explicitly
    deferred as real but separate future work, not attempted here.
 
+   **Follow-up (2026-08-20): reserve removed -- wasn't the actual lever,
+   and the real gap is inside the HR calibration itself.** User reported
+   the anaerobic reserve "doesn't work very well ... I have no idea what a
+   sane value would be," and still wanted avg predicted HR for a 10k
+   around LT2, not ~10bpm under. Root-caused with real numbers instead of
+   more modeling: `reserveCrossoverMin` for this athlete's fitted params
+   (f0=0.94, fInf=0.38, tau=250min, lt2Fraction=0.83) computes to ~55min --
+   longer than the 42min race in question, so `sustainableFraction` is
+   *already* flat at the LT2 cap for the entire race, and the reserve
+   never activates. It was never the right tool for this complaint.
+   Removed entirely (`anaerobicReserve.ts` deleted, `solver.ts`'s
+   `SolverInputs.anaerobicReserve`/threading/gating removed, UI field
+   removed, tests removed) -- 463 tests pass (back to the pre-reserve
+   baseline count), `tsc -b` clean.
+
+   Real cause, confirmed via a leave-one-out check against 322 cached real
+   activities (not synthetic data): at theta=1 on a fully LT2-capped
+   segment, `effortFraction = grossPower/ceiling` is exactly 1.0 by
+   construction -- the same effortFraction the LT2 anchor itself
+   represents. So displayed HR at full effort is literally
+   `calibration(1.0)`. `THRESHOLD_ANCHOR_WEIGHT_FRACTION = 0.25` blends
+   the anchor into the SAME regression as the pooled race data rather than
+   forcing the line through it, so the fit doesn't reproduce the athlete's
+   own entered LT2 HR at effortFraction=1.0. Measured: production predicts
+   159.7bpm at ef=1.0 vs. the entered 165bpm -- a real ~5bpm calibration
+   gap that (since Askerspurten runs close to LT2 effort throughout) shows
+   up as a near-uniform ~10bpm bias across the whole race (bias≈MAE≈
+   -10.06bpm on Askerspurten's own splits, leave-one-out).
+
+   Tested four candidate fixes, all validated the same way (leave-one-out
+   MAE + bias against Askerspurten/Ecotrail 80/Soria Moria, using the
+   athlete's real cached Strava data, not synthetic points):
+
+   1. **Full anchor lock** (force the regression through the LT2 point
+      exactly, fit only the slope from pooled data): halves the
+      Askerspurten gap (predHR@ef=1.0 exactly 165, bias -10.06→-4.42bpm)
+      but measurably worsens Ecotrail 80 (MAE 24.49→28.91bpm, bias
+      +9.92→+14.61bpm) -- pivoting the line around the high-effort end
+      pulls the low-effort end away from where the long-only + start-trim
+      fixes (this section, earlier) tuned it. A real tradeoff, not a free
+      win -- surfaced to the user rather than silently picked.
+   2. **A non-linear (piecewise) fit**, user's own suggestion after seeing
+      the straight-line tradeoff: identical to today's line below a knot
+      (weighted-median effortFraction of the pool), bent to hit the LT2
+      anchor above it -- built specifically to guarantee zero change to
+      well-supported low-effort predictions. Landed within ~2bpm of the
+      plain full-lock result on all three races; no better. Root cause:
+      individual SEGMENTS within a long ultra (a steep climb) legitimately
+      reach near-max effortFraction too, so a curve keyed on effortFraction
+      alone can't cleanly separate "short race" from "long race" data --
+      the separation would need to be duration-of-sustained-effort based,
+      a bigger redesign not attempted.
+   3. **Recovery-point downweighting** (user's idea, second implementation
+      after the first version's bug was caught before shipping): flag a
+      point where smoothed power has dropped well below its own trailing
+      3-minute peak WHILE heart rate is still near ITS OWN trailing peak --
+      the literal HR-decay-lag signature (power fell, pulse hasn't caught
+      up) -- and downweight it to 15% in the fit. (A first attempt that
+      tested only the power-drop half of the condition, without the HR
+      condition, was a selection-bias bug in disguise: it deleted genuine
+      settled-easy-running data too, not just lag artifacts, and produced
+      a misleadingly dramatic "fix" that didn't survive the corrected
+      detector.) With the real two-part detector: only 7.4% of pooled time
+      flags, Askerspurten's bias improves (-10.06→-6.30bpm combined with
+      the anchor) but its own bin-to-bin MAE gets slightly worse (10.06→
+      14.18bpm, more spread), and Ecotrail 80 still costs (MAE 24.49→
+      26.44bpm). A real, smaller, honest effect -- not an escape from the
+      same short/long tension, just a different lever on it.
+   4. **Admitting short "hard session" training runs whole** (not just
+      confirmed races) into the pool, to give the near-LT2 end real
+      support instead of a single lab point -- the user's original
+      intuition ("don't we want a spread of intensities?"). Tested
+      properly per an early correction: whole sessions (reps AND
+      recoveries together) through the SAME early-window/start-trim/
+      smoothing path real races use, gated by session-level admission
+      (duration + a genuine CONTIGUOUS near-max streak, not accumulated
+      scattered minutes -- the first version of this gate admitted 148 of
+      157 candidate sessions, i.e. almost every ordinary trail run,
+      because 5+ min of scattered >=0.85-effort readings turns out to be
+      common on hilly terrain, not exclusive to real interval work).
+      Every variant tried -- unrestricted admission, a stricter
+      contiguous-streak gate, and a THRESHOLD_ANCHOR_WEIGHT_FRACTION-style
+      total-weight cap on the admitted sessions (the fairest, most bounded
+      version) -- either degraded the long races, produced a result that
+      flipped sign depending on the arbitrary admission threshold (helped
+      Askerspurten at one setting, hurt it at another, with no principled
+      way to choose), or hit outright numerical instability (predicted HR
+      at LT2 swinging to <0bpm or >80,000bpm from a near-zero regression
+      slope on an ill-conditioned narrow-band-heavy sample). This
+      reproduces, on this athlete's own real data, the exact swamping
+      failure mode `poolIndicesInformativeAtReference`'s long-only
+      restriction was originally built to prevent (see this section's
+      earlier "long-only" history) -- confirms the gate is doing real
+      work, not proof the underlying intuition is wrong, just that this
+      pooling mechanism can't safely admit short data without it.
+
+   **Not yet shipped as of this writing.** All four options were measured
+   against real data via ad-hoc scripts (not committed) rather than
+   implemented in `hrCalibration.ts` -- the reserve removal is the only
+   code change from this investigation that's actually landed. The three
+   surviving candidates (bump `THRESHOLD_ANCHOR_WEIGHT_FRACTION`, full
+   anchor-lock, or recovery-downweight+anchor) land within a few bpm of
+   each other on this athlete's data; recovery-downweighting is real but
+   adds real machinery (two trailing-max series, a decay/proximity
+   threshold pair) for a smaller edge than the much simpler weight-bump or
+   full-lock options. Session-admission is closed as a dead end for now,
+   not a future-work item -- would need a genuinely different (likely
+   non-linear or duration-aware) model to revisit productively.
+
 ### Open questions
 
 **Resolved with the user (2026-07-23):** segmentation also breaks on a
