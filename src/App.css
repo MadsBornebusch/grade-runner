@@ -526,6 +526,41 @@
   gap: 8px;
 }
 
+.add-course-button {
+  width: 100%;
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.generic-course {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 12px 0;
+}
+
+.generic-course__control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.generic-course__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.generic-course__row input {
+  width: 90px;
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+}
+
 .course-library__select {
   flex: 1;
   text-align: left;

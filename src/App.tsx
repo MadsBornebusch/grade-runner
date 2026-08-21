@@ -7,21 +7,19 @@ import { analyzeRun, type AnalysisInputs } from "./model/analysis";
 import { predictPowerFromHr } from "./model/hrCalibration";
 import { attachSurfaceData, type ValhallaSurfaceEdge } from "./model/surfaceExposure";
 import { fetchSurfaceEdges } from "./ui/surfaceLookup";
-import { GpxUpload } from "./ui/GpxUpload";
+import { AddCoursePanel } from "./ui/AddCoursePanel";
 import { CourseLibraryPanel } from "./ui/CourseLibraryPanel";
 import { saveCourse } from "./storage/courseLibrary";
-import { CourseProcessingFields, FuelingFields } from "./ui/InputsPanel";
+import { FuelingFields } from "./ui/InputsPanel";
 import { PageCarousel } from "./ui/PageCarousel";
 import { ElevationProfileChart } from "./ui/ElevationProfileChart";
 import { FinishTimeRangePanel } from "./ui/FinishTimeRangePanel";
-import { CourseDebugChart } from "./ui/CourseDebugChart";
 import { FuelChart } from "./ui/FuelChart";
 import { SubstrateChart } from "./ui/SubstrateChart";
 import { PaceEffortChart } from "./ui/PaceEffortChart";
 import { PacingFitPanel } from "./ui/PacingFitPanel";
 import { PowerHrChart } from "./ui/PowerHrChart";
 import { SettingsModal } from "./ui/SettingsModal";
-import { StravaImport } from "./ui/StravaImport";
 import { buildEffortTrendPoints, type EffortTrendPoint } from "./model/pacingFit";
 import { SplitTable } from "./ui/SplitTable";
 import { ResultsSummary } from "./ui/ResultsSummary";
@@ -49,6 +47,7 @@ function App() {
   const [formInputs, setFormInputs] = useState(() => loadFormInputs());
   const { connected: stravaConnected } = useStravaSession();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [addCourseOpen, setAddCourseOpen] = useState(false);
 
   // Fit runs as a module-level process (runFitBatch.ts), independent of
   // whether Settings/RunLibraryPanel is mounted -- see that file's own
@@ -495,46 +494,10 @@ function App() {
                     setFileName(name);
                   }}
                 />
-                <GpxUpload
-                  onLoaded={(points, name) => {
-                    setRawPoints(points);
-                    setFileName(name);
-                    void saveCourse(name, points).then(() => setCourseLibraryVersion((v) => v + 1));
-                  }}
-                />
-                <StravaImport
-                  onImport={(points, name, stravaId) => {
-                    setRawPoints(points);
-                    setFileName(name);
-                    void saveCourse(name, points, stravaId !== undefined ? `strava:${stravaId}` : undefined).then(() =>
-                      setCourseLibraryVersion((v) => v + 1),
-                    );
-                  }}
-                />
-                {courseResult && (
-                  <>
-                    {fileName && <p className="course-name">{fileName}</p>}
-                    {!courseResult.hasElevation && (
-                      <p className="warning">No elevation data found — treating the course as flat.</p>
-                    )}
-                    <p className="course-stats">
-                      {(courseResult.totalDistance3D / 1000).toFixed(1)} km &middot;{" "}
-                      {courseResult.totalElevationGain.toFixed(0)} m gain
-                    </p>
-                    <CourseProcessingFields values={formInputs} onChange={setFormInputs} />
-                    <FuelingFields values={formInputs} onChange={setFormInputs} />
-                    {formInputs.showCourseDebug && rawStats && (
-                      <CourseDebugChart
-                        raw={rawStats}
-                        processed={debugProcessedPoints}
-                        processedDistanceM={courseResult.totalDistance3D}
-                        processedElevationGain={courseResult.totalElevationGain}
-                        segmentLengthM={formInputs.segmentLengthM}
-                        smoothingWindowM={formInputs.smoothingWindowM}
-                      />
-                    )}
-                  </>
-                )}
+                <button type="button" className="button-primary add-course-button" onClick={() => setAddCourseOpen(true)}>
+                  + Add course
+                </button>
+                <FuelingFields values={formInputs} onChange={setFormInputs} />
               </>
             ),
           },
@@ -712,6 +675,24 @@ function App() {
           setFormInputs((prev) => ({ ...prev, vo2MaxHistory: [...prev.vo2MaxHistory, entry] }))
         }
         onRacesFitted={(races, raceDates) => setFittedRaces({ races, raceDates })}
+      />
+
+      <AddCoursePanel
+        open={addCourseOpen}
+        onClose={() => setAddCourseOpen(false)}
+        onCourseLoaded={(points, name, stravaId) => {
+          setRawPoints(points);
+          setFileName(name);
+          void saveCourse(name, points, stravaId !== undefined ? `strava:${stravaId}` : undefined).then(() =>
+            setCourseLibraryVersion((v) => v + 1),
+          );
+        }}
+        formInputs={formInputs}
+        onFormInputsChange={setFormInputs}
+        courseResult={courseResult}
+        fileName={fileName}
+        rawStats={rawStats}
+        debugProcessedPoints={debugProcessedPoints}
       />
     </div>
   );
