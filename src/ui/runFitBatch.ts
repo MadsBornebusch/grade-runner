@@ -16,12 +16,12 @@ import type { CourseSegment, GpxPoint } from "../gpx/pipeline";
 import { runPipeline } from "../gpx/pipeline";
 import { splitAtTransitGaps } from "../gpx/transitGap";
 import { analyzeRun } from "../model/analysis";
-import type { CeilingParams } from "../model/ceiling";
+import { maxAerobicPower, type CeilingParams } from "../model/ceiling";
 import {
-  buildThresholdAnchorPoints,
-  fitHrToEffortCalibrationAcrossRaces,
-  fitHrToEffortCalibrationFromThresholds,
-  type HrEffortCalibration,
+  buildThresholdPowerAnchorPoints,
+  fitHrToPowerCalibrationAcrossRaces,
+  fitHrToPowerCalibrationFromThresholds,
+  type HrPowerCalibration,
 } from "../model/hrCalibration";
 import {
   bootstrapTauConfidenceInterval,
@@ -92,7 +92,7 @@ export interface RunFitResult {
   fInfFitResult: FInfTauFitResult | null;
   safeFitTier: SafeFitResult["tier"] | null;
   surfaceFit: SurfaceCostMultiplierFitResult | null;
-  hrCalibrationFit: HrEffortCalibration | null;
+  hrCalibrationFit: HrPowerCalibration | null;
   marginFit: PacingMarginFitResult | null;
   transitGapCount: number;
   excludedForDurationCount: number;
@@ -246,24 +246,27 @@ export async function runFitBatch(
       callbacks.onApplySurfaceCostMultipliers(surfaceFit.surfaceCostMultipliers);
     }
 
-    // HR-to-effort calibration: pools (HR, effort) points across the same
+    // HR-to-power calibration: pools (HR, power) points across the same
     // races, restricted internally to each race's own early/low-drift
-    // window, blended with the athlete's own lab-measured LT1/LT2 (+fat-ox)
-    // anchor points when available. The race pool alone can end up
-    // entirely long-race-only for an athlete with several ultras confirmed
-    // (see fitHrToEffortCalibrationAcrossRaces's own doc on why) -- the
-    // near-LT2/short-race end of the line would then be pure extrapolation
-    // from lower-effort long-race data with no anchor of its own. Blending
-    // in the real LT1/LT2 measurement fixes that end without reopening the
-    // short-race-swamping bug the long-race restriction exists to prevent
-    // (a handful of anchor points can't outvote real race history the way
-    // dozens of short races could -- see THRESHOLD_ANCHOR_WEIGHT_FRACTION).
+    // window, blended with the athlete's own lab-measured LT1 (+fat-ox)
+    // anchor points when available, and LOCKED exactly through the
+    // athlete's own lab-measured LT2 pace+HR when available (see
+    // fitHrToPowerCalibrationAcrossRaces's own doc: unlike the old
+    // effortFraction fit's 25%-blend treatment for every anchor, locking
+    // through LT2 specifically was checked leave-one-out against 3 real
+    // races and improved all three simultaneously, with no tradeoff). The
+    // race pool alone can end up entirely long-race-only for an athlete
+    // with several ultras confirmed -- the near-LT2/short-race end of the
+    // line would then be pure extrapolation from lower-power long-race
+    // data with no anchor of its own; the LT2 lock fixes that end without
+    // reopening the short-race-swamping bug the long-race restriction
+    // exists to prevent.
     // Uses the RESOLVED lt1Fraction/lt2Fraction (honoring a pace-entered
     // threshold), not the raw formInputs fields directly -- those stay at
     // their default whenever the athlete entered LT1/LT2 as pace instead of
     // a fraction, which would silently anchor the wrong point.
     const { lt1Fraction, lt2Fraction } = resolveLt1Lt2Fractions(formInputs);
-    const thresholdAnchors = buildThresholdAnchorPoints(
+    const thresholdAnchors = buildThresholdPowerAnchorPoints(
       {
         lt1Fraction,
         lt2Fraction,
@@ -274,13 +277,19 @@ export async function runFitBatch(
       },
       safeFit.ceilingParams,
     );
+    const maxAerobic = maxAerobicPower(0, safeFit.ceilingParams);
+    const lt2Anchor =
+      formInputs.lt2HeartRateBpm !== null && maxAerobic > 0
+        ? { hr: formInputs.lt2HeartRateBpm, powerWPerKg: lt2Fraction * maxAerobic }
+        : undefined;
     // Auto-apply is gated on rSquared -- a low rSquared is a legitimate
-    // result (HR may just not track this athlete's effort well), not a
+    // result (HR may just not track this athlete's power well), not a
     // reason to lower the bar until it passes.
-    const hrCalibrationFit = fitHrToEffortCalibrationAcrossRaces(races, safeFit.ceilingParams, {
+    const hrCalibrationFit = fitHrToPowerCalibrationAcrossRaces(races, safeFit.ceilingParams, {
       raceDates,
       halfLifeDays,
       thresholdAnchors,
+      lockThroughLt2: lt2Anchor,
     });
     if (hrCalibrationFit && hrCalibrationFit.rSquared >= MIN_HR_CALIBRATION_R_SQUARED) {
       callbacks.onApplyHrCalibration(hrCalibrationFit.slope, hrCalibrationFit.intercept);
@@ -294,7 +303,7 @@ export async function runFitBatch(
     // by itself.
     const marginCalibration =
       hrCalibrationFit ??
-      fitHrToEffortCalibrationFromThresholds(
+      fitHrToPowerCalibrationFromThresholds(
         {
           lt1Fraction,
           lt2Fraction,
@@ -306,7 +315,7 @@ export async function runFitBatch(
         safeFit.ceilingParams,
       );
     const marginFit = marginCalibration
-      ? fitPacingMarginAcrossRaces(confirmedRaceTrendPoints, confirmedRaceNames, marginCalibration)
+      ? fitPacingMarginAcrossRaces(confirmedRaceTrendPoints, confirmedRaceNames, marginCalibration, safeFit.ceilingParams)
       : null;
     if (marginFit) callbacks.onApplyPacingMargin(marginFit);
 

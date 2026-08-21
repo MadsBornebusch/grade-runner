@@ -119,10 +119,10 @@ export interface SimulateOptions {
   /**
    * PLAN.md pacing-margin follow-up, HR-driven variant: when set, called
    * once per segment to OVERRIDE theta*ceilingGross entirely with an
-   * externally-supplied gross power target (W/kg) -- e.g. an effort
-   * fraction read from the athlete's own recorded heart rate via
-   * hrCalibration.ts's predictEffortFractionFromHr, instead of a
-   * theoretical pacing shape (theta search or flatDurationMin). Receives
+   * externally-supplied gross power target (W/kg) -- e.g. a power reading
+   * derived from the athlete's own recorded heart rate via
+   * hrCalibration.ts's predictPowerFromHr, instead of a theoretical pacing
+   * shape (theta search or flatDurationMin). Receives
    * the segment's own index plus the SAME elapsedMin/elapsedHours/
    * altitudeM the normal ceilingGross computation would have used, so a
    * caller can still route the athlete's own duration-decay curve through

@@ -8,7 +8,7 @@
 // race under ~6-8h, the glycogen/fuel constraint never even binds, so the
 // search just returns theta=1 (100% of the fitted ceiling) with no other
 // limit applied at all. Real races don't happen at theta=1 -- heart-rate-
-// implied "chosen theta" (predictEffortFractionFromHr, same HR-effort
+// implied "chosen theta" (computeChosenTheta below, from the same HR-power
 // calibration hrCalibration.ts already fits) averaged 0.75-0.96 for the
 // athlete's own short races and 0.52-0.75 for their several-hour ones, a
 // real, duration-dependent gap theta=1 can't see because nothing in the
@@ -34,7 +34,9 @@
 // parameters -- appropriate given how few confirmed races most athletes
 // will have.
 
-import { EARLY_WINDOW_FRACTION, predictEffortFractionFromHr, type HrEffortCalibration } from "./hrCalibration";
+import type { CeilingParams } from "./ceiling";
+import { ceilingPower } from "./ceiling";
+import { EARLY_WINDOW_FRACTION, predictPowerFromHr, type HrPowerCalibration } from "./hrCalibration";
 import type { EffortTrendPoint } from "./pacingFit";
 
 /** Below this many confirmed races, a 2-parameter curve isn't meaningfully
@@ -66,12 +68,16 @@ export interface PacingMarginFitResult {
   perRace: PacingMarginRacePoint[];
 }
 
-/** Duration-weighted mean HR-implied effort fraction over a race's own
- * early (trusted) window -- same restriction and same reasoning as
- * hrCalibration.ts's own fitting (cardiac drift makes late-race HR read
- * artificially high relative to true effort). Returns null if the race has
- * no HR data at all in that window. */
-export function computeChosenTheta(race: EffortTrendPoint[], calibration: HrEffortCalibration): number | null {
+/** Duration-weighted mean HR-implied effort fraction (theta -- power over
+ * the ceiling AT that point in time) over a race's own early (trusted)
+ * window -- same restriction and same reasoning as hrCalibration.ts's own
+ * fitting (cardiac drift makes late-race HR read artificially high
+ * relative to true power). The HR-power calibration predicts absolute
+ * power, not a ceiling-relative fraction (see hrCalibration.ts's header
+ * doc for why), so this divides by each point's own ceiling to get theta --
+ * the quantity this margin curve is fit in terms of. Returns null if the
+ * race has no HR data at all in that window. */
+export function computeChosenTheta(race: EffortTrendPoint[], calibration: HrPowerCalibration, ceilingParams: CeilingParams): number | null {
   if (race.length === 0) return null;
   const totalHours = Math.max(...race.map((p) => p.tHours + p.dtS / 3600));
   if (!(totalHours > 0)) return null;
@@ -82,7 +88,10 @@ export function computeChosenTheta(race: EffortTrendPoint[], calibration: HrEffo
   for (const p of race) {
     if (p.tHours >= cutoffHours) continue;
     if (p.heartRateBpm === undefined) continue;
-    const effortFraction = predictEffortFractionFromHr(p.heartRateBpm, calibration);
+    const ceiling = ceilingPower({ tMin: p.tHours * 60, altitudeM: p.altitudeM, elapsedHours: p.tHours }, ceilingParams);
+    if (ceiling <= 0) continue;
+    const powerWPerKg = predictPowerFromHr(p.heartRateBpm, calibration);
+    const effortFraction = powerWPerKg / ceiling;
     weightedSum += effortFraction * p.dtS;
     weightedWeight += p.dtS;
   }
@@ -102,11 +111,12 @@ function predictMarginThetaRaw(durationHours: number, marginFInf: number, margin
 export function fitPacingMarginAcrossRaces(
   races: EffortTrendPoint[][],
   names: string[],
-  calibration: HrEffortCalibration,
+  calibration: HrPowerCalibration,
+  ceilingParams: CeilingParams,
 ): PacingMarginFitResult | null {
   const points = races.map((race, i) => {
     const totalHours = race.length > 0 ? Math.max(...race.map((p) => p.tHours + p.dtS / 3600)) : 0;
-    const chosenTheta = computeChosenTheta(race, calibration);
+    const chosenTheta = computeChosenTheta(race, calibration, ceilingParams);
     return { name: names[i] ?? `race ${i + 1}`, durationHours: totalHours, chosenTheta };
   });
 

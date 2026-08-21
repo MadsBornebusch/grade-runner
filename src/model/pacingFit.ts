@@ -53,7 +53,7 @@ export interface EffortTrendPoint {
    * gpx/pipeline.ts's CourseSegment.heartRateBpm) -- undefined if this run
    * has no HR data at all. See hrCalibration.ts's own doc for why this is
    * reference data for most fits in this file but the one thing
-   * fitHrToEffortCalibrationAcrossRaces actually regresses against. */
+   * fitHrToPowerCalibrationAcrossRaces actually regresses against. */
   heartRateBpm?: number;
 }
 

@@ -1,18 +1,40 @@
-// PLAN.md §11 stage 3: fits a per-athlete HR-to-effort mapping from any
-// recorded run with both pace-derived power (see analysis.ts -- always
-// derived from GPS pace + gradient via Minetti, never a device's own power
-// reading) and heart rate. Unlike the tau/fInf fits in pacingFit.ts, this
-// isn't a within-race fatigue shape -- HR-to-effort should be a roughly
-// stable athlete-level relationship across races, so pooling every (HR,
-// effort) pair from every race into one weighted linear regression is the
-// right level of complexity, not a per-race-slope trick.
+// PLAN.md §11 stage 3 (superseded by the 2026-08-21 rework, see PLAN.md):
+// fits a per-athlete HR-to-power mapping from any recorded run with both
+// pace-derived power (see analysis.ts -- always derived from GPS pace +
+// gradient via Minetti, never a device's own power reading) and heart rate.
+// Unlike the tau/fInf fits in pacingFit.ts, this isn't a within-race
+// fatigue shape -- HR-to-power should be a roughly stable athlete-level
+// relationship across races, so pooling every (HR, power) pair from every
+// race into one weighted linear regression is the right level of
+// complexity, not a per-race-slope trick.
+//
+// Fits HR directly against raw (terrain-adjusted, NOT ceiling-normalized)
+// gross power, not effortFraction (power/ceiling) as an earlier version of
+// this file did. Checked directly on this athlete's real cached race data
+// (leave-one-out, same weighting/gating either way): raw power explains far
+// more of HR's variance than effortFraction does (weighted R² 0.49 vs
+// 0.077, apples-to-apples). Two reasons, both real: (1) effortFraction
+// divides by a ceiling that decays on a fitted tau/fInf curve which doesn't
+// perfectly track this athlete's true within-race fatigue, injecting
+// elapsed-time variance HR doesn't actually share; (2) effortFraction is
+// bounded near 1.0 by construction (power can't much exceed its own
+// ceiling), so points pile up near the top regardless of what HR is doing
+// there, losing resolution exactly where LT2-effort predictions need it
+// most. Physiologically this also matches the more direct causal chain:
+// heart rate tracks something close to absolute metabolic demand (~oxygen
+// consumption, which terrain-adjusted power already approximates), not a
+// ratio against a modeled, decaying capacity.
 //
 // Cardiac drift (HR climbing at constant true output, from rising core
 // temperature/dehydration/reduced stroke volume, not increased metabolic
 // intensity -- 10-15bpm typical over a long aerobic effort, worse in heat)
-// means late-race HR is a worse proxy for effort than early-race HR. This
+// means late-race HR is a worse proxy for power than early-race HR. This
 // restricts fitting to the early portion of each race, where the confound
-// is smallest.
+// is smallest. An explicit elapsed-time drift term was tried and rejected:
+// its fitted coefficient came out NEGATIVE (opposite sign from real
+// cardiovascular drift), meaning it was picking up a confound with the
+// pacing-decay curve rather than genuine drift signal, and even with it
+// added the fit still underperformed the plain two-parameter version below.
 //
 // The cardiac/pulmonary response to a change in metabolic output is also
 // LAGGED and effectively low-pass filtered, not instantaneous -- comparing
@@ -34,12 +56,12 @@
 // check.
 
 import type { CeilingParams } from "./ceiling";
-import { ceilingPower, maxAerobicPower, sustainableFraction } from "./ceiling";
+import { maxAerobicPower } from "./ceiling";
 import { type EffortTrendPoint, MIN_FIT_POINTS, poolIndicesInformativeAtReference } from "./pacingFit";
 import { paceToGrossPowerWPerKg } from "./substrate";
 
 /** Fraction of each race's own duration considered "early enough" to trust
- * HR as an effort proxy -- PLAN.md's own cardiac-drift research puts
+ * HR as a power proxy -- PLAN.md's own cardiac-drift research puts
  * meaningful drift onset around 25km into a marathon-length effort, i.e.
  * roughly the back third of a several-hour race. Exported for reuse by
  * pacingMarginFit.ts, which needs the SAME restriction for the same reason
@@ -63,8 +85,8 @@ const POWER_SMOOTHING_WINDOW_S = 75;
  * settling-in period was previously included in every race's fit
  * unfiltered. That barely affects a many-hour race (a negligible fraction
  * of its usable window) but can dominate a short one -- pulling the
- * pooled intercept toward "lower HR for a given effort" and contributing
- * to the same real-data under-prediction bias (4-10+ bpm on long races)
+ * pooled intercept toward "lower HR for a given power" and contributing to
+ * the same real-data under-prediction bias (4-10+ bpm on long races)
  * poolIndicesInformativeAtReference's own duration gate was built to fix.
  * Confirmed as a genuinely separate, complementary improvement on real
  * held-out data (Ecotrail 80, Soria Moria, leave-one-out): combining this
@@ -74,17 +96,75 @@ const POWER_SMOOTHING_WINDOW_S = 75;
  */
 const START_TRIM_MINUTES = 15;
 
+/**
+ * A handful of segments per race have a near-duplicate consecutive GPS
+ * timestamp (dtS of a fraction of a second) while still recording a real,
+ * nonzero distance between them -- a device/export artifact, not the
+ * athlete pausing (checked directly: <2% of the affected points are even
+ * near a real pause). Dividing a real distance by a near-zero time produces
+ * a nonsensical instantaneous speed, and therefore power, in the hundreds
+ * or thousands of W/kg (worst observed case: 0.05s and 25m apart -> 490m/s
+ * -> 568 W/kg). Excluded entirely (not clamped) before smoothing, since a
+ * single such point can dominate a 75s trailing-mean window that otherwise
+ * has few real points in it.
+ */
+const MIN_SEGMENT_DT_S = 1.0;
+
+/**
+ * No realistic sustained gross power exceeds this for this app's athletes
+ * (the highest genuine value seen across this athlete's whole cached race
+ * history, near-max effort, was under 17 W/kg) -- a second, direct filter
+ * on the same GPS-artifact class MIN_SEGMENT_DT_S catches (the median
+ * offending segment was ~1.8s, not near-zero, so duration alone doesn't
+ * fully separate real data from artifacts; this catches the rest).
+ * Excluded entirely, same reasoning as MIN_SEGMENT_DT_S above.
+ */
+const MAX_PLAUSIBLE_POWER_W_PER_KG = 20;
+
+/**
+ * How far back (seconds) to look for each point's own recent peak smoothed
+ * power/HR when detecting recovery-lag -- see DECAY_THRESHOLD's doc.
+ */
+const RECOVERY_LOOKBACK_S = 180;
+
+/**
+ * A point is flagged as "recovery lag" (heart rate still elevated from a
+ * harder effort a moment ago -- descending after a climb, easing after a
+ * surge -- not a real reading of CURRENT power) when its smoothed power has
+ * dropped below this fraction of its own recent (RECOVERY_LOOKBACK_S) peak
+ * WHILE heart rate is still at or above HR_PROXIMITY_THRESHOLD of ITS OWN
+ * recent peak. Both conditions are required: power-decay alone would also
+ * flag genuine settled-easy-running (power AND HR both fell together, which
+ * is real informative low-power data, not lag) -- checked directly on real
+ * data, dropping the HR condition produced a dramatically different, wrong
+ * result. Confirmed front-loaded early in each race's fitting window and
+ * skewed toward descents (mean gradient -0.22% vs +1.22% for normal
+ * points), matching the physiological signature of "power fell, pulse
+ * hasn't caught up yet."
+ */
+const RECOVERY_DECAY_THRESHOLD = 0.75;
+const RECOVERY_HR_PROXIMITY_THRESHOLD = 0.95;
+
+/** Flagged points are down-weighted to this fraction, not excluded --
+ * they're still real data, just less trustworthy as a power-at-this-HR
+ * reading than an unflagged point. 0.15 was the value validated on real
+ * held-out data (a meaningful, not dramatic, improvement -- see PLAN.md). */
+const RECOVERY_DOWNWEIGHT_FACTOR = 0.15;
+
 const DEFAULT_RECENCY_HALF_LIFE_DAYS = 75;
 
 function daysAgo(date: Date, now: Date): number {
   return (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24);
 }
 
-export interface HrEffortCalibration {
-  /** effortFraction per bpm. */
+export interface HrPowerCalibration {
+  /** bpm per W/kg of gross (terrain-adjusted) power. */
   slope: number;
+  /** bpm, at zero power -- not a physiologically meaningful resting HR on
+   * its own (the fit is only ever evaluated in the athlete's real running
+   * power range), just the line's own y-intercept. */
   intercept: number;
-  /** Weighted R² -- how well HR actually tracks this athlete's effort. A
+  /** Weighted R² -- how well HR actually tracks this athlete's power. A
    * low value is a legitimate result (HR may just not be a reliable proxy
    * for this athlete), not a bug in the fit. */
   rSquared: number;
@@ -116,112 +196,137 @@ function trailingMeanPower(race: EffortTrendPoint[], windowS: number): number[] 
   return out;
 }
 
-/** effortFraction implied by the current ceiling at this point, from the
- * SMOOTHED power at this index (see trailingMeanPower) -- same quantity
- * every other fit in this codebase computes (grossPower over ceiling), just
- * using a smoothed numerator here since HR responds to sustained, not
- * instantaneous, effort. Returns null if the ceiling is non-positive
- * (can't divide) or heartRateBpm is missing. */
-function effortFractionForHrPoint(p: EffortTrendPoint, smoothedPowerWPerKg: number, ceilingParams: CeilingParams): number | null {
-  if (p.heartRateBpm === undefined) return null;
-  const ceiling = ceilingPower({ tMin: p.tHours * 60, altitudeM: p.altitudeM, elapsedHours: p.tHours }, ceilingParams);
-  if (ceiling <= 0) return null;
-  return smoothedPowerWPerKg / ceiling;
+/** Trailing max of an already-smoothed series, via a monotonic deque --
+ * O(n) total, not O(n*windowS). Shared shape by trailingMaxHr below. */
+function trailingMaxSmoothed(smoothed: number[], tHoursArr: number[], windowS: number): number[] {
+  const out: number[] = new Array(smoothed.length);
+  const maxDeque: number[] = [];
+  for (let i = 0; i < smoothed.length; i++) {
+    while (maxDeque.length > 0 && smoothed[maxDeque[maxDeque.length - 1]] <= smoothed[i]) maxDeque.pop();
+    maxDeque.push(i);
+    while (tHoursArr[i] * 3600 - tHoursArr[maxDeque[0]] * 3600 > windowS) maxDeque.shift();
+    out[i] = smoothed[maxDeque[0]];
+  }
+  return out;
+}
+
+function trailingMaxHr(race: EffortTrendPoint[], windowS: number): number[] {
+  const out: number[] = new Array(race.length);
+  const maxDeque: number[] = [];
+  for (let i = 0; i < race.length; i++) {
+    const hr = race[i].heartRateBpm ?? -Infinity;
+    while (maxDeque.length > 0 && (race[maxDeque[maxDeque.length - 1]].heartRateBpm ?? -Infinity) <= hr) maxDeque.pop();
+    maxDeque.push(i);
+    while (race[i].tHours * 3600 - race[maxDeque[0]].tHours * 3600 > windowS) maxDeque.shift();
+    out[i] = race[maxDeque[0]].heartRateBpm ?? hr;
+  }
+  return out;
+}
+
+interface Sample {
+  hr: number;
+  powerWPerKg: number;
+  weight: number;
+}
+
+/** Builds the weighted (hr, power) sample pool for one race: start-trim +
+ * early-window gated, GPS-spike-filtered, recency- and recovery-lag-
+ * weighted. Shared by the pooled fit below. */
+function collectRaceSamples(race: EffortTrendPoint[], recencyWeightForRace: number): Sample[] {
+  if (race.length === 0) return [];
+  const raceDurationHours = Math.max(...race.map((p) => p.tHours + p.dtS / 3600));
+  if (!(raceDurationHours > 0)) return [];
+  const earlyCutoffHours = raceDurationHours * EARLY_WINDOW_FRACTION;
+  const startCutoffHours = START_TRIM_MINUTES / 60;
+
+  const smoothedPower = trailingMeanPower(race, POWER_SMOOTHING_WINDOW_S);
+  const tHoursArr = race.map((p) => p.tHours);
+  const recentMaxPower = trailingMaxSmoothed(smoothedPower, tHoursArr, RECOVERY_LOOKBACK_S);
+  const recentMaxHr = trailingMaxHr(race, RECOVERY_LOOKBACK_S);
+
+  const samples: Sample[] = [];
+  race.forEach((p, i) => {
+    if (p.tHours < startCutoffHours || p.tHours >= earlyCutoffHours) return;
+    if (p.heartRateBpm === undefined) return;
+    if (p.dtS < MIN_SEGMENT_DT_S || p.grossPowerWPerKg > MAX_PLAUSIBLE_POWER_W_PER_KG) return;
+
+    const powerDecayRatio = recentMaxPower[i] > 0 ? smoothedPower[i] / recentMaxPower[i] : 1;
+    const hrProximityRatio = recentMaxHr[i] > 0 ? p.heartRateBpm / recentMaxHr[i] : 1;
+    const recoveryFlagged = powerDecayRatio < RECOVERY_DECAY_THRESHOLD && hrProximityRatio >= RECOVERY_HR_PROXIMITY_THRESHOLD;
+    const weight = p.dtS * recencyWeightForRace * (recoveryFlagged ? RECOVERY_DOWNWEIGHT_FACTOR : 1);
+    samples.push({ hr: p.heartRateBpm, powerWPerKg: smoothedPower[i], weight });
+  });
+  return samples;
 }
 
 /**
- * Total weight given to the lab-threshold anchor points (see
- * `buildThresholdAnchorPoints`) as a fraction of the race-pooled data's own
- * total weight, when both are blended into one fit -- see
- * `fitHrToEffortCalibrationAcrossRaces`'s `thresholdAnchors` option. Bounded
- * on both sides by construction: split evenly across however many anchor
- * points exist, so they can meaningfully pull the near-LT2 end of the line
- * toward a real physiological measurement without a handful of points ever
- * outvoting the athlete's own race history.
- */
-const THRESHOLD_ANCHOR_WEIGHT_FRACTION = 0.25;
-
-/**
- * Fits `effortFraction ≈ intercept + slope * heartRateBpm` via weighted
+ * Fits `heartRateBpm ≈ intercept + slope * grossPowerWPerKg` via weighted
  * least squares, pooling qualifying points (has HR, within the early
- * window of its own race) across every race supplied, weighted by segment
- * duration and by race recency (mirroring pacingFit.ts's other multi-race
- * fits). Returns null if fewer than MIN_FIT_POINTS points qualify, or if
- * pooled HR shows no variance to regress against (a flat HR reading can't
- * identify a slope).
+ * window of its own race, GPS-artifact-filtered) across every race
+ * supplied, weighted by segment duration, race recency, and recovery-lag
+ * confidence. Returns null if fewer than MIN_FIT_POINTS points qualify, or
+ * if pooled power shows no variance to regress against.
  *
  * Restricted to races at least as long as the incoming reference tau (see
  * `poolIndicesInformativeAtReference`'s own doc), falling back to every
  * race if too few clear that bar, and to points past START_TRIM_MINUTES
- * into each race. A real held-out check on this athlete's own data found
- * the unrestricted pool under-predicted heart rate on genuinely long
- * races by 4-10+ bpm -- NOT because short races correlate worse or sit at
- * lower effort fractions (checked directly: they don't, some short races
- * correlate better within themselves than the long ones, and short races
- * reach effort fractions as high or higher). The real driver looks like
- * every race's own un-trimmed start-of-run transient (HR still settling
- * to a new steady workload) being a much larger fraction of a short
- * race's usable window than a long one's, biasing the pooled intercept
- * toward "lower HR for a given effort." Restricting to long-only training
- * alone cut that error by 20-24%; adding the start trim on top improved
- * it further in both held-out races tested (see PLAN.md §14) -- the two
- * fixes are complementary, not redundant.
+ * into each race -- see this file's header doc and START_TRIM_MINUTES'
+ * own doc for why (short-race start-transient contamination, confirmed on
+ * real held-out data).
  *
  * Side effect worth knowing: for an athlete whose confirmed races are
  * mostly long (ultras), this restriction can end up excluding EVERY short
  * race from the fit, leaving the near-LT2/short-race end of the line pure
- * extrapolation from long-race (lower effort fraction) data -- exactly the
- * failure mode `thresholdAnchors` exists to close, not by re-admitting
- * short races (which would reopen the swamping bug above) but by anchoring
- * that end with the athlete's own lab-measured LT1/LT2 pace+HR instead.
+ * extrapolation from long-race (lower power) data -- exactly the failure
+ * mode `lockThroughLt2` exists to close, by forcing the fit through the
+ * athlete's own lab-measured LT2 pace+HR exactly rather than leaving it as
+ * extrapolation. Checked directly (leave-one-out against 3 real races):
+ * locking through LT2 improved ALL THREE races simultaneously here (unlike
+ * the earlier effortFraction-based fit, where locking helped the anchored
+ * race but measurably hurt the others) -- the tradeoff that motivated the
+ * softer 25%-blend design in the old effortFraction fit doesn't reappear
+ * in power space, so this fit locks rather than blends when an LT2 anchor
+ * is available.
  */
-export function fitHrToEffortCalibrationAcrossRaces(
+export function fitHrToPowerCalibrationAcrossRaces(
   races: EffortTrendPoint[][],
   ceilingParams: CeilingParams,
   opts: {
     raceDates?: (Date | null)[];
     halfLifeDays?: number;
     now?: Date;
-    /** Lab-measured (hr, effortFraction) anchor points -- see
-     * `buildThresholdAnchorPoints` -- blended into the SAME regression as
-     * the pooled race data, not used as a separate fallback fit. Undefined
-     * or empty is byte-for-byte identical to omitting this option. */
-    thresholdAnchors?: { hr: number; effortFraction: number }[];
+    /** Lab-measured (hr, powerWPerKg) anchor points -- see
+     * `buildThresholdPowerAnchorPoints` -- blended into the SAME regression
+     * as the pooled race data (all of them EXCEPT lockThroughLt2, which is
+     * forced through exactly rather than blended). Undefined or empty is
+     * byte-for-byte identical to omitting this option. */
+    thresholdAnchors?: { hr: number; powerWPerKg: number }[];
+    /** When provided, the fit is forced through this exact point (see this
+     * function's own doc) instead of the plain weighted-least-squares
+     * intercept/slope. By convention the caller's own LT2 anchor, when
+     * available -- the one point real leave-one-out testing validated
+     * locking through. Should also appear in thresholdAnchors when both are
+     * passed together, so callers don't have to compute it twice; this
+     * function does not add it to the blended pool itself. */
+    lockThroughLt2?: { hr: number; powerWPerKg: number };
   } = {},
-): HrEffortCalibration | null {
+): HrPowerCalibration | null {
   const halfLifeDays = opts.halfLifeDays ?? DEFAULT_RECENCY_HALF_LIFE_DAYS;
   const now = opts.now ?? new Date();
 
   const totalMinPerRace = races.map((race) => (race.length > 0 ? Math.max(...race.map((p) => p.tHours + p.dtS / 3600)) * 60 : 0));
   const longEnoughIndices = new Set(poolIndicesInformativeAtReference(totalMinPerRace, ceilingParams));
 
-  interface Sample {
-    hr: number;
-    effortFraction: number;
-    weight: number;
-  }
   const samples: Sample[] = [];
   const contributingRaceIndices = new Set<number>();
 
   races.forEach((race, raceIndex) => {
-    if (race.length === 0) return;
     if (!longEnoughIndices.has(raceIndex)) return;
-    const raceDurationHours = Math.max(...race.map((p) => p.tHours + p.dtS / 3600));
-    if (!(raceDurationHours > 0)) return;
-    const earlyCutoffHours = raceDurationHours * EARLY_WINDOW_FRACTION;
-    const startCutoffHours = START_TRIM_MINUTES / 60;
     const date = opts.raceDates?.[raceIndex] ?? null;
     const recencyWeight = date ? Math.exp((-Math.LN2 * daysAgo(date, now)) / halfLifeDays) : 1;
-    const smoothedPower = trailingMeanPower(race, POWER_SMOOTHING_WINDOW_S);
-
-    race.forEach((p, i) => {
-      if (p.tHours < startCutoffHours) return;
-      if (p.tHours >= earlyCutoffHours) return;
-      const effortFraction = effortFractionForHrPoint(p, smoothedPower[i], ceilingParams);
-      if (effortFraction === null) return;
-      samples.push({ hr: p.heartRateBpm!, effortFraction, weight: p.dtS * recencyWeight });
-      contributingRaceIndices.add(raceIndex);
-    });
+    const raceSamples = collectRaceSamples(race, recencyWeight);
+    if (raceSamples.length > 0) contributingRaceIndices.add(raceIndex);
+    samples.push(...raceSamples);
   });
 
   if (samples.length < MIN_FIT_POINTS) return null;
@@ -229,33 +334,55 @@ export function fitHrToEffortCalibrationAcrossRaces(
   // Blended in AFTER the MIN_FIT_POINTS gate above -- anchors alone (2-4
   // points) should never let a fit through that real race data couldn't on
   // its own; they adjust an already-qualifying fit, not substitute for one.
-  if (opts.thresholdAnchors && opts.thresholdAnchors.length > 0) {
+  const blendedAnchors = (opts.thresholdAnchors ?? []).filter((a) => a !== opts.lockThroughLt2);
+  if (blendedAnchors.length > 0) {
     const raceWeightTotal = samples.reduce((s, p) => s + p.weight, 0);
-    const anchorWeightEach = (raceWeightTotal * THRESHOLD_ANCHOR_WEIGHT_FRACTION) / opts.thresholdAnchors.length;
-    for (const anchor of opts.thresholdAnchors) {
-      samples.push({ hr: anchor.hr, effortFraction: anchor.effortFraction, weight: anchorWeightEach });
+    const anchorWeightEach = (raceWeightTotal * THRESHOLD_ANCHOR_WEIGHT_FRACTION) / blendedAnchors.length;
+    for (const anchor of blendedAnchors) {
+      samples.push({ hr: anchor.hr, powerWPerKg: anchor.powerWPerKg, weight: anchorWeightEach });
     }
   }
 
   const sumW = samples.reduce((s, p) => s + p.weight, 0);
   if (!(sumW > 0)) return null;
+
+  if (opts.lockThroughLt2) {
+    const anchor = opts.lockThroughLt2;
+    let sXY = 0;
+    let sXX = 0;
+    let sYY = 0;
+    const meanPowerForR2 = samples.reduce((s, p) => s + p.weight * p.powerWPerKg, 0) / sumW;
+    for (const p of samples) {
+      const dPower = p.powerWPerKg - anchor.powerWPerKg;
+      const dHr = p.hr - anchor.hr;
+      sXY += p.weight * dPower * dHr;
+      sXX += p.weight * dPower * dPower;
+      sYY += p.weight * (p.powerWPerKg - meanPowerForR2) * (p.powerWPerKg - meanPowerForR2);
+    }
+    if (!(sXX > 0)) return null;
+    const slope = sXY / sXX;
+    const intercept = anchor.hr - slope * anchor.powerWPerKg;
+    const rSquared = sXX > 0 && sYY > 0 ? (sXY * sXY) / (sXX * sYY) : 0;
+    return { slope, intercept, rSquared, pointCount: samples.length, raceCount: contributingRaceIndices.size };
+  }
+
+  const meanPower = samples.reduce((s, p) => s + p.weight * p.powerWPerKg, 0) / sumW;
   const meanHr = samples.reduce((s, p) => s + p.weight * p.hr, 0) / sumW;
-  const meanEffort = samples.reduce((s, p) => s + p.weight * p.effortFraction, 0) / sumW;
 
   let sXY = 0;
   let sXX = 0;
   let sYY = 0;
   for (const p of samples) {
+    const dPower = p.powerWPerKg - meanPower;
     const dHr = p.hr - meanHr;
-    const dEffort = p.effortFraction - meanEffort;
-    sXY += p.weight * dHr * dEffort;
-    sXX += p.weight * dHr * dHr;
-    sYY += p.weight * dEffort * dEffort;
+    sXY += p.weight * dPower * dHr;
+    sXX += p.weight * dPower * dPower;
+    sYY += p.weight * dHr * dHr;
   }
-  if (!(sXX > 0)) return null; // no HR variance to regress against
+  if (!(sXX > 0)) return null; // no power variance to regress against
 
   const slope = sXY / sXX;
-  const intercept = meanEffort - slope * meanHr;
+  const intercept = meanHr - slope * meanPower;
   const rSquared = sYY > 0 ? (sXY * sXY) / (sXX * sYY) : 0;
 
   return {
@@ -267,25 +394,33 @@ export function fitHrToEffortCalibrationAcrossRaces(
   };
 }
 
-/** Predicted effortFraction at a given heart rate under a fitted
- * calibration -- multiply by the current ceiling (ceilingPower) to get a
- * power estimate usable anywhere pace-derived power is (e.g.
- * substrate.ts's splitPower/bonkPowerWPerKg), which is what makes this
- * plug into the existing fat-ox-curve pipeline without any new
- * substrate-layer code. */
-export function predictEffortFractionFromHr(heartRateBpm: number, calibration: HrEffortCalibration): number {
-  return calibration.intercept + calibration.slope * heartRateBpm;
+/**
+ * Total weight given to the lab-threshold anchor points that AREN'T being
+ * locked through exactly (see `fitHrToPowerCalibrationAcrossRaces`'s
+ * `lockThroughLt2` option) -- LT1 and/or fat-ox points, as a fraction of
+ * the race-pooled data's own total weight. Split evenly across however
+ * many such points exist, so they can meaningfully pull the fit without a
+ * handful of points ever outvoting the athlete's own race history. Mirrors
+ * the old effortFraction fit's own anchor-blend fraction.
+ */
+const THRESHOLD_ANCHOR_WEIGHT_FRACTION = 0.25;
+
+/** Predicted gross power (W/kg) at a given heart rate under a fitted
+ * calibration -- usable anywhere pace-derived power is (e.g.
+ * substrate.ts's splitPower/bonkPowerWPerKg). */
+export function predictPowerFromHr(heartRateBpm: number, calibration: HrPowerCalibration): number {
+  return (heartRateBpm - calibration.intercept) / calibration.slope;
 }
 
-/** Inverse of predictEffortFractionFromHr -- estimates the heart rate this
- * athlete would likely show at a given effort fraction, for a Planning-mode
- * course where there's no recorded HR yet to work from (see
- * chartData.ts's ChartPoint.estimatedHeartRateBpm). Same caveats as the
- * calibration itself: a rough, athlete-specific estimate, not a guarantee --
- * cardiac drift means it should read low for effort sustained deep into a
- * long race, and this doesn't attempt to model that. */
-export function predictHeartRateFromEffortFraction(effortFraction: number, calibration: HrEffortCalibration): number {
-  return (effortFraction - calibration.intercept) / calibration.slope;
+/** Inverse of predictPowerFromHr -- estimates the heart rate this athlete
+ * would likely show at a given gross power, for a Planning-mode course
+ * where there's no recorded HR yet to work from (see chartData.ts's
+ * ChartPoint.estimatedHeartRateBpm). Same caveats as the calibration
+ * itself: a rough, athlete-specific estimate, not a guarantee -- cardiac
+ * drift means it should read low for effort sustained deep into a long
+ * race, and this doesn't attempt to model that. */
+export function predictHeartRateFromPower(powerWPerKg: number, calibration: HrPowerCalibration): number {
+  return calibration.intercept + calibration.slope * powerWPerKg;
 }
 
 /** Structural subset of formInputs.ts's FatOxPoint this module actually
@@ -307,28 +442,48 @@ export interface ThresholdCalibrationInputs {
 }
 
 /**
- * Fits the same effortFraction ≈ intercept + slope·heartRateBpm shape as
- * fitHrToEffortCalibrationAcrossRaces, but from the athlete's own
- * LAB-MEASURED thresholds/fat-ox test instead of pooled training-run data.
- *
- * LT1/LT2 fractions are already expressed in the exact %VO2max units
- * sustainableFraction() operates in, so converting them to effortFraction
- * needs no Minetti pace conversion, no altitude adjustment, no terrain/GPS
- * noise at all -- none of the machinery the rest of this investigation
- * needed to fight through (warm-up transients, walk breaks, race-duration
- * decay confounds): effortFraction = labFraction / sustainableFraction(0,
- * ceilingParams). LT2's own effortFraction comes out to exactly 1.0
- * whenever the athlete's entered lt2Fraction matches ceilingParams'
- * (the normal case), since LT2 *is* the ceiling's own fresh/undecayed cap
- * by construction -- not a coincidence, a direct consequence of how LT2 is
- * defined elsewhere in this app.
- *
- * Fat-ox points need one extra step, since they're recorded in pace/
- * oxidation-rate terms rather than a %VO2max fraction directly: pace ->
- * gross power via the same Minetti conversion the rest of this app uses
- * (paceToGrossPowerWPerKg), then power -> %VO2max via maxAerobicPower. This
- * reintroduces the Minetti-model uncertainty LT1/LT2 avoid, but it's still
- * a controlled lab measurement, not real-world GPS/terrain data.
+ * Builds (hr, powerWPerKg) anchor points from the athlete's own
+ * LAB-MEASURED thresholds/fat-ox test. LT1/LT2 fractions are already
+ * expressed in %VO2max terms, so converting to power just needs
+ * `maxAerobicPower` (the athlete's 100%-VO2max power, altitude-adjusted,
+ * duration-independent) -- no Minetti pace conversion needed for those two.
+ * Fat-ox points ARE recorded in pace terms, so they go through the same
+ * pace -> gross power conversion the rest of this app uses
+ * (paceToGrossPowerWPerKg) directly -- no further %VO2max step needed,
+ * since the target here is power, not a normalized fraction. Unlike the
+ * old effortFraction version of this function, the LT2 point's power value
+ * is NOT tautologically fixed by construction (it genuinely depends on the
+ * entered lt2Fraction and VO2max) -- a real consequence of dropping the
+ * ceiling-fraction normalization, not a design choice made for this
+ * reason specifically.
+ */
+export function buildThresholdPowerAnchorPoints(
+  inputs: ThresholdCalibrationInputs,
+  ceilingParams: CeilingParams,
+): { hr: number; powerWPerKg: number }[] {
+  const maxAerobic = maxAerobicPower(0, ceilingParams);
+  if (!(maxAerobic > 0)) return [];
+
+  const points: { hr: number; powerWPerKg: number }[] = [];
+  if (inputs.lt1HeartRateBpm !== null) {
+    points.push({ hr: inputs.lt1HeartRateBpm, powerWPerKg: inputs.lt1Fraction * maxAerobic });
+  }
+  if (inputs.lt2HeartRateBpm !== null) {
+    points.push({ hr: inputs.lt2HeartRateBpm, powerWPerKg: inputs.lt2Fraction * maxAerobic });
+  }
+  for (const p of inputs.fatOxPoints) {
+    if (p.heartRateBpm === undefined) continue;
+    points.push({ hr: p.heartRateBpm, powerWPerKg: paceToGrossPowerWPerKg(p.paceMinPerKm, inputs.walkMaxMs) });
+  }
+  return points;
+}
+
+/**
+ * Fits the same heartRateBpm ≈ intercept + slope·powerWPerKg shape as
+ * fitHrToPowerCalibrationAcrossRaces, but from the athlete's own
+ * lab-measured thresholds/fat-ox test alone, for use as a fallback when
+ * there isn't enough (or any) race data to support the pooled fit -- see
+ * runFitBatch.ts's marginCalibration fallback.
  *
  * Every qualifying point (only where heartRateBpm is actually present)
  * counts equally -- unlike the race-pooled fit, there's no natural duration
@@ -341,65 +496,30 @@ export interface ThresholdCalibrationInputs {
  * pointCount is 3 or more (e.g. a fat-ox curve contributing extra points
  * alongside LT1/LT2).
  */
-/**
- * Builds the same (hr, effortFraction) anchor points
- * `fitHrToEffortCalibrationFromThresholds` fits standalone -- factored out
- * so `fitHrToEffortCalibrationAcrossRaces` can blend them into its own
- * race-pooled regression instead (see that function's `thresholdAnchors`
- * option), rather than the two calibrations only ever competing as an
- * either/or fallback. See that function's own doc for the conversion
- * reasoning (LT1/LT2 need none; fat-ox needs a Minetti pace->power step).
- */
-export function buildThresholdAnchorPoints(
+export function fitHrToPowerCalibrationFromThresholds(
   inputs: ThresholdCalibrationInputs,
   ceilingParams: CeilingParams,
-): { hr: number; effortFraction: number }[] {
-  const referenceCeilingFraction = sustainableFraction(0, ceilingParams);
-  if (!(referenceCeilingFraction > 0)) return [];
-
-  const points: { hr: number; effortFraction: number }[] = [];
-  if (inputs.lt1HeartRateBpm !== null) {
-    points.push({ hr: inputs.lt1HeartRateBpm, effortFraction: inputs.lt1Fraction / referenceCeilingFraction });
-  }
-  if (inputs.lt2HeartRateBpm !== null) {
-    points.push({ hr: inputs.lt2HeartRateBpm, effortFraction: inputs.lt2Fraction / referenceCeilingFraction });
-  }
-  const maxAerobic = maxAerobicPower(0, ceilingParams);
-  if (maxAerobic > 0) {
-    for (const p of inputs.fatOxPoints) {
-      if (p.heartRateBpm === undefined) continue;
-      const grossPowerWPerKg = paceToGrossPowerWPerKg(p.paceMinPerKm, inputs.walkMaxMs);
-      const intensityFraction = grossPowerWPerKg / maxAerobic;
-      points.push({ hr: p.heartRateBpm, effortFraction: intensityFraction / referenceCeilingFraction });
-    }
-  }
-  return points;
-}
-
-export function fitHrToEffortCalibrationFromThresholds(
-  inputs: ThresholdCalibrationInputs,
-  ceilingParams: CeilingParams,
-): HrEffortCalibration | null {
-  const points = buildThresholdAnchorPoints(inputs, ceilingParams);
+): HrPowerCalibration | null {
+  const points = buildThresholdPowerAnchorPoints(inputs, ceilingParams);
   if (points.length < 2) return null;
 
   const n = points.length;
+  const meanPower = points.reduce((s, p) => s + p.powerWPerKg, 0) / n;
   const meanHr = points.reduce((s, p) => s + p.hr, 0) / n;
-  const meanEffort = points.reduce((s, p) => s + p.effortFraction, 0) / n;
   let sXY = 0;
   let sXX = 0;
   let sYY = 0;
   for (const p of points) {
+    const dPower = p.powerWPerKg - meanPower;
     const dHr = p.hr - meanHr;
-    const dEffort = p.effortFraction - meanEffort;
-    sXY += dHr * dEffort;
-    sXX += dHr * dHr;
-    sYY += dEffort * dEffort;
+    sXY += dPower * dHr;
+    sXX += dPower * dPower;
+    sYY += dHr * dHr;
   }
   if (!(sXX > 0)) return null;
 
   const slope = sXY / sXX;
-  const intercept = meanEffort - slope * meanHr;
+  const intercept = meanHr - slope * meanPower;
   const rSquared = sYY > 0 ? (sXY * sXY) / (sXX * sYY) : 1;
 
   return { slope, intercept, rSquared, pointCount: points.length, raceCount: points.length };

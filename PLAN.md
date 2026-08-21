@@ -3626,18 +3626,99 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
       work, not proof the underlying intuition is wrong, just that this
       pooling mechanism can't safely admit short data without it.
 
-   **Not yet shipped as of this writing.** All four options were measured
-   against real data via ad-hoc scripts (not committed) rather than
-   implemented in `hrCalibration.ts` -- the reserve removal is the only
-   code change from this investigation that's actually landed. The three
-   surviving candidates (bump `THRESHOLD_ANCHOR_WEIGHT_FRACTION`, full
-   anchor-lock, or recovery-downweight+anchor) land within a few bpm of
-   each other on this athlete's data; recovery-downweighting is real but
-   adds real machinery (two trailing-max series, a decay/proximity
-   threshold pair) for a smaller edge than the much simpler weight-bump or
-   full-lock options. Session-admission is closed as a dead end for now,
-   not a future-work item -- would need a genuinely different (likely
-   non-linear or duration-aware) model to revisit productively.
+   **Not yet shipped as of that writing.** All four options above were
+   measured against real data via ad-hoc scripts (not committed) rather
+   than implemented in `hrCalibration.ts` -- the reserve removal was the
+   only code change from that investigation that had actually landed.
+
+   **Follow-up (2026-08-21): shipped, but as a fit-axis rework, not one of
+   the four candidates above.** Continued investigating with real cached
+   Strava data (322 activities) and charts (GPS-spike-filtered raw power
+   vs. HR, recovery-lag downweighted). Two findings changed the direction
+   entirely:
+
+   1. **`lt2Fraction` accuracy turned out to be a red herring for the
+      predHR@LT2 gap specifically** -- sweeping it 0.75-0.93 moved
+      predHR@LT2 by ~1bpm. Root cause: the LT2 anchor's own effortFraction
+      is `lt2Fraction / sustainableFraction(0, ceilingParams)`, i.e. the
+      same value divided by itself, always exactly 1.0 regardless of
+      `lt2Fraction`'s accuracy -- and separately, ~90% of the pool's own
+      fit-eligible weight comes from points already past their race's own
+      local tau-decay crossover, where `lt2Fraction` isn't even part of
+      `ceilingPower`'s calculation (the `Math.min` cap doesn't bind there).
+      VO2max, by contrast, moved predHR@LT2 a lot (132-165bpm across a
+      46-62 sweep) -- but that's a measured physiological input, not a
+      free knob to reverse-engineer from HR residuals (same objection as
+      the LT2-cap-during-prediction question below), and the sweep wasn't
+      even self-consistent (varied VO2max while holding a pace-derived
+      `lt2Fraction` fixed, which in reality would move with it) -- flagged,
+      not acted on.
+   2. **Fitting effortFraction (power/ceiling) against HR was itself the
+      weaker choice of dependent variable.** Apples-to-apples on the same
+      cleaned pool (GPS-spike-filtered, recovery-lag-downweighted,
+      recency-weighted): weighted R², effortFraction~hr = 0.077, raw
+      power~hr = 0.49 -- raw power explains **six times** more of HR's
+      variance. Two real, additive causes: (a) `effortFraction` divides by
+      a ceiling that follows a fitted `tau`/`fInf` decay curve that doesn't
+      perfectly track this athlete's true within-race fatigue, injecting
+      elapsed-time variance HR doesn't share; (b) `effortFraction` is
+      bounded near 1.0 by construction (power can't much exceed its own
+      ceiling), so points saturate near the top regardless of what HR is
+      doing there, losing resolution exactly where LT2-effort predictions
+      need it most. Physiologically this also matches the more direct
+      causal chain -- HR tracks something close to absolute metabolic
+      demand (~oxygen consumption, which terrain-adjusted power already
+      approximates), not a ratio against a modeled, decaying capacity. An
+      explicit HR-drift term (elapsed-time predictor) was tried and
+      rejected: its fitted coefficient came out negative (opposite sign
+      from real cardiovascular drift -- a confound with the pacing-decay
+      curve, not genuine drift signal), and even with it added the fit
+      still underperformed the plain two-parameter version.
+
+   **Shipped**: `hrCalibration.ts` rewritten to fit
+   `heartRateBpm = intercept + slope * grossPowerWPerKg` directly (not
+   inverted from a power~hr fit -- direct is the natural direction for the
+   actual use case, predicting HR from a planned/simulated power), locked
+   exactly through the athlete's own lab-measured LT2 pace+HR when
+   available (`lockThroughLt2`) rather than blended at 25% weight. Full
+   lock was re-validated leave-one-out against all three target races
+   (Askerspurten/Ecotrail 80/Soria Moria) on the new power axis and, unlike
+   the old effortFraction axis, showed **no tradeoff** -- MAE improved on
+   all three simultaneously (12.4/26.2/36.6bpm -> 6.6/6.7/6.7bpm), landing
+   at a consistent, small residual rather than one race winning at
+   another's expense. LT1 and fat-ox points still blend in (not locked) at
+   the same `THRESHOLD_ANCHOR_WEIGHT_FRACTION=0.25` the old fit used.
+   Recovery-lag downweighting and GPS-spike filtering (both validated
+   in-session but never shipped before now) are folded into this same
+   rewrite, since they touch the identical sample-collection code being
+   replaced anyway. `chartData.ts`/`App.tsx`'s HR-estimate and calibrated-
+   power-from-HR paths simplified accordingly (no ceiling division needed
+   at all once the fit is in power terms). `formInputs.ts`'s
+   `hrEffortCalibrationSlope/Intercept` renamed to
+   `hrPowerCalibrationSlope/Intercept` (semantics changed -- old stored
+   values would silently mispredict if reused under the old field names).
+   `pacingMarginFit.ts`'s `computeChosenTheta` still needs a ceiling-
+   relative theta for its own duration-based margin fit, so it now
+   converts explicitly (`predictPowerFromHr` then divide by that point's
+   own `ceilingPower`) rather than reading effortFraction straight from the
+   calibration. 466 tests pass (up from 463 -- new coverage for GPS-spike
+   filtering and recovery-lag downweighting, neither of which had
+   production tests before since neither had shipped), `tsc -b`/`npm run
+   build` clean.
+
+   **Separately raised and answered, not acted on further:** why does
+   `sustainableFraction`'s LT2 cap apply during *prediction*, not just
+   fitting? Because `f0` (the value the cap holds the curve flat at near
+   t=0) is never actually fit from data anywhere in this codebase --
+   `pacingFit.ts`'s own header doc confirms it's structurally
+   unidentifiable from a single race's observable data (the cap hides
+   whatever's above it, and fitting f0/fInf jointly from within-race
+   slopes is scale-invariant). Uncapping it during prediction would expose
+   an arbitrary, never-validated constant (0.94) as if it were measured
+   capacity -- the same failure mode that motivated removing the
+   anaerobic-reserve feature above. Genuine above-LT2 short-race modeling
+   would need `f0` (or something like it) to actually be fit first; out of
+   scope here.
 
 ### Open questions
 

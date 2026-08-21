@@ -84,14 +84,16 @@ export interface FormInputs {
    * that function's own doc for why this replaced it as the auto-fit
    * RunLibraryPanel applies). */
   surfaceCostMultipliers: Partial<Record<SurfaceCategory, number>> | null;
-  /** Fitted HR-to-effort-fraction linear mapping (PLAN.md §11 stage 3) --
-   * both null together means not yet fit/applied. Unlike the zones above,
-   * this DOES feed a calculation (predictEffortFractionFromHr in
-   * hrCalibration.ts) -- but only where a caller explicitly asks for an
-   * HR-derived effort estimate; it never overrides the pace-derived
-   * grossPowerWPerKg every other calculation already uses. */
-  hrEffortCalibrationSlope: number | null;
-  hrEffortCalibrationIntercept: number | null;
+  /** Fitted HR-to-power linear mapping (PLAN.md §11 stage 3, reworked
+   * 2026-08-21 to fit raw power instead of effortFraction -- see
+   * hrCalibration.ts's header doc) -- both null together means not yet
+   * fit/applied. Unlike the zones above, this DOES feed a calculation
+   * (predictPowerFromHr in hrCalibration.ts) -- but only where a caller
+   * explicitly asks for an HR-derived power estimate; it never overrides
+   * the pace-derived grossPowerWPerKg every other calculation already
+   * uses. */
+  hrPowerCalibrationSlope: number | null;
+  hrPowerCalibrationIntercept: number | null;
   /** Fitted pacing-margin curve (pacingMarginFit.ts) -- how much of the
    * fitted aerobic ceiling this athlete actually holds, as a function of a
    * race's own total duration, from user-confirmed races only. null = not
@@ -145,8 +147,8 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   durabilityDriftPerHour: 0,
   unpavedCostMultiplier: 1,
   surfaceCostMultipliers: null,
-  hrEffortCalibrationSlope: null,
-  hrEffortCalibrationIntercept: null,
+  hrPowerCalibrationSlope: null,
+  hrPowerCalibrationIntercept: null,
   pacingMargin: null,
   // See gpx/pipeline.ts's DEFAULT_SEGMENT_LENGTH_M/DEFAULT_SMOOTHING_WINDOW_M
   // for the measured reasoning behind these two numbers (PLAN.md §5 update).

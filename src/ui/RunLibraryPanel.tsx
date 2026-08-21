@@ -12,8 +12,8 @@ import {
 import { DURABILITY_MIN_DURATION_S, suggestRunsForFit } from "../model/suggestRuns";
 import { dedupeStoredRuns } from "../model/dedupeRuns";
 import { splitAtTransitGaps } from "../gpx/transitGap";
-import { fitHrToEffortCalibrationFromThresholds, predictHeartRateFromEffortFraction } from "../model/hrCalibration";
-import { sustainableFraction } from "../model/ceiling";
+import { fitHrToPowerCalibrationFromThresholds, predictHeartRateFromPower } from "../model/hrCalibration";
+import { maxAerobicPower } from "../model/ceiling";
 import { estimateVo2MaxFromRun, isEstimableEffort } from "../model/vo2MaxEstimate";
 import {
   clearStoredRuns,
@@ -359,7 +359,7 @@ export function RunLibraryPanel({
   // below still requires runs to have been fitted.
   const thresholdHrCalibrationFitResult = useMemo(() => {
     const { lt1Fraction, lt2Fraction } = resolveLt1Lt2Fractions(formInputs);
-    return fitHrToEffortCalibrationFromThresholds(
+    return fitHrToPowerCalibrationFromThresholds(
       {
         lt1Fraction,
         lt2Fraction,
@@ -732,7 +732,7 @@ export function RunLibraryPanel({
                     .join(", ")
                 : "not fit yet"}
             </li>
-            <li>HR calibration: {formInputs.hrEffortCalibrationSlope !== null ? "fit" : "not fit yet"}</li>
+            <li>HR calibration: {formInputs.hrPowerCalibrationSlope !== null ? "fit" : "not fit yet"}</li>
             <li>
               Pacing margin:{" "}
               {formInputs.pacingMargin
@@ -979,14 +979,15 @@ export function RunLibraryPanel({
 
       {hrCalibrationFitResult &&
         (() => {
-          const referenceCeilingFraction = sustainableFraction(0, ceilingParams);
+          const maxAerobic = maxAerobicPower(0, ceilingParams);
+          if (!(maxAerobic > 0)) return null;
           const { lt1Fraction, lt2Fraction } = resolveLt1Lt2Fractions(formInputs);
-          const labAnchors: { label: string; enteredHr: number; effortFraction: number }[] = [];
+          const labAnchors: { label: string; enteredHr: number; powerWPerKg: number }[] = [];
           if (formInputs.lt1HeartRateBpm !== null) {
-            labAnchors.push({ label: "LT1", enteredHr: formInputs.lt1HeartRateBpm, effortFraction: lt1Fraction / referenceCeilingFraction });
+            labAnchors.push({ label: "LT1", enteredHr: formInputs.lt1HeartRateBpm, powerWPerKg: lt1Fraction * maxAerobic });
           }
           if (formInputs.lt2HeartRateBpm !== null) {
-            labAnchors.push({ label: "LT2", enteredHr: formInputs.lt2HeartRateBpm, effortFraction: lt2Fraction / referenceCeilingFraction });
+            labAnchors.push({ label: "LT2", enteredHr: formInputs.lt2HeartRateBpm, powerWPerKg: lt2Fraction * maxAerobic });
           }
           if (labAnchors.length === 0) return null;
           return (
@@ -995,7 +996,7 @@ export function RunLibraryPanel({
               <p className="field-group-help">Checks whether the calibration above agrees with your entered LT1/LT2 heart rate.</p>
               <ul className="run-library__fit-notes">
                 {labAnchors.map((a) => {
-                  const derivedHr = predictHeartRateFromEffortFraction(a.effortFraction, hrCalibrationFitResult);
+                  const derivedHr = predictHeartRateFromPower(a.powerWPerKg, hrCalibrationFitResult);
                   const delta = derivedHr - a.enteredHr;
                   return (
                     <li key={a.label}>
