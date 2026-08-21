@@ -334,7 +334,13 @@ export function fitHrToPowerCalibrationAcrossRaces(
   // Blended in AFTER the MIN_FIT_POINTS gate above -- anchors alone (2-4
   // points) should never let a fit through that real race data couldn't on
   // its own; they adjust an already-qualifying fit, not substitute for one.
-  const blendedAnchors = (opts.thresholdAnchors ?? []).filter((a) => a !== opts.lockThroughLt2);
+  // Compared by VALUE, not reference -- callers build lockThroughLt2 and
+  // thresholdAnchors' own LT2 entry as separate object literals from the
+  // same formula, so reference equality would silently fail to exclude it
+  // here, double-counting LT2 as both locked AND blended.
+  const blendedAnchors = (opts.thresholdAnchors ?? []).filter(
+    (a) => !opts.lockThroughLt2 || a.hr !== opts.lockThroughLt2.hr || a.powerWPerKg !== opts.lockThroughLt2.powerWPerKg,
+  );
   if (blendedAnchors.length > 0) {
     const raceWeightTotal = samples.reduce((s, p) => s + p.weight, 0);
     const anchorWeightEach = (raceWeightTotal * THRESHOLD_ANCHOR_WEIGHT_FRACTION) / blendedAnchors.length;
@@ -351,13 +357,12 @@ export function fitHrToPowerCalibrationAcrossRaces(
     let sXY = 0;
     let sXX = 0;
     let sYY = 0;
-    const meanPowerForR2 = samples.reduce((s, p) => s + p.weight * p.powerWPerKg, 0) / sumW;
     for (const p of samples) {
       const dPower = p.powerWPerKg - anchor.powerWPerKg;
       const dHr = p.hr - anchor.hr;
       sXY += p.weight * dPower * dHr;
       sXX += p.weight * dPower * dPower;
-      sYY += p.weight * (p.powerWPerKg - meanPowerForR2) * (p.powerWPerKg - meanPowerForR2);
+      sYY += p.weight * dHr * dHr;
     }
     if (!(sXX > 0)) return null;
     const slope = sXY / sXX;
