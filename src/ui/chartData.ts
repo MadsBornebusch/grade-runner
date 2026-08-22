@@ -23,6 +23,13 @@ export interface ChartPoint {
    * recording: useful for Planning mode, where there's no real HR to show
    * yet. */
   estimatedHeartRateBpm: number | null;
+  /** ACTUAL recorded heart rate at this point, straight from the source
+   * GPX/Strava data (CourseSegment.heartRateBpm) -- only ever set by
+   * buildAnalysisChartPoints (a real completed run); Planning mode has no
+   * run to have recorded, so buildChartPoints leaves this undefined.
+   * Preferred over estimatedHeartRateBpm whenever both are available,
+   * since it's a measurement, not a model output. */
+  recordedHeartRateBpm?: number;
 }
 
 /** Shared by both builders below -- estimates HR from this point's own
@@ -83,6 +90,7 @@ export function buildAnalysisChartPoints(
       cumulativeTimeS: r.cumulativeElapsedTimeS,
       surfaceUnpaved: seg?.surfaceUnpaved,
       estimatedHeartRateBpm: estimateHeartRateBpm(r.grossPowerWPerKg, hrEstimateInputs),
+      recordedHeartRateBpm: seg?.heartRateBpm ?? undefined,
     };
   });
 }
@@ -97,14 +105,17 @@ export interface CourseSummaryStats {
    * aggregation is what "how fast would the WHOLE course have felt on
    * flat ground" actually asks for). */
   avgGapMinPerKm: number | null;
-  /** Time-weighted mean of estimatedHeartRateBpm, skipping points with none
-   * (no calibration applied) -- null if no point has an estimate at all. */
+  /** Time-weighted mean heart rate, preferring each point's own recorded
+   * value (a real completed run, analysis mode) over its calibration
+   * estimate (planning mode, or an analysis point with no HR sensor data)
+   * -- null if no point has either. */
   avgHrBpm: number | null;
 }
 
 /** Summarizes a course/effort's chart points into whole-course averages --
- * pace, grade-adjusted pace (GAP), and estimated heart rate. Needs at least
- * 2 points (a single point has no distance/time to weight against). */
+ * pace, grade-adjusted pace (GAP), and heart rate (recorded where
+ * available, else estimated). Needs at least 2 points (a single point has
+ * no distance/time to weight against). */
 export function summarizeChartPoints(points: ChartPoint[]): CourseSummaryStats {
   if (points.length < 2) return { avgPaceMinPerKm: null, avgGapMinPerKm: null, avgHrBpm: null };
 
@@ -124,8 +135,9 @@ export function summarizeChartPoints(points: ChartPoint[]): CourseSummaryStats {
       const gapSpeedMs = gradeAdjustedSpeedMs(cur.speedMs, cur.gradient, cur.mode);
       totalGapTimeS += gapSpeedMs > 0 ? segDistanceM / gapSpeedMs : 0;
     }
-    if (cur.estimatedHeartRateBpm !== null && segTimeS > 0) {
-      hrWeightedSum += cur.estimatedHeartRateBpm * segTimeS;
+    const hrBpm = cur.recordedHeartRateBpm ?? cur.estimatedHeartRateBpm;
+    if (hrBpm !== null && hrBpm !== undefined && segTimeS > 0) {
+      hrWeightedSum += hrBpm * segTimeS;
       hrWeight += segTimeS;
     }
   }

@@ -14,6 +14,10 @@ export function formatPace(speedMs: number): string {
   return `${m}:${String(s).padStart(2, "0")}/km`;
 }
 
+export function formatMinPerKm(minPerKm: number | null): string {
+  return minPerKm === null ? "--:--/km" : formatPace(1000 / (minPerKm * 60));
+}
+
 export function formatDistanceKm(meters: number): string {
   return `${(meters / 1000).toFixed(2)} km`;
 }

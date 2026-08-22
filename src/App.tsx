@@ -402,6 +402,8 @@ function App() {
     return buildAnalysisChartPoints(courseResult.segments, analysisResult.segments, formInputs.walkMaxMs, hrEstimateInputs);
   }, [courseResult, analysisResult, formInputs.walkMaxMs, hrEstimateInputs]);
 
+  const analysisSummaryStats = useMemo(() => summarizeChartPoints(analysisChartPoints), [analysisChartPoints]);
+
   const substratePoints = useMemo(
     () =>
       analysisResult?.segments.map((s, i) => ({
@@ -602,7 +604,7 @@ function App() {
                     )}
                     {resultMode === "analysis" && analysisResult && (
                       <>
-                        <AnalysisSummary result={analysisResult} totalDistanceM={courseResult.totalDistance3D} />
+                        <AnalysisSummary result={analysisResult} totalDistanceM={courseResult.totalDistance3D} summaryStats={analysisSummaryStats} />
                         {analysisChartPoints.length >= 5 && (
                           <>
                             <ElevationProfileChart points={analysisChartPoints} />

@@ -1,6 +1,6 @@
 import type { CourseSummaryStats } from "./chartData";
 import type { FlatPacedResult, SimulationResult } from "../model/solver";
-import { formatDuration, formatPace } from "./format";
+import { formatDuration, formatMinPerKm } from "./format";
 
 interface ResultsSummaryProps {
   theta: number;
@@ -25,10 +25,6 @@ interface ResultsSummaryProps {
    * closest the solver could actually produce (may not match targetTimeS
    * exactly -- see the sublabel logic below). */
   target: { result: SimulationResult; theta: number; targetTimeS: number } | null;
-}
-
-function formatMinPerKm(minPerKm: number | null): string {
-  return minPerKm === null ? "--:--/km" : formatPace(1000 / (minPerKm * 60));
 }
 
 function formatOrBonk(r: SimulationResult): string {

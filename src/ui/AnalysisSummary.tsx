@@ -1,12 +1,18 @@
 import type { AnalysisResult } from "../model/analysis";
-import { formatDuration } from "./format";
+import type { CourseSummaryStats } from "./chartData";
+import { formatDuration, formatMinPerKm } from "./format";
 
 interface AnalysisSummaryProps {
   result: AnalysisResult;
   totalDistanceM: number;
+  /** Whole-run averages (pace, grade-adjusted pace, heart rate) -- see
+   * chartData.ts's summarizeChartPoints. Heart rate here is the ACTUAL
+   * recorded average whenever the run has HR data, not a calibration
+   * estimate (see ChartPoint.recordedHeartRateBpm's own doc). */
+  summaryStats: CourseSummaryStats;
 }
 
-export function AnalysisSummary({ result, totalDistanceM }: AnalysisSummaryProps) {
+export function AnalysisSummary({ result, totalDistanceM, summaryStats }: AnalysisSummaryProps) {
   const bonkSegment = result.bonkIndex !== null ? result.segments.find((s) => s.index === result.bonkIndex) : undefined;
 
   return (
@@ -26,6 +32,17 @@ export function AnalysisSummary({ result, totalDistanceM }: AnalysisSummaryProps
         <span className="results-summary__label">Moving time</span>
         <span className="results-summary__value">{formatDuration(result.totalMovingTimeS)}</span>
       </div>
+
+      {(summaryStats.avgPaceMinPerKm !== null || summaryStats.avgHrBpm !== null) && (
+        <div className="results-summary__averages">
+          <span>Avg pace {formatMinPerKm(summaryStats.avgPaceMinPerKm)}</span>
+          <span title="Grade-adjusted pace -- flat-equivalent pace for the same effort.">
+            GAP {formatMinPerKm(summaryStats.avgGapMinPerKm)}
+          </span>
+          {summaryStats.avgHrBpm !== null && <span>Avg HR {Math.round(summaryStats.avgHrBpm)} bpm</span>}
+        </div>
+      )}
+
       {result.bonked && bonkSegment && (
         <p className="results-summary__warning">
           Glycogen hit reserve at {(bonkSegment.cumulativeDistance3D / 1000).toFixed(1)} km of{" "}
