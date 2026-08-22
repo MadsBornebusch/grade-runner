@@ -161,10 +161,22 @@ export function ResultsSummary({
         </div>
       )}
 
-      {chosenPacing && result.feasible && chosenPacing.result.feasible && (
+      {chosenPacing && chosenPacing.result.feasible && (
         <p className="results-summary__margin-note">
-          Margin: {formatDuration(chosenPacing.result.finishTimeS - result.finishTimeS)} slower than the theoretical
-          ceiling.
+          {target && target.result.feasible ? (
+            target.result.finishTimeS <= chosenPacing.result.finishTimeS ? (
+              <>Your target is {formatDuration(chosenPacing.result.finishTimeS - target.result.finishTimeS)} faster than your typical pacing.</>
+            ) : (
+              <>Your target is {formatDuration(target.result.finishTimeS - chosenPacing.result.finishTimeS)} slower than your typical pacing.</>
+            )
+          ) : (
+            result.feasible && (
+              <>
+                Margin: {formatDuration(chosenPacing.result.finishTimeS - result.finishTimeS)} slower than the theoretical
+                ceiling.
+              </>
+            )
+          )}
           {bestDemonstrated?.result.feasible && chosenPacing.result.finishTimeS > bestDemonstrated.result.finishTimeS && (
             <> Room to improve on your typical pacing: {formatDuration(chosenPacing.result.finishTimeS - bestDemonstrated.result.finishTimeS)}.</>
           )}
