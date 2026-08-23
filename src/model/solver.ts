@@ -610,6 +610,19 @@ export function findFlatPacedFinishTime(inputs: SolverInputs, opts: FlatPacingOp
  * instead of silently simulating a bonk. Symmetrically, a target slower
  * than the gentlest feasible pace falls back to that gentlest plan.
  */
+/**
+ * Search bound for how far ABOVE theta=1 (the "theoretical ceiling")
+ * findThetaForTargetTime will look for a target faster than that ceiling --
+ * NOT a physiological claim (the model has no real collapse mechanism past
+ * theta=1; ceilingGross already IS the duration-aware, anaerobic-capacity-
+ * boosted aerobic limit, so theta>1 just means "more than that," with only
+ * fuel/glycogen left to ever call it infeasible). Bounded purely so an
+ * absurd target (a marathon in 2 minutes) still eventually reports "not
+ * achievable" with a real number attached, instead of the search running
+ * forever or reporting a meaningless huge theta.
+ */
+const ABOVE_CEILING_MAX_THETA = 3;
+
 export function findThetaForTargetTime(
   inputs: SolverInputs,
   targetTimeS: number,
@@ -621,9 +634,7 @@ export function findThetaForTargetTime(
   const scanSteps = opts.scanSteps ?? 20;
 
   const fastest = findSustainableTheta(inputs, { lo: lo0, hi: hi0, iterations, scanSteps });
-  if (!fastest.result.feasible || fastest.result.finishTimeS >= targetTimeS) {
-    return fastest;
-  }
+  if (!fastest.result.feasible) return fastest;
 
   // The target duration is already known here (that's the whole point of
   // this function), so -- unlike findSustainableTheta, which has to
@@ -635,6 +646,60 @@ export function findThetaForTargetTime(
   const simOpts: SimulateOptions = (inputs.anaerobicCapacityMin ?? 0) > 0
     ? { anaerobicBoostReferenceMin: targetTimeS / 60 }
     : {};
+
+  if (fastest.result.finishTimeS > targetTimeS) {
+    // Target is faster than the theoretical ceiling (theta=1) -- rather than
+    // silently snapping back to the ceiling and calling it "not achievable",
+    // search ABOVE theta=1 for the actual effort this would take (theta>1 =
+    // ">100% effort"), so the athlete sees a real number and a real plan
+    // instead of a dead end. Same scan-then-bisect shape as the below-1
+    // search further down, mirrored above fastest.theta instead of below it.
+    let loTheta = fastest.theta;
+    let loResult = fastest.result;
+    let hiTheta: number | null = null;
+    let hiResult: SimulationResult | null = null;
+    for (let i = 1; i <= scanSteps; i++) {
+      const theta = fastest.theta + ((ABOVE_CEILING_MAX_THETA - fastest.theta) * i) / scanSteps;
+      const result = simulate(theta, inputs, simOpts);
+      // Not "continue if infeasible" like the below-1 scan -- feasibility
+      // isn't guaranteed contiguous above theta=1 the way it is below it
+      // (higher theta burns carbs faster, so a course that bonks can bonk
+      // at high theta and not at a slightly lower one); track the fastest
+      // FEASIBLE point reached regardless, so a bonk partway up the range
+      // still reports real progress instead of nothing.
+      if (result.feasible) {
+        loTheta = theta;
+        loResult = result;
+      }
+      if (result.feasible && result.finishTimeS <= targetTimeS) {
+        hiTheta = theta;
+        hiResult = result;
+        break;
+      }
+    }
+    if (hiTheta === null || hiResult === null) {
+      // Even at the search cap (or a bonk stopped it sooner), still not
+      // fast enough -- genuinely unreachable within a sane effort range;
+      // report the fastest feasible attempt found, not a false match.
+      return { theta: loTheta, result: loResult };
+    }
+    let lo = fastest.theta;
+    let hi = hiTheta;
+    let best = hiResult;
+    let bestTheta = hiTheta;
+    for (let i = 0; i < iterations; i++) {
+      const mid = (lo + hi) / 2;
+      const midResult = simulate(mid, inputs, simOpts);
+      if (midResult.feasible && midResult.finishTimeS <= targetTimeS) {
+        hi = mid;
+        best = midResult;
+        bestTheta = mid;
+      } else {
+        lo = mid;
+      }
+    }
+    return { theta: bestTheta, result: best };
+  }
 
   let gentlestTheta: number | null = null;
   let gentlestResult: SimulationResult | null = null;

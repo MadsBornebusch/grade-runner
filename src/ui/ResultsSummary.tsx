@@ -66,9 +66,15 @@ export function ResultsSummary({
   const totalKm = totalDistanceM / 1000;
 
   const targetMatched = target && Math.abs(target.result.finishTimeS - target.targetTimeS) <= TARGET_MATCH_TOLERANCE_S;
-  // Unreachable-fast target: the closest we can do (fastest feasible plan)
-  // still finishes SLOWER than what was asked for.
+  // Unreachable-fast target: the closest we can do still finishes SLOWER
+  // than what was asked for. findThetaForTargetTime now searches theta
+  // ABOVE 1 (>100% effort) for a target faster than the theoretical
+  // ceiling before giving up -- theta > 1 here means it found a genuine,
+  // if unrealistic, above-ceiling attempt that still fell short; theta <= 1
+  // means even that search found nothing feasible, so it fell all the way
+  // back to the plain ceiling itself.
   const targetTooFast = target && !targetMatched && target.result.finishTimeS > target.targetTimeS;
+  const targetAboveCeilingAttempt = targetTooFast && target.theta > 1;
 
   // Lead with whatever's most useful to actually plan around: the athlete's
   // own explicit target when they've set one, else their fitted realistic
@@ -98,16 +104,22 @@ export function ResultsSummary({
       sublabel={
         targetMatched
           ? `${(target.theta * 100).toFixed(0)}% effort`
-          : targetTooFast
-            ? "not achievable — showing fastest sustainable pace"
-            : "closest achievable pace"
+          : targetAboveCeilingAttempt
+            ? `still not achievable — closest is ${(target.theta * 100).toFixed(0)}% effort, beyond your ceiling`
+            : targetTooFast
+              ? "not achievable — showing fastest sustainable pace"
+              : "closest achievable pace"
       }
       title={
         targetMatched
-          ? "The pacing needed to hit your target finish time."
-          : targetTooFast
-            ? "Your target isn't reachable without bonking — this is your fastest sustainable pace instead."
-            : "Your target is slower than this course's gentlest sustainable pace — this is the closest match."
+          ? target.theta > 1
+            ? "Beyond your theoretical ceiling (>100% effort) — hits your target time, but this isn't a realistic plan."
+            : "The pacing needed to hit your target finish time."
+          : targetAboveCeilingAttempt
+            ? "Even pushing past your theoretical ceiling, this course can't reach your target without bonking — this is the closest (still unrealistic) attempt."
+            : targetTooFast
+              ? "Your target isn't reachable without bonking — this is your fastest sustainable pace instead."
+              : "Your target is slower than this course's gentlest sustainable pace — this is the closest match."
       }
     />
   );

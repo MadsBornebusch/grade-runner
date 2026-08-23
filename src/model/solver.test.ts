@@ -601,12 +601,43 @@ describe("findThetaForTargetTime", () => {
     expect(result.finishTimeS).toBeCloseTo(targetTimeS, 0);
   });
 
-  it("falls back to the fastest feasible plan when the target is faster than achievable without bonking", () => {
+  it("searches ABOVE theta=1 for a target faster than the theoretical ceiling, rather than just falling back to it", () => {
+    const course = baseInputs(); // flat 10km, generous fueling -- glycogen isn't the limiter here
+    const fastest = findSustainableTheta(course);
+    const fasterThanCeilingTarget = fastest.result.finishTimeS * 0.5;
+
+    const { theta, result } = findThetaForTargetTime(course, fasterThanCeilingTarget);
+    expect(theta).toBeGreaterThan(fastest.theta); // genuinely >100% effort, not clamped back to 1
+    expect(result.feasible).toBe(true);
+    expect(result.finishTimeS).toBeCloseTo(fasterThanCeilingTarget, 0);
+  });
+
+  it("still reports a real (>100%) fastest-attempt result, not the plain theta=1 ceiling, when even the above-ceiling search cap can't reach an absurd target", () => {
     const course = baseInputs();
     const fastest = findSustainableTheta(course);
-    const impossiblyFastTarget = fastest.result.finishTimeS * 0.5;
+    // Faster than ABOVE_CEILING_MAX_THETA=3 could ever reach on this course.
+    const absurdTarget = fastest.result.finishTimeS * 0.01;
 
-    const { theta, result } = findThetaForTargetTime(course, impossiblyFastTarget);
+    const { theta, result } = findThetaForTargetTime(course, absurdTarget);
+    expect(theta).toBeGreaterThan(fastest.theta);
+    expect(result.feasible).toBe(true);
+    expect(result.finishTimeS).toBeGreaterThan(absurdTarget); // still didn't reach it -- honestly reported, not faked
+  });
+
+  it("falls back to the theta=1 ceiling when the course bonks before reaching any faster-than-ceiling theta", () => {
+    // Fuel-limited: even theta=1 is already right at the edge, so pushing
+    // above it can only bonk sooner, never help -- the above-ceiling search
+    // should find nothing feasible and fall back to the plain ceiling.
+    const fuelLimited = baseInputs({
+      segments: makeSegments(3000, 50, 0), // 150km
+      fueling: { intakeGPerH: 40 },
+      glycogenStoreG: 400,
+    });
+    const fastest = findSustainableTheta(fuelLimited);
+    expect(fastest.result.feasible).toBe(true);
+    const fasterThanCeilingTarget = fastest.result.finishTimeS * 0.9;
+
+    const { theta, result } = findThetaForTargetTime(fuelLimited, fasterThanCeilingTarget);
     expect(theta).toBe(fastest.theta);
     expect(result).toEqual(fastest.result);
   });
