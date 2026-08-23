@@ -68,6 +68,15 @@ export interface FormInputs {
   altitudeAdjustment: boolean;
   /** Fraction lost per hour of durability drift. 0 = off. */
   durabilityDriftPerHour: number;
+  /** Critical-power/critical-speed short-race boost (ceiling.ts's
+   * anaerobicCapacityMultiplier via solver.ts's SolverInputs field of the
+   * same name) -- W'/CP in minutes, how much "extra" capacity above LT2 a
+   * short race can draw down. 0 = off. Not threaded through
+   * resolveCeilingParams -- see that function's own field list and
+   * anaerobicCapacityMultiplier's doc for why this is deliberately a
+   * solver-only input, not part of the ceiling model pacingFit.ts fits
+   * against. */
+  anaerobicCapacityMin: number;
   /** Flat cost multiplier applied to unpaved/technical trail segments (see
    * src/model/surfaceExposure.ts) -- 1 = off (default; also the practical
    * value for any course/race with no surface data available yet). Not a
@@ -145,6 +154,10 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   forceWalkAboveGrade: null,
   altitudeAdjustment: true,
   durabilityDriftPerHour: 0,
+  // 1 minute matches the anchor points from the critical-power literature
+  // review this was calibrated against: ~125%/112%/107%/103%/101% of LT2 at
+  // 4/8/15/30/55 min respectively (1 + 1/t at those durations).
+  anaerobicCapacityMin: 1,
   unpavedCostMultiplier: 1,
   surfaceCostMultipliers: null,
   hrPowerCalibrationSlope: null,

@@ -189,6 +189,35 @@ describe("findSustainableTheta", () => {
   });
 });
 
+describe("anaerobicCapacityMin (critical-power short-race boost)", () => {
+  it("simulate() is byte-for-byte unchanged when anaerobicCapacityMin is omitted", () => {
+    const course = baseInputs();
+    expect(simulate(0.6, course)).toEqual(simulate(0.6, baseInputs({ anaerobicCapacityMin: 0 })));
+  });
+
+  it("lets a short race (theta already at 1, aerobically unconstrained) finish faster than without the boost", () => {
+    const shortCourse = makeSegments(40, 50, 0); // ~2km
+    const unboosted = findSustainableTheta(baseInputs({ segments: shortCourse }));
+    const boosted = findSustainableTheta(baseInputs({ segments: shortCourse, anaerobicCapacityMin: 1 }));
+    expect(unboosted.theta).toBe(1);
+    expect(boosted.theta).toBe(1);
+    expect(unboosted.result.feasible).toBe(true);
+    expect(boosted.result.feasible).toBe(true);
+    expect(boosted.result.finishTimeS).toBeLessThan(unboosted.result.finishTimeS);
+  });
+
+  it("only moves a long, multi-hour race's overall finish time by a couple percent (the boost only touches its first ~90min)", () => {
+    const longSegments = makeSegments(3000, 50, 0); // 150km
+    const longFueling = { fueling: { intakeGPerH: 90 }, glycogenStoreG: 3000 };
+    const unboosted = findSustainableTheta(baseInputs({ segments: longSegments, ...longFueling }));
+    const boosted = findSustainableTheta(baseInputs({ segments: longSegments, ...longFueling, anaerobicCapacityMin: 1 }));
+    expect(unboosted.result.feasible).toBe(true);
+    expect(boosted.result.feasible).toBe(true);
+    const pctDiff = Math.abs(boosted.result.finishTimeS - unboosted.result.finishTimeS) / unboosted.result.finishTimeS;
+    expect(pctDiff).toBeLessThan(0.02);
+  });
+});
+
 describe("findFlatPacedFinishTime (pacing-margin follow-up)", () => {
   it("simulate() is byte-for-byte unchanged when flatDurationMin is omitted", () => {
     const course = baseInputs();

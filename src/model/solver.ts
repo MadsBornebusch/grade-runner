@@ -6,7 +6,7 @@
 import type { CourseSegment, SurfaceCategory } from "../gpx/pipeline";
 import { costOfRunning, costOfWalking, maxDescentSpeedMs } from "./minetti";
 import { grossToNet, netToGross } from "./energetics";
-import { type CeilingParams, ceilingPower, maxAerobicPower, sustainableFraction } from "./ceiling";
+import { anaerobicCapacityMultiplier, type CeilingParams, ceilingPower, maxAerobicPower, sustainableFraction } from "./ceiling";
 import type { DescentExposureBasis } from "./pacingFit";
 import {
   type FuelingParams,
@@ -68,6 +68,19 @@ export interface SolverInputs {
    * identical to before this field existed.
    */
   surfaceCostMultipliers?: Partial<Record<SurfaceCategory, number>>;
+  /**
+   * Critical-power/critical-speed short-race boost (ceiling.ts's
+   * anaerobicCapacityMultiplier) -- W'/CP expressed in minutes, i.e. how
+   * many minutes of "extra" capacity above LT2 the athlete can draw down
+   * for a race short enough to need it. 0/undefined = off (byte-for-byte
+   * identical to before this field existed). Not a CeilingParams field for
+   * the same reason unpavedCostMultiplier above isn't: ceilingPower is
+   * called directly by pacingFit.ts on real recorded elapsed time to fit
+   * tau/fInf, and this term would corrupt that fit if it lived there (see
+   * anaerobicCapacityMultiplier's own doc) -- it only belongs in forward
+   * simulation.
+   */
+  anaerobicCapacityMin?: number;
 }
 
 export interface SegmentResult {
@@ -194,15 +207,17 @@ export function simulate(theta: number, inputs: SolverInputs, opts: SimulateOpti
             ? cumulativeDescentImpactSquared
             : undefined;
 
-    const ceilingGross = ceilingPower(
-      {
-        tMin: opts.flatDurationMin ?? elapsedMin,
-        altitudeM,
-        elapsedHours,
-        ...(descentExposure !== undefined ? { descentExposure } : {}),
-      },
-      inputs.ceilingParams,
-    );
+    const boostTMin = opts.flatDurationMin ?? elapsedMin;
+    const ceilingGross =
+      ceilingPower(
+        {
+          tMin: boostTMin,
+          altitudeM,
+          elapsedHours,
+          ...(descentExposure !== undefined ? { descentExposure } : {}),
+        },
+        inputs.ceilingParams,
+      ) * anaerobicCapacityMultiplier(boostTMin, inputs.anaerobicCapacityMin ?? 0);
     const targetOverride = opts.targetGrossPowerWPerKgOverride?.(seg.index, elapsedMin, elapsedHours, altitudeM);
     const targetGrossPowerWPerKg = targetOverride ?? theta * ceilingGross;
     const targetNet = Math.max(0, grossToNet(targetGrossPowerWPerKg));
@@ -493,7 +508,9 @@ export function findFlatPacedFinishTime(inputs: SolverInputs, opts: FlatPacingOp
   }
 
   const targetFractionAt = (candidateMin: number): number =>
-    (opts.marginCurve ? opts.marginCurve(candidateMin / 60) : 1) * sustainableFraction(candidateMin, inputs.ceilingParams);
+    (opts.marginCurve ? opts.marginCurve(candidateMin / 60) : 1) *
+    sustainableFraction(candidateMin, inputs.ceilingParams) *
+    anaerobicCapacityMultiplier(candidateMin, inputs.anaerobicCapacityMin ?? 0);
 
   if (bracketLo === null || bracketHi === null) {
     return {

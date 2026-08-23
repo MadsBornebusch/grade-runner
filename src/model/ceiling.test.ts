@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { altitudeFraction, ceilingPower, sustainableFraction } from "./ceiling";
+import { altitudeFraction, anaerobicCapacityMultiplier, ceilingPower, sustainableFraction } from "./ceiling";
 
 describe("sustainableFraction", () => {
   it("starts near f0 and decays toward f_inf, capped by LT2", () => {
@@ -30,6 +30,38 @@ describe("sustainableFraction", () => {
     for (const t of [0, 60, 600, 6000]) {
       expect(sustainableFraction(t, params)).toBeCloseTo(0.85, 6); // capped by lt2Fraction, not decaying toward fInf
     }
+  });
+});
+
+describe("anaerobicCapacityMultiplier", () => {
+  it("matches the critical-power anchor points at anaerobicCapacityMin=1", () => {
+    expect(anaerobicCapacityMultiplier(4, 1)).toBeCloseTo(1.25, 2); // ~125% at 4 min
+    expect(anaerobicCapacityMultiplier(8, 1)).toBeCloseTo(1.125, 2); // ~112% at 8 min
+    expect(anaerobicCapacityMultiplier(15, 1)).toBeCloseTo(1.067, 2); // ~107% at 15 min
+    expect(anaerobicCapacityMultiplier(30, 1)).toBeCloseTo(1.033, 2); // ~103% at 30 min
+    expect(anaerobicCapacityMultiplier(55, 1)).toBeCloseTo(1.018, 2); // ~roughly LT2 by 55 min
+  });
+
+  it("is 1 (no boost) when disabled", () => {
+    expect(anaerobicCapacityMultiplier(4, 0)).toBe(1);
+  });
+
+  it("is 1 for non-positive duration", () => {
+    expect(anaerobicCapacityMultiplier(0, 1)).toBe(1);
+    expect(anaerobicCapacityMultiplier(-5, 1)).toBe(1);
+  });
+
+  it("holds flat below the 2-minute floor instead of exploding toward t=0", () => {
+    expect(anaerobicCapacityMultiplier(1, 1)).toBeCloseTo(1.5, 6);
+    expect(anaerobicCapacityMultiplier(0.1, 1)).toBeCloseTo(1.5, 6);
+  });
+
+  it("asymptotes toward 1 (negligible) for long durations", () => {
+    expect(anaerobicCapacityMultiplier(600, 1)).toBeLessThan(1.01);
+  });
+
+  it("scales linearly with anaerobicCapacityMin", () => {
+    expect(anaerobicCapacityMultiplier(10, 2)).toBeCloseTo(1 + 2 * (anaerobicCapacityMultiplier(10, 1) - 1), 6);
   });
 });
 

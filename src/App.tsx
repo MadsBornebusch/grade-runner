@@ -201,6 +201,7 @@ function App() {
       altitudeAdjustment: formInputs.altitudeAdjustment,
       unpavedCostMultiplier: formInputs.unpavedCostMultiplier,
       surfaceCostMultipliers: formInputs.surfaceCostMultipliers ?? undefined,
+      anaerobicCapacityMin: formInputs.anaerobicCapacityMin,
     };
     lastSolverInputsRef.current = built;
     return built;
@@ -235,6 +236,7 @@ function App() {
     formInputs.glycogenGPerKg,
     formInputs.forceWalkAboveGrade,
     formInputs.altitudeAdjustment,
+    formInputs.anaerobicCapacityMin,
     formInputs.unpavedCostMultiplier,
     formInputs.surfaceCostMultipliers,
   ]);

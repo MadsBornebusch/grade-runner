@@ -567,6 +567,31 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
               onChange={(v) => set("durabilityDriftPerHour", v)}
             />
           )}
+          <label className="field field--checkbox">
+            <input
+              type="checkbox"
+              checked={values.anaerobicCapacityMin > 0}
+              disabled={!values.pacingCurveEnabled}
+              onChange={(e) => set("anaerobicCapacityMin", e.target.checked ? 1 : 0)}
+            />
+            <span>Anaerobic capacity (short-race boost)</span>
+          </label>
+          <p className="field-group-help">
+            Lets short races push above LT2 (critical-power model): roughly +25% at 4 min, +12% at 8 min, +7% at 15
+            min, +3% at 30 min, fading to ~0 by 50-60 min. On by default.
+          </p>
+          {values.anaerobicCapacityMin > 0 && (
+            <NumberField
+              label="W'/CP"
+              hint="minutes of extra capacity above LT2"
+              value={values.anaerobicCapacityMin}
+              step={0.1}
+              min={0}
+              max={5}
+              disabled={!values.pacingCurveEnabled}
+              onChange={(v) => set("anaerobicCapacityMin", v)}
+            />
+          )}
         </details>
       </fieldset>
 

@@ -64,6 +64,39 @@ export function sustainableFraction(
   return Math.min(fraction, lt2Fraction);
 }
 
+/** Below this many minutes, anaerobicCapacityMultiplier holds its value flat
+ * instead of continuing to extrapolate 1+k/t -- the critical-power model's
+ * own cited validity window bottoms out around 2 minutes (see PLAN.md §13's
+ * citation check), and an unfloored hyperbola blows up as t->0. */
+const MIN_ANAEROBIC_BOOST_T_MIN = 2;
+
+/**
+ * Critical-power/critical-speed short-race boost: how far ABOVE the
+ * LT2-anchored ceiling a race of duration `tMin` can sustain, on top of
+ * sustainableFraction's own long-race fade curve -- Monod & Scherrer's
+ * hyperbolic P(t) = CP + W'/t (see Poole, Burnley, Vanhatalo & Jones'
+ * reviews), reparameterized as a multiplier: `1 + anaerobicCapacityMin / t`.
+ * `anaerobicCapacityMin` is W'/CP expressed in minutes -- how many minutes
+ * of "extra" capacity above LT2 the athlete can draw down. 1 (no boost)
+ * when `anaerobicCapacityMin` is 0 or `tMin` is non-positive; asymptotes to
+ * 1 as `tMin` grows, so it's negligible (<2%) beyond ~90 minutes without
+ * needing an explicit cutoff.
+ *
+ * Deliberately NOT folded into sustainableFraction/ceilingPower: those are
+ * called directly by pacingFit.ts on real recorded elapsed time to fit
+ * tau/fInf from historical races, and this term would corrupt that fit
+ * (inflating the ceiling -- and so deflating the effort-fraction trend --
+ * for the first ~90 minutes of every race in the training set, not just
+ * short ones). solver.ts applies this separately, only in forward
+ * simulation, exactly the way unpavedCostMultiplier is threaded through
+ * SolverInputs rather than folded into CeilingParams for its own,
+ * analogous reason (see that field's own doc).
+ */
+export function anaerobicCapacityMultiplier(tMin: number, anaerobicCapacityMin: number): number {
+  if (anaerobicCapacityMin <= 0 || tMin <= 0) return 1;
+  return 1 + anaerobicCapacityMin / Math.max(tMin, MIN_ANAEROBIC_BOOST_T_MIN);
+}
+
 /**
  * Fraction of VO2max available at altitude (Cerretelli), 1.0 at sea level.
  * ≈0.94 at 2000m, ≈0.80 at 4000m.
