@@ -694,6 +694,21 @@
   opacity: 0.85;
 }
 
+/* Marks a value in .results-summary__averages as modeled/estimated rather
+   than read straight from the file -- e.g. Analysis's Avg HR when the run
+   has no (or only partial) recorded heart rate. Paired with a leading "~"
+   on the number itself and an explanatory title, not a replacement for
+   either -- three redundant, low-key cues rather than one that's easy to
+   miss. */
+.results-summary__estimated-flag {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  opacity: 0.7;
+  margin-left: 2px;
+}
+
 .results-summary__warning {
   color: var(--warn);
   flex-basis: 100%;

@@ -30,6 +30,10 @@ export function SubstrateChart({ points }: SubstrateChartProps) {
           </button>
         )}
       </div>
+      <p className="field-group-help">
+        Modeled, not measured — no file records what you actually burned. Derived from your pace/power and the
+        substrate-split model in Settings (fat-oxidation peak, LT1/LT2), applied to this run.
+      </p>
       <div className="chart__canvas" ref={containerRef}>
         {width > 0 && (
           <LineChart width={width} height={HEIGHT} data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>

@@ -6,9 +6,12 @@ interface AnalysisSummaryProps {
   result: AnalysisResult;
   totalDistanceM: number;
   /** Whole-run averages (pace, grade-adjusted pace, heart rate) -- see
-   * chartData.ts's summarizeChartPoints. Heart rate here is the ACTUAL
-   * recorded average whenever the run has HR data, not a calibration
-   * estimate (see ChartPoint.recordedHeartRateBpm's own doc). */
+   * chartData.ts's summarizeChartPoints. Heart rate can be the ACTUAL
+   * recorded average, a calibration ESTIMATE (no HR sensor data at all,
+   * or no calibration fit yet), or a MIX of the two (sensor dropout
+   * mid-run) -- summaryStats.avgHrSource says which, and this component
+   * labels the value accordingly rather than presenting all three the
+   * same way. */
   summaryStats: CourseSummaryStats;
 }
 
@@ -35,11 +38,27 @@ export function AnalysisSummary({ result, totalDistanceM, summaryStats }: Analys
 
       {(summaryStats.avgPaceMinPerKm !== null || summaryStats.avgHrBpm !== null) && (
         <div className="results-summary__averages">
-          <span>Avg pace {formatMinPerKm(summaryStats.avgPaceMinPerKm)}</span>
-          <span title="Grade-adjusted pace -- flat-equivalent pace for the same effort.">
+          <span title="From your file's recorded distance and time.">Avg pace {formatMinPerKm(summaryStats.avgPaceMinPerKm)}</span>
+          <span title="Grade-adjusted pace -- your recorded pace re-expressed as an equivalent flat-ground pace, via the same cost model Planning uses. Modeled, not a raw recording.">
             GAP {formatMinPerKm(summaryStats.avgGapMinPerKm)}
           </span>
-          {summaryStats.avgHrBpm !== null && <span>Avg HR {Math.round(summaryStats.avgHrBpm)} bpm</span>}
+          {summaryStats.avgHrBpm !== null && (
+            <span
+              title={
+                summaryStats.avgHrSource === "recorded"
+                  ? "From your file's recorded heart rate."
+                  : summaryStats.avgHrSource === "mixed"
+                    ? "Partly your file's recorded heart rate, partly estimated from your HR-effort calibration where the recording had gaps."
+                    : "Estimated from your HR-effort calibration -- this run has no recorded heart rate to show instead."
+              }
+            >
+              Avg HR {summaryStats.avgHrSource !== "recorded" ? "~" : ""}
+              {Math.round(summaryStats.avgHrBpm)} bpm
+              {summaryStats.avgHrSource !== "recorded" && (
+                <sup className="results-summary__estimated-flag">{summaryStats.avgHrSource === "mixed" ? "mixed" : "est"}</sup>
+              )}
+            </span>
+          )}
         </div>
       )}
 

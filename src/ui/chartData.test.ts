@@ -17,8 +17,9 @@ function point(overrides: Partial<ChartPoint> = {}): ChartPoint {
 
 describe("summarizeChartPoints", () => {
   it("returns nulls for fewer than 2 points", () => {
-    expect(summarizeChartPoints([])).toEqual({ avgPaceMinPerKm: null, avgGapMinPerKm: null, avgHrBpm: null });
-    expect(summarizeChartPoints([point()])).toEqual({ avgPaceMinPerKm: null, avgGapMinPerKm: null, avgHrBpm: null });
+    const empty = { avgPaceMinPerKm: null, avgGapMinPerKm: null, avgHrBpm: null, avgHrSource: null };
+    expect(summarizeChartPoints([])).toEqual(empty);
+    expect(summarizeChartPoints([point()])).toEqual(empty);
   });
 
   it("computes avg pace as total time over total distance on a flat, constant-speed course", () => {
@@ -64,6 +65,35 @@ describe("summarizeChartPoints", () => {
 
   it("returns null avg HR when no point has an estimate", () => {
     const points = [point({ cumulativeTimeS: 0 }), point({ distanceKm: 1, cumulativeTimeS: 300 })];
-    expect(summarizeChartPoints(points).avgHrBpm).toBeNull();
+    const { avgHrBpm, avgHrSource } = summarizeChartPoints(points);
+    expect(avgHrBpm).toBeNull();
+    expect(avgHrSource).toBeNull();
+  });
+
+  it("reports avgHrSource 'estimated' when every contributing point is a calibration estimate, not a recording", () => {
+    const points = [
+      point({ distanceKm: 0, cumulativeTimeS: 0 }),
+      point({ distanceKm: 0.3, cumulativeTimeS: 100, estimatedHeartRateBpm: 140 }),
+    ];
+    expect(summarizeChartPoints(points).avgHrSource).toBe("estimated");
+  });
+
+  it("reports avgHrSource 'recorded' when every contributing point has a real recorded reading", () => {
+    const points = [
+      point({ distanceKm: 0, cumulativeTimeS: 0 }),
+      point({ distanceKm: 0.3, cumulativeTimeS: 100, recordedHeartRateBpm: 140 }),
+    ];
+    expect(summarizeChartPoints(points).avgHrSource).toBe("recorded");
+  });
+
+  it("reports avgHrSource 'mixed' when some segments are recorded and others fall back to an estimate (e.g. sensor dropout)", () => {
+    const points = [
+      point({ distanceKm: 0, cumulativeTimeS: 0 }),
+      // Segment ending here (0->100s) is a real recording.
+      point({ distanceKm: 0.3, cumulativeTimeS: 100, recordedHeartRateBpm: 150 }),
+      // Segment ending here (100->400s) has no recording, only an estimate.
+      point({ distanceKm: 1.3, cumulativeTimeS: 400, estimatedHeartRateBpm: 160 }),
+    ];
+    expect(summarizeChartPoints(points).avgHrSource).toBe("mixed");
   });
 });

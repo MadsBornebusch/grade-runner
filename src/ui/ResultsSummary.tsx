@@ -162,8 +162,8 @@ export function ResultsSummary({
             GAP {formatMinPerKm(summaryStats.avgGapMinPerKm)}
           </span>
           {summaryStats.avgHrBpm !== null && (
-            <span title="Estimated from your HR-effort calibration, not measured.">
-              Avg HR ~{Math.round(summaryStats.avgHrBpm)} bpm
+            <span title="Estimated from your HR-effort calibration, not measured -- Planning mode has no recorded run to show instead.">
+              Avg HR ~{Math.round(summaryStats.avgHrBpm)} bpm<sup className="results-summary__estimated-flag">est</sup>
             </span>
           )}
         </div>

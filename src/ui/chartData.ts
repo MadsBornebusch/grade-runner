@@ -110,6 +110,19 @@ export interface CourseSummaryStats {
    * estimate (planning mode, or an analysis point with no HR sensor data)
    * -- null if no point has either. */
   avgHrBpm: number | null;
+  /**
+   * Whether avgHrBpm above is a real measurement, a model output, or a
+   * blend of both -- needed because avgHrBpm itself can't tell a caller
+   * which: it silently falls back to estimatedHeartRateBpm per-point
+   * (recordedHeartRateBpm ?? estimatedHeartRateBpm above), so a run with
+   * sensor dropout, or no HR strap at all, produces the exact same shape
+   * of number as a fully-measured one. "recorded" = every contributing
+   * point had a real reading; "estimated" = none did (planning mode
+   * always lands here, since it has no recorded run at all); "mixed" =
+   * some segments measured, some estimated (e.g. HR sensor dropout mid-run
+   * in analysis mode). Null iff avgHrBpm itself is null.
+   */
+  avgHrSource: "recorded" | "estimated" | "mixed" | null;
 }
 
 /** Summarizes a course/effort's chart points into whole-course averages --
@@ -117,7 +130,7 @@ export interface CourseSummaryStats {
  * available, else estimated). Needs at least 2 points (a single point has
  * no distance/time to weight against). */
 export function summarizeChartPoints(points: ChartPoint[]): CourseSummaryStats {
-  if (points.length < 2) return { avgPaceMinPerKm: null, avgGapMinPerKm: null, avgHrBpm: null };
+  if (points.length < 2) return { avgPaceMinPerKm: null, avgGapMinPerKm: null, avgHrBpm: null, avgHrSource: null };
 
   const totalDistanceKm = points[points.length - 1].distanceKm - points[0].distanceKm;
   const totalTimeS = points[points.length - 1].cumulativeTimeS - points[0].cumulativeTimeS;
@@ -126,6 +139,7 @@ export function summarizeChartPoints(points: ChartPoint[]): CourseSummaryStats {
   let totalGapTimeS = 0;
   let hrWeightedSum = 0;
   let hrWeight = 0;
+  let recordedHrWeight = 0;
   for (let i = 1; i < points.length; i++) {
     const prev = points[i - 1];
     const cur = points[i];
@@ -139,12 +153,17 @@ export function summarizeChartPoints(points: ChartPoint[]): CourseSummaryStats {
     if (hrBpm !== null && hrBpm !== undefined && segTimeS > 0) {
       hrWeightedSum += hrBpm * segTimeS;
       hrWeight += segTimeS;
+      if (cur.recordedHeartRateBpm !== undefined) recordedHrWeight += segTimeS;
     }
   }
+
+  const avgHrSource: CourseSummaryStats["avgHrSource"] =
+    hrWeight <= 0 ? null : recordedHrWeight <= 0 ? "estimated" : recordedHrWeight >= hrWeight ? "recorded" : "mixed";
 
   return {
     avgPaceMinPerKm,
     avgGapMinPerKm: totalDistanceKm > 0 ? totalGapTimeS / 60 / totalDistanceKm : null,
     avgHrBpm: hrWeight > 0 ? hrWeightedSum / hrWeight : null,
+    avgHrSource,
   };
 }
