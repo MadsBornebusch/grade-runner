@@ -216,6 +216,29 @@ describe("anaerobicCapacityMin (critical-power short-race boost)", () => {
     const pctDiff = Math.abs(boosted.result.finishTimeS - unboosted.result.finishTimeS) / unboosted.result.finishTimeS;
     expect(pctDiff).toBeLessThan(0.02);
   });
+
+  it("does not spike early-race power above LT2 for a long ultra -- the boost applies as one flat factor over the whole race, not per elapsed-time segment", () => {
+    const longSegments = makeSegments(3000, 50, 0); // 150km
+    const longFueling = { fueling: { intakeGPerH: 90 }, glycogenStoreG: 3000 };
+    const unboosted = findSustainableTheta(baseInputs({ segments: longSegments, ...longFueling }));
+    const boosted = findSustainableTheta(baseInputs({ segments: longSegments, ...longFueling, anaerobicCapacityMin: 1 }));
+    expect(unboosted.result.feasible).toBe(true);
+    expect(boosted.result.feasible).toBe(true);
+
+    // Per-segment elapsedMin lookup would put segment 1 onward (elapsedMin
+    // just above 0, well under the 2-minute floor) at ~150% of LT2 -- confirm
+    // it's nowhere near that: this is the exact "sprint the first 2 minutes
+    // of your 100-miler" bug the flat boost reference is meant to prevent.
+    const firstSegRatio = boosted.result.segments[1].grossPowerWPerKg / unboosted.result.segments[1].grossPowerWPerKg;
+    expect(firstSegRatio).toBeLessThan(1.05);
+
+    // And the boost factor should be about the same at the start as partway
+    // through -- a flat whole-race multiplier, not one that decays with
+    // elapsed time within the simulation.
+    const midIndex = Math.floor(boosted.result.segments.length / 2);
+    const midSegRatio = boosted.result.segments[midIndex].grossPowerWPerKg / unboosted.result.segments[midIndex].grossPowerWPerKg;
+    expect(midSegRatio).toBeCloseTo(firstSegRatio, 2);
+  });
 });
 
 describe("findFlatPacedFinishTime (pacing-margin follow-up)", () => {

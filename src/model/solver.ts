@@ -157,6 +157,27 @@ export interface SimulateOptions {
     elapsedHours: number,
     altitudeM: number,
   ) => number | null | undefined;
+  /**
+   * Evaluates ceiling.ts's anaerobicCapacityMultiplier at this FIXED value
+   * (minutes) instead of each segment's own elapsedMin/flatDurationMin --
+   * same "flat instead of per-segment" idea as flatDurationMin above, but
+   * for the anaerobic-capacity term specifically, and needed even when
+   * flatDurationMin itself is NOT set. Without this, findSustainableTheta's
+   * plain elapsedMin-per-segment lookup would boost the first ~2 minutes of
+   * EVERY race -- including a 15-hour ultra -- up to 1+anaerobicCapacityMin/2
+   * (e.g. 150% of LT2 at the default 1-minute capacity), a nonsensical
+   * "sprint the first 2 minutes of your 100-miler" artifact: W'/CP models a
+   * finite capacity spent once over a genuinely short EVENT, not something
+   * to re-earn and spend at the start of every elapsed-time window. Callers
+   * that know the race's actual (or self-consistently resolved) total
+   * duration -- findSustainableTheta, findThetaForTargetTime -- pass it
+   * here so the boost is instead a single flat multiplier over the whole
+   * race, matching how flatDurationMin already avoids the equivalent
+   * problem for the fatigue-decay curve. Undefined (the default) falls back
+   * to flatDurationMin ?? elapsedMin, byte-for-byte identical to before
+   * this option existed.
+   */
+  anaerobicBoostReferenceMin?: number;
 }
 
 /**
@@ -207,11 +228,12 @@ export function simulate(theta: number, inputs: SolverInputs, opts: SimulateOpti
             ? cumulativeDescentImpactSquared
             : undefined;
 
-    const boostTMin = opts.flatDurationMin ?? elapsedMin;
+    const fadeTMin = opts.flatDurationMin ?? elapsedMin;
+    const boostTMin = opts.anaerobicBoostReferenceMin ?? fadeTMin;
     const ceilingGross =
       ceilingPower(
         {
-          tMin: boostTMin,
+          tMin: fadeTMin,
           altitudeM,
           elapsedHours,
           ...(descentExposure !== undefined ? { descentExposure } : {}),
@@ -323,9 +345,20 @@ export interface SolverResult {
  * anyway), then bisects between that point and the next infeasible sample
  * above it, where monotonicity genuinely holds.
  */
-export function findSustainableTheta(
+/**
+ * Core of findSustainableTheta, parameterized over the SimulateOptions
+ * threaded into every internal simulate() call -- split out so
+ * findSustainableTheta itself can run this twice when anaerobicCapacityMin
+ * is set: once unboosted to get a seed total duration, then once more with
+ * anaerobicBoostReferenceMin pinned to that seed, so the anaerobic-capacity
+ * boost lands as a single flat multiplier over the whole race instead of
+ * spiking the first ~2 minutes of every race regardless of its actual
+ * length (see anaerobicBoostReferenceMin's own doc on SimulateOptions).
+ */
+function findSustainableThetaAt(
   inputs: SolverInputs,
-  opts: BisectionOptions & { scanSteps?: number } = {},
+  opts: BisectionOptions & { scanSteps?: number },
+  simOpts: SimulateOptions,
 ): SolverResult {
   const hi0 = opts.hi ?? 1;
   const lo0 = opts.lo ?? 0.05;
@@ -337,7 +370,7 @@ export function findSustainableTheta(
       ? result.segments[result.segments.length - 1].cumulativeDistance3D
       : 0;
 
-  const hiResult = simulate(hi0, inputs);
+  const hiResult = simulate(hi0, inputs, simOpts);
   if (hiResult.feasible) return { theta: hi0, result: hiResult };
 
   // If no theta is feasible anywhere (checked below), report whichever
@@ -352,7 +385,7 @@ export function findSustainableTheta(
   let hi = hi0;
   for (let i = 1; i <= scanSteps; i++) {
     const theta = lo0 + ((hi0 - lo0) * i) / scanSteps;
-    const result = simulate(theta, inputs);
+    const result = simulate(theta, inputs, simOpts);
     if (distanceReached(result) > distanceReached(furthestResult)) {
       furthestTheta = theta;
       furthestResult = result;
@@ -375,7 +408,7 @@ export function findSustainableTheta(
   let best = bestFeasibleResult;
   for (let i = 0; i < iterations; i++) {
     const mid = (lo + hi) / 2;
-    const midResult = simulate(mid, inputs);
+    const midResult = simulate(mid, inputs, simOpts);
     if (midResult.feasible) {
       lo = mid;
       best = midResult;
@@ -384,6 +417,24 @@ export function findSustainableTheta(
     }
   }
   return { theta: lo, result: best };
+}
+
+export function findSustainableTheta(
+  inputs: SolverInputs,
+  opts: BisectionOptions & { scanSteps?: number } = {},
+): SolverResult {
+  const capacityMin = inputs.anaerobicCapacityMin ?? 0;
+  if (capacityMin <= 0) return findSustainableThetaAt(inputs, opts, {});
+
+  // Seed pass: unboosted (anaerobicCapacityMin off), to get a total-duration
+  // estimate the boost can be pinned to. Feasibility/theta shape don't
+  // depend on the boost being off here -- only the DURATION does, and the
+  // boost's own effect on duration is exactly what the refine pass below
+  // resolves.
+  const seed = findSustainableThetaAt({ ...inputs, anaerobicCapacityMin: 0 }, opts, {});
+  if (!seed.result.feasible) return seed;
+
+  return findSustainableThetaAt(inputs, opts, { anaerobicBoostReferenceMin: seed.result.finishTimeS / 60 });
 }
 
 export interface FlatPacingOptions {
@@ -574,11 +625,22 @@ export function findThetaForTargetTime(
     return fastest;
   }
 
+  // The target duration is already known here (that's the whole point of
+  // this function), so -- unlike findSustainableTheta, which has to
+  // self-consistently discover its own duration first -- the
+  // anaerobic-capacity boost can be pinned to it directly: a theta that hits
+  // targetTimeS exactly IS a race of that length, no seed/refine pass
+  // needed. Same "spike the first ~2 minutes of every race" problem this
+  // avoids -- see anaerobicBoostReferenceMin's own doc.
+  const simOpts: SimulateOptions = (inputs.anaerobicCapacityMin ?? 0) > 0
+    ? { anaerobicBoostReferenceMin: targetTimeS / 60 }
+    : {};
+
   let gentlestTheta: number | null = null;
   let gentlestResult: SimulationResult | null = null;
   for (let i = 0; i <= scanSteps; i++) {
     const theta = lo0 + ((fastest.theta - lo0) * i) / scanSteps;
-    const result = simulate(theta, inputs);
+    const result = simulate(theta, inputs, simOpts);
     if (result.feasible) {
       gentlestTheta = theta;
       gentlestResult = result;
@@ -597,7 +659,7 @@ export function findThetaForTargetTime(
   let hiTheta = fastest.theta;
   for (let i = 1; i <= scanSteps; i++) {
     const theta = gentlestTheta + ((fastest.theta - gentlestTheta) * i) / scanSteps;
-    const result = simulate(theta, inputs);
+    const result = simulate(theta, inputs, simOpts);
     if (!result.feasible) continue; // stay defensive; feasibility is expected contiguous above gentlestTheta
     if (result.finishTimeS <= targetTimeS) {
       hiTheta = theta;
@@ -613,7 +675,7 @@ export function findThetaForTargetTime(
   let bestTheta = loTheta;
   for (let i = 0; i < iterations; i++) {
     const mid = (lo + hi) / 2;
-    const midResult = simulate(mid, inputs);
+    const midResult = simulate(mid, inputs, simOpts);
     if (!midResult.feasible) {
       hi = mid;
       continue;
