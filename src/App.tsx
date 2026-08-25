@@ -540,11 +540,6 @@ function App() {
 
                 {courseResult && (
                   <>
-                    <RouteMap
-                      routePoints={courseResult.routePoints}
-                      highlightedDistanceKm={highlightedDistanceKm}
-                      onHighlight={setHighlightedDistanceKm}
-                    />
                     {resultMode === "planning" && solverResult && (
                       <>
                         <div className="target-time-input">
@@ -587,6 +582,11 @@ function App() {
                             targetSegments={courseResult.segments}
                           />
                         )}
+                        <RouteMap
+                          routePoints={courseResult.routePoints}
+                          highlightedDistanceKm={highlightedDistanceKm}
+                          onHighlight={setHighlightedDistanceKm}
+                        />
                         {/* A handful of segments (e.g. an immediate bonk) isn't
                             enough for a meaningful chart axis/scale. */}
                         {chartPoints.length >= 5 && (
@@ -621,6 +621,11 @@ function App() {
                     {resultMode === "analysis" && analysisResult && (
                       <>
                         <AnalysisSummary result={analysisResult} totalDistanceM={courseResult.totalDistance3D} summaryStats={analysisSummaryStats} />
+                        <RouteMap
+                          routePoints={courseResult.routePoints}
+                          highlightedDistanceKm={highlightedDistanceKm}
+                          onHighlight={setHighlightedDistanceKm}
+                        />
                         {analysisChartPoints.length >= 5 && (
                           <>
                             <ElevationProfileChart points={analysisChartPoints} highlightedDistanceKm={highlightedDistanceKm} />
