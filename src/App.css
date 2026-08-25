@@ -762,6 +762,17 @@
   touch-action: none;
 }
 
+.route-map__canvas {
+  width: 100%;
+  height: 320px;
+  border-radius: 6px;
+  overflow: hidden;
+  /* Same carousel-swipe-vs-internal-drag conflict as .chart__canvas above --
+     a drag starting on the map is Leaflet's own pan/zoom gesture, not the
+     page carousel's horizontal swipe. */
+  touch-action: none;
+}
+
 .split-table {
   border: 1px solid var(--border);
   border-radius: 8px;

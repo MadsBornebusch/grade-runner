@@ -59,6 +59,7 @@ function courseFrom(segments: CourseSegment[]): PipelineResult {
     hasTimestamps: true,
     hasHeartRate: false,
     hasPower: false,
+    routePoints: [],
   };
 }
 

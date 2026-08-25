@@ -17,6 +17,9 @@ interface PaceEffortChartProps {
   planned: { distanceKm: number; paceMinPerKm: number | null }[];
   /** Planning's solved effort fraction (0-1), drawn as a reference line. Null if no plan available. */
   plannedThetaFraction: number | null;
+  /** Shared with RouteMap.tsx via App.tsx -- see ElevationProfileChart's
+   * own doc on this prop. */
+  highlightedDistanceKm?: number | null;
 }
 
 const HEIGHT = 300;
@@ -28,7 +31,7 @@ const HEIGHT = 300;
  * course run harder than sustainable shows up as the effort line poking
  * above the 100% ceiling reference, not just as a vague pace wobble.
  */
-export function PaceEffortChart({ actual, planned, plannedThetaFraction }: PaceEffortChartProps) {
+export function PaceEffortChart({ actual, planned, plannedThetaFraction, highlightedDistanceKm }: PaceEffortChartProps) {
   const [containerRef, width] = useContainerWidth<HTMLDivElement>();
   const actualData = downsample(actual, 800);
   const plannedData = downsample(planned, 800);
@@ -87,6 +90,9 @@ export function PaceEffortChart({ actual, planned, plannedThetaFraction }: PaceE
             />
             <Legend />
             <ReferenceLine yAxisId="effort" y={100} stroke="var(--text)" strokeOpacity={0.4} strokeDasharray="3 3" />
+            {highlightedDistanceKm != null && (
+              <ReferenceLine yAxisId="effort" x={highlightedDistanceKm} stroke="#e05252" strokeWidth={2} ifOverflow="extendDomain" />
+            )}
             {plannedThetaFraction !== null && (
               <ReferenceLine
                 yAxisId="effort"

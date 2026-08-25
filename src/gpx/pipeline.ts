@@ -96,6 +96,16 @@ export interface PipelineResult {
   hasTimestamps: boolean;
   hasHeartRate: boolean;
   hasPower: boolean;
+  /**
+   * Lat/lon at the same resampled distance grid as `segments` -- index i
+   * here is segments[i]'s own endpoint (both come from the same `resampled`
+   * array, one element ahead). Not part of CourseSegment itself: the
+   * physics model (solver/analysis) never needs a coordinate, and adding
+   * one there would ripple through every call site that builds or copies a
+   * CourseSegment. Purely for RouteMap.tsx to plot the course and map a
+   * click back to a distanceKm, matching ChartPoint.distanceKm.
+   */
+  routePoints: { distanceKm: number; lat: number; lon: number }[];
 }
 
 /**
@@ -349,6 +359,8 @@ export function runPipeline(
   const gradientRadius = metersToPointRadius(gradientWindowM, segmentLengthM);
 
   const segments: CourseSegment[] = [];
+  const routePoints: { distanceKm: number; lat: number; lon: number }[] = [];
+  if (resampled.length > 0) routePoints.push({ distanceKm: 0, lat: resampled[0].lat, lon: resampled[0].lon });
   let cumulativeDistance3D = 0;
   let totalElevationGain = 0;
   let totalElevationLoss = 0;
@@ -364,6 +376,7 @@ export function runPipeline(
 
     const distance3D = distanceHorizontal * Math.sqrt(1 + gradient * gradient);
     cumulativeDistance3D += distance3D;
+    routePoints.push({ distanceKm: cumulativeDistance3D / 1000, lat: resampled[i].lat, lon: resampled[i].lon });
 
     const eleDelta = smoothedEle[i] - smoothedEle[i - 1];
     if (eleDelta > 0) totalElevationGain += eleDelta;
@@ -401,5 +414,6 @@ export function runPipeline(
     hasTimestamps,
     hasHeartRate,
     hasPower,
+    routePoints,
   };
 }

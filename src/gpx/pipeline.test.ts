@@ -108,6 +108,16 @@ describe("runPipeline", () => {
     expect(withoutData.segments.every((s) => s.heartRateBpm === null)).toBe(true);
   });
 
+  it("returns routePoints aligned 1:1 with segments, at the same cumulative distanceKm", () => {
+    const points = makeLine({ n: 20, spacingM: 5 });
+    const result = runPipeline(points);
+    expect(result.routePoints.length).toBe(result.segments.length + 1);
+    for (let i = 0; i < result.segments.length; i++) {
+      expect(result.routePoints[i + 1].distanceKm).toBeCloseTo(result.segments[i].cumulativeDistance3D / 1000, 6);
+    }
+    expect(result.routePoints.every((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon))).toBe(true);
+  });
+
   it("computes gradient, total along-slope distance, and elevation gain for a steady climb", () => {
     const grade = 0.1;
     const points = makeLine({ n: 201, spacingM: 5, grade });

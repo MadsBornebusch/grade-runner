@@ -1,4 +1,4 @@
-import { Area, Brush, CartesianGrid, ComposedChart, Line, ReferenceArea, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, Brush, CartesianGrid, ComposedChart, Line, ReferenceArea, ReferenceLine, Tooltip, XAxis, YAxis } from "recharts";
 import type { ChartPoint } from "./chartData";
 import { downsample } from "./downsample";
 import { formatPace } from "./format";
@@ -7,6 +7,11 @@ import { useDomainZoom } from "./useDomainZoom";
 
 interface ElevationProfileChartProps {
   points: ChartPoint[];
+  /** Shared with RouteMap.tsx via App.tsx -- when set, draws a vertical
+   * marker at this distance so a point clicked on the map is easy to find
+   * here too. Undefined/null draws nothing (no map on this page, or
+   * nothing clicked yet). */
+  highlightedDistanceKm?: number | null;
 }
 
 const HEIGHT = 280;
@@ -34,7 +39,7 @@ function computeUnpavedBands(data: ChartPoint[]): { startKm: number; endKm: numb
   return bands;
 }
 
-export function ElevationProfileChart({ points }: ElevationProfileChartProps) {
+export function ElevationProfileChart({ points, highlightedDistanceKm }: ElevationProfileChartProps) {
   const [containerRef, width] = useContainerWidth<HTMLDivElement>();
   const data = downsample(points, 800).map((p) => ({
     ...p,
@@ -123,6 +128,9 @@ export function ElevationProfileChart({ points }: ElevationProfileChartProps) {
               strokeWidth={1.5}
               isAnimationActive={false}
             />
+            {highlightedDistanceKm != null && (
+              <ReferenceLine yAxisId="elevation" x={highlightedDistanceKm} stroke="#e05252" strokeWidth={2} ifOverflow="extendDomain" />
+            )}
             <Brush
               dataKey="distanceKm"
               height={22}

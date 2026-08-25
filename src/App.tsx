@@ -17,6 +17,7 @@ import { FinishTimeRangePanel } from "./ui/FinishTimeRangePanel";
 import { FuelChart } from "./ui/FuelChart";
 import { SubstrateChart } from "./ui/SubstrateChart";
 import { PaceEffortChart } from "./ui/PaceEffortChart";
+import { RouteMap } from "./ui/RouteMap";
 import { PacingFitPanel } from "./ui/PacingFitPanel";
 import { PowerHrChart } from "./ui/PowerHrChart";
 import { SettingsModal } from "./ui/SettingsModal";
@@ -87,6 +88,14 @@ function App() {
   // local, unpersisted state (not formInputs) since it's tied to viewing
   // this particular course in this session, not an athlete setting.
   const [targetTimeInput, setTargetTimeInput] = useState("");
+
+  // Shared between RouteMap and whichever charts are on screen (Planning or
+  // Analysis) -- clicking a point on the route map highlights the same
+  // distance in the charts below, regardless of which mode is active.
+  const [highlightedDistanceKm, setHighlightedDistanceKm] = useState<number | null>(null);
+  useEffect(() => {
+    setHighlightedDistanceKm(null);
+  }, [rawPoints]);
 
   useEffect(() => {
     saveFormInputs(formInputs);
@@ -531,6 +540,11 @@ function App() {
 
                 {courseResult && (
                   <>
+                    <RouteMap
+                      routePoints={courseResult.routePoints}
+                      highlightedDistanceKm={highlightedDistanceKm}
+                      onHighlight={setHighlightedDistanceKm}
+                    />
                     {resultMode === "planning" && solverResult && (
                       <>
                         <div className="target-time-input">
@@ -586,7 +600,7 @@ function App() {
                                 . Clear it to go back to the theoretical ceiling.
                               </p>
                             )}
-                            <ElevationProfileChart points={chartPoints} />
+                            <ElevationProfileChart points={chartPoints} highlightedDistanceKm={highlightedDistanceKm} />
                             <FuelChart points={chartPoints} />
                             <SplitTable
                               points={chartPoints}
@@ -609,12 +623,13 @@ function App() {
                         <AnalysisSummary result={analysisResult} totalDistanceM={courseResult.totalDistance3D} summaryStats={analysisSummaryStats} />
                         {analysisChartPoints.length >= 5 && (
                           <>
-                            <ElevationProfileChart points={analysisChartPoints} />
+                            <ElevationProfileChart points={analysisChartPoints} highlightedDistanceKm={highlightedDistanceKm} />
                             {solverResult && (
                               <PaceEffortChart
                                 actual={paceEffortActualPoints}
                                 planned={paceEffortPlannedPoints}
                                 plannedThetaFraction={solverResult.theta}
+                                highlightedDistanceKm={highlightedDistanceKm}
                               />
                             )}
                             {(courseResult.hasPower || courseResult.hasHeartRate) && (
