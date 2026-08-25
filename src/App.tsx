@@ -584,6 +584,7 @@ function App() {
                         )}
                         <RouteMap
                           routePoints={courseResult.routePoints}
+                          splitPoints={chartPoints}
                           highlightedDistanceKm={highlightedDistanceKm}
                           onHighlight={setHighlightedDistanceKm}
                         />
@@ -623,6 +624,7 @@ function App() {
                         <AnalysisSummary result={analysisResult} totalDistanceM={courseResult.totalDistance3D} summaryStats={analysisSummaryStats} />
                         <RouteMap
                           routePoints={courseResult.routePoints}
+                          splitPoints={analysisChartPoints}
                           highlightedDistanceKm={highlightedDistanceKm}
                           onHighlight={setHighlightedDistanceKm}
                         />

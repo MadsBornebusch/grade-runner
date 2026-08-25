@@ -1,5 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { CircleMarker, MapContainer, Polyline, TileLayer, useMap, useMapEvent } from "react-leaflet";
+import type { ChartPoint } from "./chartData";
+import { formatDuration, formatPace } from "./format";
 import "leaflet/dist/leaflet.css";
 
 export interface RoutePoint {
@@ -10,6 +12,13 @@ export interface RoutePoint {
 
 interface RouteMapProps {
   routePoints: RoutePoint[];
+  /** Same points the charts below are built from (Planning's chartPoints or
+   * Analysis's analysisChartPoints) -- lets the highlighted map point show
+   * its own split-style stats (pace, elevation, elapsed time, HR) rather
+   * than just its location. Indexed by distanceKm, independent of
+   * routePoints' own indexing (routePoints has one more entry -- the
+   * course's start -- than a segment-derived ChartPoint[] does). */
+  splitPoints: ChartPoint[];
   /** Shared with the charts below via App.tsx -- clicking the route here
    * sets it, and each chart renders a ReferenceLine at the same distance. */
   highlightedDistanceKm: number | null;
@@ -61,10 +70,13 @@ function MapClickHandler({ routePoints, onHighlight }: { routePoints: RoutePoint
   return null;
 }
 
-/** Nearest routePoint to a given distanceKm -- routePoints is monotonic in
- * distanceKm, but a linear scan is simpler than a binary search and, same
- * reasoning as nearestPointIndex, cheap enough at this point count. */
-function pointAtDistance(points: RoutePoint[], distanceKm: number): RoutePoint | null {
+/** Nearest of any distanceKm-tagged point array to a given distanceKm --
+ * shared by the map marker (over RoutePoint[]) and the split-stats panel
+ * (over ChartPoint[]), which are independently indexed (see splitPoints'
+ * own doc) but both monotonic in distanceKm. A linear scan is simpler than
+ * a binary search and, same reasoning as nearestPointIndex, cheap enough
+ * at this point count. */
+function pointAtDistance<T extends { distanceKm: number }>(points: T[], distanceKm: number): T | null {
   if (points.length === 0) return null;
   let best = points[0];
   let bestDiff = Math.abs(best.distanceKm - distanceKm);
@@ -78,11 +90,38 @@ function pointAtDistance(points: RoutePoint[], distanceKm: number): RoutePoint |
   return best;
 }
 
-export function RouteMap({ routePoints, highlightedDistanceKm, onHighlight }: RouteMapProps) {
+/** Split-style stats for one clicked point -- same fields SplitTable.tsx
+ * reports per km range, just for this single point instead of a range
+ * between two of them. HR prefers a real recording over a calibration
+ * estimate, same convention as chartData.ts's summarizeChartPoints. */
+function SelectedPointStats({ point }: { point: ChartPoint }) {
+  const hrBpm = point.recordedHeartRateBpm ?? point.estimatedHeartRateBpm;
+  const hrIsEstimated = point.recordedHeartRateBpm === undefined && point.estimatedHeartRateBpm !== null;
+  return (
+    <p className="field-group-note route-map__point-stats">
+      <strong>{point.distanceKm.toFixed(2)} km</strong> · {formatDuration(point.cumulativeTimeS)} elapsed ·{" "}
+      {point.speedMs > 0 ? formatPace(point.speedMs) : "stopped"} · {point.elevationM.toFixed(0)}m elevation ·{" "}
+      {(point.gradient * 100).toFixed(1)}% grade · {point.mode}
+      {hrBpm !== null && hrBpm !== undefined && (
+        <>
+          {" "}
+          · {hrIsEstimated ? "~" : ""}
+          {Math.round(hrBpm)}bpm{hrIsEstimated ? " (est.)" : ""}
+        </>
+      )}
+    </p>
+  );
+}
+
+export function RouteMap({ routePoints, splitPoints, highlightedDistanceKm, onHighlight }: RouteMapProps) {
   const positions = useMemo<[number, number][]>(() => routePoints.map((p): [number, number] => [p.lat, p.lon]), [routePoints]);
   const highlightedPoint = useMemo(
     () => (highlightedDistanceKm !== null ? pointAtDistance(routePoints, highlightedDistanceKm) : null),
     [routePoints, highlightedDistanceKm],
+  );
+  const highlightedSplitPoint = useMemo(
+    () => (highlightedDistanceKm !== null ? pointAtDistance(splitPoints, highlightedDistanceKm) : null),
+    [splitPoints, highlightedDistanceKm],
   );
 
   if (positions.length < 2) return null;
@@ -98,6 +137,7 @@ export function RouteMap({ routePoints, highlightedDistanceKm, onHighlight }: Ro
         )}
       </div>
       <p className="field-group-help">Click the map to highlight the nearest point on the route in the charts below.</p>
+      {highlightedSplitPoint && <SelectedPointStats point={highlightedSplitPoint} />}
       <div className="route-map__canvas">
         <MapContainer center={positions[0]} zoom={13} scrollWheelZoom={true} style={{ height: "100%", width: "100%" }}>
           <TileLayer
