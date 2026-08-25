@@ -97,6 +97,18 @@ function App() {
     setHighlightedDistanceKm(null);
   }, [rawPoints]);
 
+  // Points saved from RouteMap for aid-station planning -- feeds
+  // SplitTable's own custom-boundary mode. Same "tied to this course view,
+  // not an athlete setting" reasoning as highlightedDistanceKm/
+  // targetTimeInput above, so it resets on a new upload the same way.
+  const [savedPointsKm, setSavedPointsKm] = useState<number[]>([]);
+  useEffect(() => {
+    setSavedPointsKm([]);
+  }, [rawPoints]);
+  const saveHighlightedPoint = (km: number) => setSavedPointsKm((prev) => (prev.includes(km) ? prev : [...prev, km]));
+  const removeSavedPoint = (km: number) => setSavedPointsKm((prev) => prev.filter((k) => k !== km));
+  const clearSavedPoints = () => setSavedPointsKm([]);
+
   useEffect(() => {
     saveFormInputs(formInputs);
   }, [formInputs]);
@@ -333,8 +345,8 @@ function App() {
 
   const chartPoints = useMemo(() => {
     if (!courseResult || !activeResult) return [];
-    return buildChartPoints(courseResult.segments, activeResult.result.segments, hrEstimateInputs);
-  }, [courseResult, activeResult, hrEstimateInputs]);
+    return buildChartPoints(courseResult.segments, activeResult.result.segments, formInputs.bodyMassKg, hrEstimateInputs);
+  }, [courseResult, activeResult, formInputs.bodyMassKg, hrEstimateInputs]);
 
   const planSummaryStats = useMemo(() => summarizeChartPoints(chartPoints), [chartPoints]);
 
@@ -587,6 +599,10 @@ function App() {
                           splitPoints={chartPoints}
                           highlightedDistanceKm={highlightedDistanceKm}
                           onHighlight={setHighlightedDistanceKm}
+                          savedPointsKm={savedPointsKm}
+                          onSavePoint={saveHighlightedPoint}
+                          onRemoveSavedPoint={removeSavedPoint}
+                          onClearSavedPoints={clearSavedPoints}
                         />
                         {/* A handful of segments (e.g. an immediate bonk) isn't
                             enough for a meaningful chart axis/scale. */}
@@ -607,6 +623,8 @@ function App() {
                               points={chartPoints}
                               splitLengthKm={formInputs.splitLengthKm}
                               onSplitLengthChange={(splitLengthKm) => setFormInputs((prev) => ({ ...prev, splitLengthKm }))}
+                              savedPointsKm={savedPointsKm}
+                              onClearSavedPoints={clearSavedPoints}
                             />
                           </>
                         )}
@@ -627,6 +645,10 @@ function App() {
                           splitPoints={analysisChartPoints}
                           highlightedDistanceKm={highlightedDistanceKm}
                           onHighlight={setHighlightedDistanceKm}
+                          savedPointsKm={savedPointsKm}
+                          onSavePoint={saveHighlightedPoint}
+                          onRemoveSavedPoint={removeSavedPoint}
+                          onClearSavedPoints={clearSavedPoints}
                         />
                         {analysisChartPoints.length >= 5 && (
                           <>
@@ -667,6 +689,8 @@ function App() {
                               points={analysisChartPoints}
                               splitLengthKm={formInputs.splitLengthKm}
                               onSplitLengthChange={(splitLengthKm) => setFormInputs((prev) => ({ ...prev, splitLengthKm }))}
+                              savedPointsKm={savedPointsKm}
+                              onClearSavedPoints={clearSavedPoints}
                             />
                           </>
                         )}

@@ -10,6 +10,7 @@ function point(overrides: Partial<ChartPoint> = {}): ChartPoint {
     mode: "run",
     glycogenG: 500,
     cumulativeTimeS: 0,
+    cumulativeCarbG: 0,
     estimatedHeartRateBpm: null,
     ...overrides,
   };

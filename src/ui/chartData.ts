@@ -1,5 +1,6 @@
 import type { CourseSegment } from "../gpx/pipeline";
 import type { AnalysisSegmentResult } from "../model/analysis";
+import { CARB_KJ_PER_G, joulesToGrams } from "../model/energetics";
 import { type HrPowerCalibration, predictHeartRateFromPower } from "../model/hrCalibration";
 import { gradeAdjustedSpeedMs } from "../model/minetti";
 import type { SegmentResult } from "../model/solver";
@@ -12,6 +13,13 @@ export interface ChartPoint {
   mode: "run" | "walk";
   glycogenG: number;
   cumulativeTimeS: number;
+  /** Cumulative carbohydrate burned so far, grams -- same
+   * carbRateWPerKg-integrated-over-time quantity analysis.ts's
+   * AnalysisSegmentResult.cumulativeCarbG already tracks; buildChartPoints
+   * computes the equivalent for a solved plan, which SegmentResult doesn't
+   * carry directly. Used by splits.ts's per-split carb column (aid-station
+   * fueling planning) and SubstrateChart. */
+  cumulativeCarbG: number;
   /** Undefined when no surface classification is available for this point
    * at all (see CourseSegment.surfaceUnpaved's own doc) -- distinct from
    * false ("known paved"), so a course with no surface data doesn't render
@@ -46,14 +54,20 @@ function estimateHeartRateBpm(grossPowerWPerKg: number, hrEstimateInputs: HrEsti
 }
 
 /** Merges solver output back with the original course segments (for
- * elevation/gradient, which the solver doesn't carry) into one series. */
+ * elevation/gradient, which the solver doesn't carry) into one series.
+ * bodyMassKg is only needed to integrate carbRateWPerKg (W/kg) into
+ * cumulative grams -- same formula analysis.ts's own cumulativeCarbG uses -
+ * SegmentResult doesn't track it directly the way AnalysisSegmentResult does. */
 export function buildChartPoints(
   courseSegments: CourseSegment[],
   results: SegmentResult[],
+  bodyMassKg: number,
   hrEstimateInputs?: HrEstimateInputs,
 ): ChartPoint[] {
+  let cumulativeCarbG = 0;
   return results.map((r) => {
     const seg = courseSegments[r.index];
+    cumulativeCarbG += joulesToGrams(r.carbRateWPerKg * bodyMassKg * r.timeS, CARB_KJ_PER_G);
     return {
       distanceKm: r.cumulativeDistance3D / 1000,
       elevationM: seg?.elevation ?? 0,
@@ -62,6 +76,7 @@ export function buildChartPoints(
       mode: r.mode,
       glycogenG: r.glycogenG,
       cumulativeTimeS: r.cumulativeTimeS,
+      cumulativeCarbG,
       surfaceUnpaved: seg?.surfaceUnpaved,
       estimatedHeartRateBpm: estimateHeartRateBpm(r.grossPowerWPerKg, hrEstimateInputs),
     };
@@ -88,6 +103,7 @@ export function buildAnalysisChartPoints(
       mode: r.speedMs <= walkMaxMs ? "walk" : "run",
       glycogenG: r.glycogenG,
       cumulativeTimeS: r.cumulativeElapsedTimeS,
+      cumulativeCarbG: r.cumulativeCarbG,
       surfaceUnpaved: seg?.surfaceUnpaved,
       estimatedHeartRateBpm: estimateHeartRateBpm(r.grossPowerWPerKg, hrEstimateInputs),
       recordedHeartRateBpm: seg?.heartRateBpm ?? undefined,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChartPoint } from "./chartData";
-import { computeSplits } from "./splits";
+import { computeCustomSplits, computeSplits } from "./splits";
 
 function makePoint(overrides: Partial<ChartPoint>): ChartPoint {
   return {
@@ -11,6 +11,7 @@ function makePoint(overrides: Partial<ChartPoint>): ChartPoint {
     mode: "run",
     glycogenG: 400,
     cumulativeTimeS: 0,
+    cumulativeCarbG: 0,
     estimatedHeartRateBpm: null,
     ...overrides,
   };
@@ -76,5 +77,60 @@ describe("computeSplits", () => {
     ];
     const splits = computeSplits(points, 1);
     expect(splits[0].avgEstimatedHeartRateBpm).toBeNull();
+  });
+
+  it("reports carbG as the delta of cumulativeCarbG within each split, and cumulativeCarbG as the running total", () => {
+    const points: ChartPoint[] = [
+      makePoint({ distanceKm: 0.5, cumulativeTimeS: 150, cumulativeCarbG: 10 }),
+      makePoint({ distanceKm: 0.9, cumulativeTimeS: 270, cumulativeCarbG: 18 }),
+      makePoint({ distanceKm: 1.3, cumulativeTimeS: 390, cumulativeCarbG: 26 }), // crosses into split 2
+      makePoint({ distanceKm: 1.8, cumulativeTimeS: 540, cumulativeCarbG: 40 }),
+    ];
+    const splits = computeSplits(points, 1);
+    expect(splits).toHaveLength(2);
+    expect(splits[0].carbG).toBeCloseTo(18, 6);
+    expect(splits[0].cumulativeCarbG).toBeCloseTo(18, 6);
+    expect(splits[1].carbG).toBeCloseTo(40 - 18, 6);
+    expect(splits[1].cumulativeCarbG).toBeCloseTo(40, 6);
+  });
+});
+
+describe("computeCustomSplits", () => {
+  it("returns an empty array for no points", () => {
+    expect(computeCustomSplits([], [1, 2])).toEqual([]);
+  });
+
+  it("splits at the given arbitrary distances, always ending at the course's own final point", () => {
+    const points: ChartPoint[] = [
+      makePoint({ distanceKm: 0.5, cumulativeTimeS: 150 }),
+      makePoint({ distanceKm: 1.2, cumulativeTimeS: 360 }),
+      makePoint({ distanceKm: 2.4, cumulativeTimeS: 720 }),
+      makePoint({ distanceKm: 3.7, cumulativeTimeS: 1110 }),
+    ];
+    const splits = computeCustomSplits(points, [1.2, 2.4]);
+    expect(splits).toHaveLength(3);
+    expect(splits[0].endKm).toBeCloseTo(1.2, 6);
+    expect(splits[1].endKm).toBeCloseTo(2.4, 6);
+    expect(splits[2].endKm).toBeCloseTo(3.7, 6); // final leg to the course end, not a saved point
+  });
+
+  it("ignores a saved point at or past the course end and one at or before the start", () => {
+    const points: ChartPoint[] = [
+      makePoint({ distanceKm: 0.5, cumulativeTimeS: 150 }),
+      makePoint({ distanceKm: 1.2, cumulativeTimeS: 360 }),
+    ];
+    const splits = computeCustomSplits(points, [0, 1.2, 5]);
+    expect(splits).toHaveLength(1); // no real boundary survives -- just the one leg to the finish
+    expect(splits[0].endKm).toBeCloseTo(1.2, 6);
+  });
+
+  it("deduplicates repeated saved distances instead of producing a zero-length split", () => {
+    const points: ChartPoint[] = [
+      makePoint({ distanceKm: 0.5, cumulativeTimeS: 150 }),
+      makePoint({ distanceKm: 1.2, cumulativeTimeS: 360 }),
+      makePoint({ distanceKm: 2.0, cumulativeTimeS: 600 }),
+    ];
+    const splits = computeCustomSplits(points, [1.0, 1.0]);
+    expect(splits).toHaveLength(2);
   });
 });

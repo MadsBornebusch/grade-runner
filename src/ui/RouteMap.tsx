@@ -23,6 +23,13 @@ interface RouteMapProps {
    * sets it, and each chart renders a ReferenceLine at the same distance. */
   highlightedDistanceKm: number | null;
   onHighlight: (distanceKm: number | null) => void;
+  /** Points saved for aid-station planning (App.tsx state) -- rendered as
+   * their own markers on the map and fed to SplitTable.tsx to split
+   * between them instead of at fixed km intervals. */
+  savedPointsKm: number[];
+  onSavePoint: (distanceKm: number) => void;
+  onRemoveSavedPoint: (distanceKm: number) => void;
+  onClearSavedPoints: () => void;
 }
 
 /** MapContainer needs an initial center/zoom before any data is known --
@@ -113,7 +120,16 @@ function SelectedPointStats({ point }: { point: ChartPoint }) {
   );
 }
 
-export function RouteMap({ routePoints, splitPoints, highlightedDistanceKm, onHighlight }: RouteMapProps) {
+export function RouteMap({
+  routePoints,
+  splitPoints,
+  highlightedDistanceKm,
+  onHighlight,
+  savedPointsKm,
+  onSavePoint,
+  onRemoveSavedPoint,
+  onClearSavedPoints,
+}: RouteMapProps) {
   const positions = useMemo<[number, number][]>(() => routePoints.map((p): [number, number] => [p.lat, p.lon]), [routePoints]);
   const highlightedPoint = useMemo(
     () => (highlightedDistanceKm !== null ? pointAtDistance(routePoints, highlightedDistanceKm) : null),
@@ -123,6 +139,15 @@ export function RouteMap({ routePoints, splitPoints, highlightedDistanceKm, onHi
     () => (highlightedDistanceKm !== null ? pointAtDistance(splitPoints, highlightedDistanceKm) : null),
     [splitPoints, highlightedDistanceKm],
   );
+  const savedMapPoints = useMemo(
+    () => savedPointsKm.map((km) => ({ km, point: pointAtDistance(routePoints, km) })).filter((p) => p.point !== null),
+    [routePoints, savedPointsKm],
+  );
+  // Already saved (within a point's worth of resolution) -- disables the
+  // Save button instead of silently adding a near-duplicate boundary a
+  // click away from the one already there.
+  const alreadySaved =
+    highlightedDistanceKm !== null && savedPointsKm.some((km) => Math.abs(km - highlightedDistanceKm) < 0.001);
 
   if (positions.length < 2) return null;
 
@@ -130,14 +155,41 @@ export function RouteMap({ routePoints, splitPoints, highlightedDistanceKm, onHi
     <div className="chart">
       <div className="chart__header">
         <h3>Route map</h3>
-        {highlightedDistanceKm !== null && (
-          <button type="button" className="chart__reset-zoom" onClick={() => onHighlight(null)}>
-            Clear highlight
-          </button>
-        )}
+        <div className="route-map__header-actions">
+          {highlightedDistanceKm !== null && (
+            <>
+              <button type="button" className="chart__reset-zoom" onClick={() => onSavePoint(highlightedDistanceKm)} disabled={alreadySaved}>
+                {alreadySaved ? "Point saved" : "Save point"}
+              </button>
+              <button type="button" className="chart__reset-zoom" onClick={() => onHighlight(null)}>
+                Clear highlight
+              </button>
+            </>
+          )}
+        </div>
       </div>
-      <p className="field-group-help">Click the map to highlight the nearest point on the route in the charts below.</p>
+      <p className="field-group-help">
+        Click the map to highlight the nearest point on the route in the charts below. Save points to plan legs between them
+        (aid stations) in the split table.
+      </p>
       {highlightedSplitPoint && <SelectedPointStats point={highlightedSplitPoint} />}
+      {savedPointsKm.length > 0 && (
+        <div className="route-map__saved-points">
+          {[...savedPointsKm]
+            .sort((a, b) => a - b)
+            .map((km) => (
+              <span key={km} className="route-map__saved-point-chip">
+                {km.toFixed(2)} km
+                <button type="button" onClick={() => onRemoveSavedPoint(km)} aria-label={`Remove saved point at ${km.toFixed(2)} km`}>
+                  ×
+                </button>
+              </span>
+            ))}
+          <button type="button" className="chart__reset-zoom" onClick={onClearSavedPoints}>
+            Clear saved points
+          </button>
+        </div>
+      )}
       <div className="route-map__canvas">
         <MapContainer center={positions[0]} zoom={13} scrollWheelZoom={true} style={{ height: "100%", width: "100%" }}>
           <TileLayer
@@ -147,6 +199,14 @@ export function RouteMap({ routePoints, splitPoints, highlightedDistanceKm, onHi
           <FitBounds positions={positions} />
           <MapClickHandler routePoints={routePoints} onHighlight={onHighlight} />
           <Polyline positions={positions} pathOptions={{ color: "var(--accent)", weight: 4 }} />
+          {savedMapPoints.map(({ km, point }) => (
+            <CircleMarker
+              key={km}
+              center={[point!.lat, point!.lon]}
+              radius={6}
+              pathOptions={{ color: "#2d6a4f", fillColor: "#2d6a4f", fillOpacity: 1, weight: 2 }}
+            />
+          ))}
           {highlightedPoint && (
             <CircleMarker
               center={[highlightedPoint.lat, highlightedPoint.lon]}

@@ -318,7 +318,7 @@ async function runBacktest(
     console.log(`  Finish time: ${result.feasible ? formatHms(result.finishTimeS) : "BONKS/INFEASIBLE"} (${(theta * 100).toFixed(0)}% effort)`);
     if (errS !== null) console.log(`  vs actual: ${errS >= 0 ? "+" : ""}${formatHms(errS)} (${((100 * errS) / actualFinishS).toFixed(1)}%)`);
     if (result.feasible) {
-      const chartPoints = buildChartPoints(targetCourse.segments, result.segments, hrEstimateInputs);
+      const chartPoints = buildChartPoints(targetCourse.segments, result.segments, formInputs.bodyMassKg, hrEstimateInputs);
       const stats = summarizeChartPoints(chartPoints);
       console.log(
         `  Avg pace: ${fmtPace(stats.avgPaceMinPerKm)}   GAP: ${fmtPace(stats.avgGapMinPerKm)}   ` +
