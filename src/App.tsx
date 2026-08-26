@@ -9,7 +9,7 @@ import { attachSurfaceData, type ValhallaSurfaceEdge } from "./model/surfaceExpo
 import { fetchSurfaceEdges } from "./ui/surfaceLookup";
 import { AddCoursePanel } from "./ui/AddCoursePanel";
 import { CourseLibraryPanel } from "./ui/CourseLibraryPanel";
-import { saveCourse } from "./storage/courseLibrary";
+import { saveCourse, updateStoredCourseCheckpoints } from "./storage/courseLibrary";
 import { FuelingFields } from "./ui/InputsPanel";
 import { PageCarousel } from "./ui/PageCarousel";
 import { ElevationProfileChart } from "./ui/ElevationProfileChart";
@@ -81,33 +81,65 @@ function App() {
   // reload -- it doesn't own the save (App.tsx already has points/name in
   // hand right where upload/import land), so it needs an external signal.
   const [courseLibraryVersion, setCourseLibraryVersion] = useState(0);
+  // The course library row this session is currently viewing/editing, if
+  // any -- lets the savedPointsKm/targetTimeS persistence effects below
+  // know which row to write back to. Null until AddCoursePanel's
+  // onCourseLoaded (below) resolves saveCourse(), or a course is
+  // re-selected from CourseLibraryPanel (which already knows its own id).
+  const [currentCourseId, setCurrentCourseId] = useState<string | null>(null);
 
   // Planned-finish-time mode: when set, Results shows the plan for THIS
   // target instead of the theoretical zero-margin ceiling -- an alternate
-  // detail view, not a fourth number alongside ceiling/chosen/best. Kept as
-  // local, unpersisted state (not formInputs) since it's tied to viewing
-  // this particular course in this session, not an athlete setting.
+  // detail view, not a fourth number alongside ceiling/chosen/best.
+  // Persisted per-course (see the targetTimeS effect below), not in
+  // formInputs -- it's tied to this specific course, not an athlete-wide
+  // setting.
   const [targetTimeInput, setTargetTimeInput] = useState("");
 
   // Shared between RouteMap and whichever charts are on screen (Planning or
   // Analysis) -- clicking a point on the route map highlights the same
-  // distance in the charts below, regardless of which mode is active.
+  // distance in the charts below, regardless of which mode is active. NOT
+  // persisted (unlike savedPointsKm/targetTimeInput below) -- it's a
+  // transient "what am I looking at right now" selection, not a plan.
   const [highlightedDistanceKm, setHighlightedDistanceKm] = useState<number | null>(null);
-  useEffect(() => {
-    setHighlightedDistanceKm(null);
-  }, [rawPoints]);
 
   // Points saved from RouteMap for aid-station planning -- feeds
-  // SplitTable's own custom-boundary mode. Same "tied to this course view,
-  // not an athlete setting" reasoning as highlightedDistanceKm/
-  // targetTimeInput above, so it resets on a new upload the same way.
+  // SplitTable's own custom-boundary mode. Persisted per-course (see the
+  // effect below) so refreshing the page or re-selecting this course later
+  // brings them back instead of starting from an empty map every time.
   const [savedPointsKm, setSavedPointsKm] = useState<number[]>([]);
-  useEffect(() => {
-    setSavedPointsKm([]);
-  }, [rawPoints]);
   const saveHighlightedPoint = (km: number) => setSavedPointsKm((prev) => (prev.includes(km) ? prev : [...prev, km]));
   const removeSavedPoint = (km: number) => setSavedPointsKm((prev) => prev.filter((k) => k !== km));
   const clearSavedPoints = () => setSavedPointsKm([]);
+
+  // Writes savedPointsKm back to whichever course row is active, whenever
+  // it changes -- skipped entirely with no course loaded yet (courseId
+  // null) or immediately after loadCourse's OWN restore below sets it to
+  // the value it was just read from (a harmless redundant write, not
+  // skipped specially -- distinguishing "just restored" from "user just
+  // changed it" isn't worth the complexity for an idempotent write).
+  useEffect(() => {
+    if (!currentCourseId) return;
+    void updateStoredCourseCheckpoints(currentCourseId, { savedPointsKm });
+  }, [currentCourseId, savedPointsKm]);
+
+  /** Single entry point for "a course is now the one being viewed" --
+   * CourseLibraryPanel's onSelect and AddCoursePanel's onCourseLoaded (once
+   * its saveCourse() resolves) both funnel through this, so the reset/
+   * restore of highlightedDistanceKm/savedPointsKm/targetTimeInput can't
+   * drift out of sync between the two entry points the way two separate
+   * useEffects keyed on `rawPoints` alone could (that approach raced: an
+   * effect resetting savedPointsKm to [] on every rawPoints change would
+   * stomp a restore this function does inline, since effects run AFTER
+   * the render the restore already committed in). */
+  function loadCourse(points: GpxPoint[], name: string, id: string, savedKm: number[] | undefined, targetS: number | null | undefined) {
+    setRawPoints(points);
+    setFileName(name);
+    setCurrentCourseId(id);
+    setHighlightedDistanceKm(null);
+    setSavedPointsKm(savedKm ?? []);
+    setTargetTimeInput(targetS != null ? formatDuration(targetS) : "");
+  }
 
   useEffect(() => {
     saveFormInputs(formInputs);
@@ -326,6 +358,16 @@ function App() {
 
   const targetTimeS = useMemo(() => parseDurationToSeconds(targetTimeInput), [targetTimeInput]);
 
+  // Persists the athlete's own target override per-course, same
+  // "write back whenever it changes" pattern as savedPointsKm above --
+  // keyed on the PARSED value, not targetTimeInput's raw text, so
+  // intermediate keystrokes that don't yet parse to a full time (which all
+  // resolve to the same null) don't each trigger a write.
+  useEffect(() => {
+    if (!currentCourseId) return;
+    void updateStoredCourseCheckpoints(currentCourseId, { targetTimeS });
+  }, [currentCourseId, targetTimeS]);
+
   const targetTimeResult = useMemo(() => {
     if (!solverInputs || targetTimeS === null) return null;
     return findThetaForTargetTime(solverInputs, targetTimeS);
@@ -345,8 +387,8 @@ function App() {
 
   const chartPoints = useMemo(() => {
     if (!courseResult || !activeResult) return [];
-    return buildChartPoints(courseResult.segments, activeResult.result.segments, formInputs.bodyMassKg, hrEstimateInputs);
-  }, [courseResult, activeResult, formInputs.bodyMassKg, hrEstimateInputs]);
+    return buildChartPoints(courseResult.segments, activeResult.result.segments, hrEstimateInputs);
+  }, [courseResult, activeResult, hrEstimateInputs]);
 
   const planSummaryStats = useMemo(() => summarizeChartPoints(chartPoints), [chartPoints]);
 
@@ -514,10 +556,7 @@ function App() {
               <>
                 <CourseLibraryPanel
                   refreshKey={courseLibraryVersion}
-                  onSelect={(points, name) => {
-                    setRawPoints(points);
-                    setFileName(name);
-                  }}
+                  onSelect={(course) => loadCourse(course.points, course.name, course.id, course.savedPointsKm, course.targetTimeS)}
                 />
                 <button type="button" className="button-primary add-course-button" onClick={() => setAddCourseOpen(true)}>
                   + Add course
@@ -625,6 +664,7 @@ function App() {
                               onSplitLengthChange={(splitLengthKm) => setFormInputs((prev) => ({ ...prev, splitLengthKm }))}
                               savedPointsKm={savedPointsKm}
                               onClearSavedPoints={clearSavedPoints}
+                              intakeGPerH={formInputs.intakeGPerH}
                             />
                           </>
                         )}
@@ -691,6 +731,7 @@ function App() {
                               onSplitLengthChange={(splitLengthKm) => setFormInputs((prev) => ({ ...prev, splitLengthKm }))}
                               savedPointsKm={savedPointsKm}
                               onClearSavedPoints={clearSavedPoints}
+                              intakeGPerH={formInputs.intakeGPerH}
                             />
                           </>
                         )}
@@ -733,9 +774,25 @@ function App() {
         onCourseLoaded={(points, name, stravaId) => {
           setRawPoints(points);
           setFileName(name);
-          void saveCourse(name, points, stravaId !== undefined ? `strava:${stravaId}` : undefined).then(() =>
-            setCourseLibraryVersion((v) => v + 1),
-          );
+          // Clears currentCourseId (not just savedPointsKm/targetTimeInput)
+          // so the persistence effects above don't write this fresh
+          // course's empty state into the PREVIOUS course's row during the
+          // gap before saveCourse resolves below -- see loadCourse's own
+          // doc on why reset and course-id changes have to land together.
+          setCurrentCourseId(null);
+          setHighlightedDistanceKm(null);
+          setSavedPointsKm([]);
+          setTargetTimeInput("");
+          void saveCourse(name, points, stravaId !== undefined ? `strava:${stravaId}` : undefined).then((saved) => {
+            setCourseLibraryVersion((v) => v + 1);
+            setCurrentCourseId(saved.id);
+            // A stable (Strava) id can resolve to a row that already had
+            // aid-station points/a target saved from a previous import --
+            // restore them now that we know. A fresh plain-upload id never
+            // has either, so this is a no-op for that case.
+            if (saved.savedPointsKm && saved.savedPointsKm.length > 0) setSavedPointsKm(saved.savedPointsKm);
+            if (saved.targetTimeS != null) setTargetTimeInput(formatDuration(saved.targetTimeS));
+          });
         }}
         formInputs={formInputs}
         onFormInputsChange={setFormInputs}

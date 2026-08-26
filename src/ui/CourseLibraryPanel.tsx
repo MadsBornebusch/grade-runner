@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
-import type { GpxPoint } from "../gpx/pipeline";
 import { deleteStoredCourse, listStoredCourses, type StoredCourse } from "../storage/courseLibrary";
 
 interface CourseLibraryPanelProps {
-  onSelect: (points: GpxPoint[], name: string) => void;
+  /** Passes the FULL stored course, not just points/name -- App.tsx needs
+   * its id (to know which row to write future checkpoint/target-time
+   * changes back to) and its saved savedPointsKm/targetTimeS to restore
+   * them. */
+  onSelect: (course: StoredCourse) => void;
   /** Bump to force a reload after a new course is saved elsewhere (a fresh
    * upload/import) -- this panel doesn't own the save itself, since App.tsx
    * already has the points/name in hand right where the upload/import
@@ -31,7 +34,7 @@ export function CourseLibraryPanel({ onSelect, refreshKey }: CourseLibraryPanelP
       <div className="course-library__rows">
         {courses.map((c) => (
           <div key={c.id} className="course-library__row">
-            <button type="button" className="course-library__select" onClick={() => onSelect(c.points, c.name)}>
+            <button type="button" className="course-library__select" onClick={() => onSelect(c)}>
               {c.name} &middot; {(c.distanceM / 1000).toFixed(1)} km &middot; {c.elevationGainM.toFixed(0)} m gain
             </button>
             <button

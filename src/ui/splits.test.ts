@@ -11,7 +11,6 @@ function makePoint(overrides: Partial<ChartPoint>): ChartPoint {
     mode: "run",
     glycogenG: 400,
     cumulativeTimeS: 0,
-    cumulativeCarbG: 0,
     estimatedHeartRateBpm: null,
     ...overrides,
   };
@@ -79,19 +78,30 @@ describe("computeSplits", () => {
     expect(splits[0].avgEstimatedHeartRateBpm).toBeNull();
   });
 
-  it("reports carbG as the delta of cumulativeCarbG within each split, and cumulativeCarbG as the running total", () => {
+  it("is 0 when no intakeGPerH is given (the default)", () => {
     const points: ChartPoint[] = [
-      makePoint({ distanceKm: 0.5, cumulativeTimeS: 150, cumulativeCarbG: 10 }),
-      makePoint({ distanceKm: 0.9, cumulativeTimeS: 270, cumulativeCarbG: 18 }),
-      makePoint({ distanceKm: 1.3, cumulativeTimeS: 390, cumulativeCarbG: 26 }), // crosses into split 2
-      makePoint({ distanceKm: 1.8, cumulativeTimeS: 540, cumulativeCarbG: 40 }),
+      makePoint({ distanceKm: 0.5, cumulativeTimeS: 150 }),
+      makePoint({ distanceKm: 0.9, cumulativeTimeS: 270 }),
     ];
     const splits = computeSplits(points, 1);
+    expect(splits[0].intakeCarbG).toBe(0);
+    expect(splits[0].cumulativeIntakeCarbG).toBe(0);
+  });
+
+  it("computes intakeCarbG from the planned intake rate x each split's own time -- NOT total carb burned/oxidized", () => {
+    const points: ChartPoint[] = [
+      makePoint({ distanceKm: 0.5, cumulativeTimeS: 1800 }), // 30min
+      makePoint({ distanceKm: 0.9, cumulativeTimeS: 3600 }), // 1h -- last point in split 1 (<=1km)
+      makePoint({ distanceKm: 1.3, cumulativeTimeS: 5400 }), // crosses into split 2
+      makePoint({ distanceKm: 1.8, cumulativeTimeS: 9000 }), // 2.5h total
+    ];
+    // 60 g/h: split 1 spans 0->3600s (1h) -> 60g; split 2 spans 3600->9000s (1.5h) -> 90g.
+    const splits = computeSplits(points, 1, 60);
     expect(splits).toHaveLength(2);
-    expect(splits[0].carbG).toBeCloseTo(18, 6);
-    expect(splits[0].cumulativeCarbG).toBeCloseTo(18, 6);
-    expect(splits[1].carbG).toBeCloseTo(40 - 18, 6);
-    expect(splits[1].cumulativeCarbG).toBeCloseTo(40, 6);
+    expect(splits[0].intakeCarbG).toBeCloseTo(60, 6);
+    expect(splits[0].cumulativeIntakeCarbG).toBeCloseTo(60, 6);
+    expect(splits[1].intakeCarbG).toBeCloseTo(90, 6);
+    expect(splits[1].cumulativeIntakeCarbG).toBeCloseTo(150, 6);
   });
 });
 

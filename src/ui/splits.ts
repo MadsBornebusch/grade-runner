@@ -15,16 +15,18 @@ export interface Split {
    * is null), same "no data, not zero" convention as ChartPoint's own
    * field. */
   avgEstimatedHeartRateBpm: number | null;
-  /** Carbohydrate burned during this split alone, grams -- last point's
-   * cumulativeCarbG minus the previous split's, the same delta-from-running-
-   * total idea timeS/distanceKm already use. For aid-station fueling
-   * planning: "how much do I need to have eaten by the time I reach the
-   * NEXT stop." */
-  carbG: number;
+  /** Carbs to consume via intake during this split, grams -- intakeGPerH
+   * held flat x this split's own timeS, NOT total carb burned/oxidized
+   * (which also draws on glycogen stores whenever demand exceeds intake --
+   * see substrate.ts's stepGlycogen: carbInOxGPerS is intakeGPerH/3600
+   * regardless of demand). This is "how much to actually eat/drink before
+   * the next stop," the number an aid-station plan needs -- burned-carb
+   * total would overstate it by whatever the body pulls from its own
+   * glycogen reserve instead of from what was eaten. */
+  intakeCarbG: number;
   /** Running total at this split's end -- lets a caller check total fueling
-   * budget (e.g. against planned intake rate x elapsed hours) without
-   * summing carbG across every prior row itself. */
-  cumulativeCarbG: number;
+   * budget without summing intakeCarbG across every prior row itself. */
+  cumulativeIntakeCarbG: number;
 }
 
 /** Shared aggregation core for both computeSplits (fixed-distance buckets)
@@ -33,7 +35,7 @@ export interface Split {
  * with the course's own final distance always last (a boundary at or past
  * the course end is a no-op: the two-pointer walk below can never advance
  * past the last point anyway). */
-function computeSplitsAtBoundaries(points: ChartPoint[], boundaryKm: number[]): Split[] {
+function computeSplitsAtBoundaries(points: ChartPoint[], boundaryKm: number[], intakeGPerH: number): Split[] {
   if (points.length === 0 || boundaryKm.length === 0) return [];
 
   const deltas = points.map((p, i) => (i === 0 ? 0 : p.elevationM - points[i - 1].elevationM));
@@ -41,7 +43,7 @@ function computeSplitsAtBoundaries(points: ChartPoint[], boundaryKm: number[]): 
   let bucketStartIdx = 0;
   let prevCumulativeTimeS = 0;
   let prevEndKm = 0;
-  let prevCumulativeCarbG = 0;
+  let cumulativeIntakeCarbG = 0;
 
   const flush = (endIdx: number) => {
     let gain = 0;
@@ -64,6 +66,8 @@ function computeSplitsAtBoundaries(points: ChartPoint[], boundaryKm: number[]): 
     const timeS = last.cumulativeTimeS - prevCumulativeTimeS;
     const distanceKm = last.distanceKm - prevEndKm;
     const modes = new Set(points.slice(bucketStartIdx, endIdx + 1).map((p) => p.mode));
+    const intakeCarbG = intakeGPerH * (timeS / 3600);
+    cumulativeIntakeCarbG += intakeCarbG;
 
     splits.push({
       index: splits.length,
@@ -76,13 +80,12 @@ function computeSplitsAtBoundaries(points: ChartPoint[], boundaryKm: number[]): 
       avgSpeedMs: distanceKm > 0 ? (distanceKm * 1000) / timeS : 0,
       mode: modes.size === 1 ? [...modes][0] : "mixed",
       avgEstimatedHeartRateBpm: hrWeightSum > 0 ? hrWeightedSum / hrWeightSum : null,
-      carbG: last.cumulativeCarbG - prevCumulativeCarbG,
-      cumulativeCarbG: last.cumulativeCarbG,
+      intakeCarbG,
+      cumulativeIntakeCarbG,
     });
 
     prevCumulativeTimeS = last.cumulativeTimeS;
     prevEndKm = last.distanceKm;
-    prevCumulativeCarbG = last.cumulativeCarbG;
   };
 
   for (const boundary of boundaryKm) {
@@ -96,14 +99,17 @@ function computeSplitsAtBoundaries(points: ChartPoint[], boundaryKm: number[]): 
   return splits;
 }
 
-/** Aggregates per-segment chart points into fixed-distance splits for the split table. */
-export function computeSplits(points: ChartPoint[], splitLengthKm = 1): Split[] {
+/** Aggregates per-segment chart points into fixed-distance splits for the
+ * split table. intakeGPerH (default 0 -- no carb column) drives each
+ * split's intakeCarbG; pass the athlete's own planned fueling rate
+ * (formInputs.intakeGPerH) to show it. */
+export function computeSplits(points: ChartPoint[], splitLengthKm = 1, intakeGPerH = 0): Split[] {
   if (points.length === 0) return [];
   const totalKm = points[points.length - 1].distanceKm;
   const boundaryKm: number[] = [];
   for (let b = splitLengthKm; b < totalKm; b += splitLengthKm) boundaryKm.push(b);
   boundaryKm.push(totalKm);
-  return computeSplitsAtBoundaries(points, boundaryKm);
+  return computeSplitsAtBoundaries(points, boundaryKm, intakeGPerH);
 }
 
 /**
@@ -114,10 +120,10 @@ export function computeSplits(points: ChartPoint[], splitLengthKm = 1): Split[] 
  * silently drops any boundary at or beyond the course end (nothing left to
  * split there) or at/before the start (an empty leading leg).
  */
-export function computeCustomSplits(points: ChartPoint[], atKm: number[]): Split[] {
+export function computeCustomSplits(points: ChartPoint[], atKm: number[], intakeGPerH = 0): Split[] {
   if (points.length === 0) return [];
   const totalKm = points[points.length - 1].distanceKm;
   const boundaryKm = [...new Set(atKm.filter((km) => km > 0 && km < totalKm))].sort((a, b) => a - b);
   boundaryKm.push(totalKm);
-  return computeSplitsAtBoundaries(points, boundaryKm);
+  return computeSplitsAtBoundaries(points, boundaryKm, intakeGPerH);
 }

@@ -18,13 +18,27 @@ interface SplitTableProps {
   /** Present alongside a non-empty savedPointsKm so the table itself offers
    * a way back to fixed-interval splits, not just RouteMap's own control. */
   onClearSavedPoints?: () => void;
+  /** The athlete's planned carb intake rate, g/h (formInputs.intakeGPerH) --
+   * drives the Carbs column (intake needed per leg, not total carb burned;
+   * see splits.ts's own doc on why those differ). 0 (default) hides the
+   * column entirely, matching every other "no data" convention here. */
+  intakeGPerH?: number;
 }
 
-export function SplitTable({ points, splitLengthKm = 5, onSplitLengthChange, savedPointsKm = [], onClearSavedPoints }: SplitTableProps) {
+export function SplitTable({
+  points,
+  splitLengthKm = 5,
+  onSplitLengthChange,
+  savedPointsKm = [],
+  onClearSavedPoints,
+  intakeGPerH = 0,
+}: SplitTableProps) {
   const usingSavedPoints = savedPointsKm.length > 0;
-  const splits = usingSavedPoints ? computeCustomSplits(points, savedPointsKm) : computeSplits(points, splitLengthKm);
+  const splits = usingSavedPoints
+    ? computeCustomSplits(points, savedPointsKm, intakeGPerH)
+    : computeSplits(points, splitLengthKm, intakeGPerH);
   const hasHrEstimate = splits.some((s) => s.avgEstimatedHeartRateBpm !== null);
-  const hasCarbs = splits.some((s) => s.carbG > 0);
+  const hasCarbs = intakeGPerH > 0;
   // Only committed once the typed text parses to a positive number -- same
   // buffering useNumberField exists for -- so clearing the field to retype
   // it doesn't get reverted mid-edit by the >0 guard rejecting "".
@@ -68,7 +82,7 @@ export function SplitTable({ points, splitLengthKm = 5, onSplitLengthChange, sav
             {hasHrEstimate && <th>Est. HR</th>}
             <th>Split time</th>
             <th>Cumulative</th>
-            {hasCarbs && <th>Carbs</th>}
+            {hasCarbs && <th>Carb intake</th>}
           </tr>
         </thead>
         <tbody>
@@ -87,7 +101,8 @@ export function SplitTable({ points, splitLengthKm = 5, onSplitLengthChange, sav
               <td>{formatDuration(s.cumulativeTimeS)}</td>
               {hasCarbs && (
                 <td>
-                  {s.carbG.toFixed(0)}g <span className="split-table__cumulative-note">({s.cumulativeCarbG.toFixed(0)}g total)</span>
+                  {s.intakeCarbG.toFixed(0)}g{" "}
+                  <span className="split-table__cumulative-note">({s.cumulativeIntakeCarbG.toFixed(0)}g total)</span>
                 </td>
               )}
             </tr>
