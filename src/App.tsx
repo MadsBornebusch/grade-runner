@@ -656,7 +656,12 @@ function App() {
                                 . Clear it to go back to the theoretical ceiling.
                               </p>
                             )}
-                            <ElevationProfileChart points={chartPoints} highlightedDistanceKm={highlightedDistanceKm} />
+                            <ElevationProfileChart
+                              points={chartPoints}
+                              highlightedDistanceKm={highlightedDistanceKm}
+                              savedPointsKm={savedPointsKm}
+                              onPointClick={setHighlightedDistanceKm}
+                            />
                             <FuelChart points={chartPoints} />
                             <SplitTable
                               points={chartPoints}
@@ -692,7 +697,12 @@ function App() {
                         />
                         {analysisChartPoints.length >= 5 && (
                           <>
-                            <ElevationProfileChart points={analysisChartPoints} highlightedDistanceKm={highlightedDistanceKm} />
+                            <ElevationProfileChart
+                              points={analysisChartPoints}
+                              highlightedDistanceKm={highlightedDistanceKm}
+                              savedPointsKm={savedPointsKm}
+                              onPointClick={setHighlightedDistanceKm}
+                            />
                             {solverResult && (
                               <PaceEffortChart
                                 actual={paceEffortActualPoints}

@@ -12,6 +12,15 @@ interface ElevationProfileChartProps {
    * here too. Undefined/null draws nothing (no map on this page, or
    * nothing clicked yet). */
   highlightedDistanceKm?: number | null;
+  /** Aid-station points saved on RouteMap.tsx -- drawn as their own,
+   * distinctly-colored vertical markers (green, matching RouteMap's own
+   * saved-point markers) so they're visible here too, not just on the map. */
+  savedPointsKm?: number[];
+  /** Fires with the distance nearest a click anywhere on the chart --
+   * App.tsx wires this to the same setHighlightedDistanceKm RouteMap uses,
+   * so clicking this chart highlights the point on the map too, not just
+   * the other direction. Omit for a chart with no map to sync with. */
+  onPointClick?: (distanceKm: number) => void;
 }
 
 const HEIGHT = 280;
@@ -39,7 +48,7 @@ function computeUnpavedBands(data: ChartPoint[]): { startKm: number; endKm: numb
   return bands;
 }
 
-export function ElevationProfileChart({ points, highlightedDistanceKm }: ElevationProfileChartProps) {
+export function ElevationProfileChart({ points, highlightedDistanceKm, savedPointsKm, onPointClick }: ElevationProfileChartProps) {
   const [containerRef, width] = useContainerWidth<HTMLDivElement>();
   const data = downsample(points, 800).map((p) => ({
     ...p,
@@ -75,6 +84,10 @@ export function ElevationProfileChart({ points, highlightedDistanceKm }: Elevati
             height={HEIGHT}
             data={data}
             margin={{ top: 8, right: 16, bottom: 8, left: 0 }}
+            onClick={(state) => {
+              const label = state?.activeLabel;
+              if (onPointClick && typeof label === "number") onPointClick(label);
+            }}
           >
             <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
             <XAxis
@@ -128,6 +141,17 @@ export function ElevationProfileChart({ points, highlightedDistanceKm }: Elevati
               strokeWidth={1.5}
               isAnimationActive={false}
             />
+            {savedPointsKm?.map((km) => (
+              <ReferenceLine
+                key={km}
+                yAxisId="elevation"
+                x={km}
+                stroke="#2d6a4f"
+                strokeWidth={2}
+                strokeDasharray="4 4"
+                ifOverflow="extendDomain"
+              />
+            ))}
             {highlightedDistanceKm != null && (
               <ReferenceLine yAxisId="elevation" x={highlightedDistanceKm} stroke="#e05252" strokeWidth={2} ifOverflow="extendDomain" />
             )}
