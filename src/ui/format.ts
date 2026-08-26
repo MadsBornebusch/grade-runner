@@ -8,9 +8,14 @@ export function formatDuration(totalSeconds: number): string {
 
 export function formatPace(speedMs: number): string {
   if (speedMs <= 0) return "--:--";
-  const secPerKm = 1000 / speedMs;
+  // Round to a whole second FIRST, then split into m/s -- rounding m and s
+  // independently (Math.floor then Math.round on the leftover) can each
+  // round correctly in isolation and still produce "4:60/km" when the
+  // seconds remainder rounds up to a full minute the floor'd minutes never
+  // sees. formatDuration already does this the right way; mirrored here.
+  const secPerKm = Math.round(1000 / speedMs);
   const m = Math.floor(secPerKm / 60);
-  const s = Math.round(secPerKm % 60);
+  const s = secPerKm % 60;
   return `${m}:${String(s).padStart(2, "0")}/km`;
 }
 

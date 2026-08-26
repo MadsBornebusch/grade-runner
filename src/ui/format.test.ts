@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration, formatPace, parseDurationToSeconds } from "./format";
+import { formatDuration, formatMinPerKm, formatPace, parseDurationToSeconds } from "./format";
 
 describe("formatDuration", () => {
   it("formats h:mm:ss", () => {
@@ -17,6 +17,31 @@ describe("formatPace", () => {
   it("handles zero/negative speed", () => {
     expect(formatPace(0)).toBe("--:--");
     expect(formatPace(-1)).toBe("--:--");
+  });
+
+  it("carries a rounded-up seconds remainder into the minutes -- never shows e.g. '4:60/km'", () => {
+    // secPerKm just under 300 (299.999...) -- rounding minutes and seconds
+    // independently gives floor(299.999/60)=4 and round(299.999%60)=60,
+    // i.e. the exact "4:60/km" bug. Must carry to "5:00/km" instead.
+    expect(formatPace(1000 / 299.999)).toBe("5:00/km");
+    // Same failure mode one minute up, for good measure.
+    expect(formatPace(1000 / 359.999)).toBe("6:00/km");
+  });
+
+  it("never emits a seconds field of 60 for any speed in a realistic pace range", () => {
+    for (let secPerKm = 120; secPerKm < 900; secPerKm += 0.137) {
+      const [, s] = formatPace(1000 / secPerKm).replace("/km", "").split(":");
+      expect(s).not.toBe("60");
+    }
+  });
+});
+
+describe("formatMinPerKm", () => {
+  it("also carries correctly through the minPerKm -> speedMs -> formatPace chain", () => {
+    // A pace expressed directly in minutes/km that lands just under a whole
+    // minute boundary after the unit conversions -- same underlying bug,
+    // reached the way the app's own avg-pace stat actually calls this.
+    expect(formatMinPerKm(299.999 / 60)).toBe("5:00/km");
   });
 });
 
