@@ -12,34 +12,6 @@
   margin-bottom: 16px;
 }
 
-.mode-toggle {
-  display: flex;
-  gap: 4px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 2px;
-}
-
-.mode-toggle button {
-  font: inherit;
-  padding: 6px 14px;
-  border: none;
-  border-radius: 6px;
-  background: none;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.mode-toggle button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.mode-toggle button.active {
-  background: var(--accent-bg);
-  color: var(--text-h);
-}
-
 .page-carousel {
   display: flex;
   flex-direction: column;

@@ -2,6 +2,12 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 interface PageCarouselProps {
   pages: { label: string; content: ReactNode }[];
+  /** Fires with the new page index whenever the active page changes, by
+   * either a nav click or a swipe/scroll -- lets a parent mirror "which
+   * page is showing" into its own state (e.g. to gate an expensive
+   * computation to only the page that's actually visible) without the
+   * carousel itself needing to know why. */
+  onPageChange?: (index: number) => void;
 }
 
 /**
@@ -12,7 +18,7 @@ interface PageCarouselProps {
  * container width via ResizeObserver and render correctly the moment you
  * swipe to them, instead of only after their own resize event.
  */
-export function PageCarousel({ pages }: PageCarouselProps) {
+export function PageCarousel({ pages, onPageChange }: PageCarouselProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [current, setCurrent] = useState(0);
@@ -32,6 +38,15 @@ export function PageCarousel({ pages }: PageCarouselProps) {
     const resizeObserver = new ResizeObserver(() => setTrackHeight(activePage.scrollHeight));
     resizeObserver.observe(activePage);
     return () => resizeObserver.disconnect();
+  }, [current]);
+
+  useEffect(() => {
+    onPageChange?.(current);
+    // Deliberately keyed on `current` alone (not onPageChange) -- a plain
+    // reactive effect on state, not read from inside the scroll/goTo
+    // handlers below, so it can't go stale the way capturing onPageChange
+    // in those handlers' own (mount-once, for onScroll) closures would.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current]);
 
   useEffect(() => {

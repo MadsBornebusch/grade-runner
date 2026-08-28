@@ -549,6 +549,15 @@ function App() {
       </header>
 
       <PageCarousel
+        onPageChange={(index) => {
+          // Only Plan (1) and Analyze (2) map to a resultMode -- Course (0)
+          // leaves it at whatever it last was, which only matters for
+          // analysisInputs' own "skip while not on Analyze" gate below, and
+          // staying on the last real mode while browsing Course is harmless
+          // (at worst a one-page-late skip, never a wrong computation).
+          if (index === 1) setResultMode("planning");
+          else if (index === 2) setResultMode("analysis");
+        }}
         pages={[
           {
             label: "Course",
@@ -566,185 +575,167 @@ function App() {
             ),
           },
           {
-            label: "Results",
+            label: "Plan",
             content: (
               <>
-                <div className="mode-toggle">
-                  <button
-                    type="button"
-                    className={resultMode === "planning" ? "active" : ""}
-                    onClick={() => setResultMode("planning")}
-                  >
-                    Planning
-                  </button>
-                  <button
-                    type="button"
-                    className={resultMode === "analysis" ? "active" : ""}
-                    onClick={() => setResultMode("analysis")}
-                    disabled={courseResult !== null && !courseResult.hasTimestamps}
-                  >
-                    Analysis
-                  </button>
-                </div>
-
                 {!courseResult && <p className="placeholder">Upload a course GPX on the Course page to get started.</p>}
-
-                {courseResult && (
+                {courseResult && solverResult && (
                   <>
-                    {resultMode === "planning" && solverResult && (
+                    <div className="target-time-input">
+                      <label>
+                        Target finish time
+                        <input
+                          type="text"
+                          placeholder="H:MM"
+                          value={targetTimeInput}
+                          onChange={(e) => setTargetTimeInput(e.target.value)}
+                        />
+                      </label>
+                      {targetTimeInput && (
+                        <button type="button" onClick={() => setTargetTimeInput("")}>
+                          Clear
+                        </button>
+                      )}
+                      {targetTimeInput && targetTimeS === null && <p className="warning">Enter a time as H:MM or H:MM:SS.</p>}
+                    </div>
+                    <ResultsSummary
+                      theta={solverResult.theta}
+                      result={solverResult.result}
+                      totalDistanceM={courseResult.totalDistance3D}
+                      chosenPacing={chosenPacingResult}
+                      bestDemonstrated={bestDemonstratedResult}
+                      summaryStats={planSummaryStats}
+                      target={
+                        targetTimeResult && targetTimeS !== null
+                          ? { result: targetTimeResult.result, theta: targetTimeResult.theta, targetTimeS }
+                          : null
+                      }
+                    />
+                    {solverInputs && solverBaseInputs && (
+                      <FinishTimeRangePanel
+                        fittedRaces={fittedRaces}
+                        ceilingParams={solverInputs.ceilingParams ?? {}}
+                        solverBaseInputs={solverBaseInputs}
+                        targetSegments={courseResult.segments}
+                      />
+                    )}
+                    <RouteMap
+                      routePoints={courseResult.routePoints}
+                      splitPoints={chartPoints}
+                      highlightedDistanceKm={highlightedDistanceKm}
+                      onHighlight={setHighlightedDistanceKm}
+                      savedPointsKm={savedPointsKm}
+                      onSavePoint={saveHighlightedPoint}
+                      onRemoveSavedPoint={removeSavedPoint}
+                      onClearSavedPoints={clearSavedPoints}
+                    />
+                    {/* A handful of segments (e.g. an immediate bonk) isn't
+                        enough for a meaningful chart axis/scale. */}
+                    {chartPoints.length >= 5 && (
                       <>
-                        <div className="target-time-input">
-                          <label>
-                            Target finish time
-                            <input
-                              type="text"
-                              placeholder="H:MM"
-                              value={targetTimeInput}
-                              onChange={(e) => setTargetTimeInput(e.target.value)}
-                            />
-                          </label>
-                          {targetTimeInput && (
-                            <button type="button" onClick={() => setTargetTimeInput("")}>
-                              Clear
-                            </button>
-                          )}
-                          {targetTimeInput && targetTimeS === null && (
-                            <p className="warning">Enter a time as H:MM or H:MM:SS.</p>
-                          )}
-                        </div>
-                        <ResultsSummary
-                          theta={solverResult.theta}
-                          result={solverResult.result}
-                          totalDistanceM={courseResult.totalDistance3D}
-                          chosenPacing={chosenPacingResult}
-                          bestDemonstrated={bestDemonstratedResult}
-                          summaryStats={planSummaryStats}
-                          target={
-                            targetTimeResult && targetTimeS !== null
-                              ? { result: targetTimeResult.result, theta: targetTimeResult.theta, targetTimeS }
-                              : null
-                          }
-                        />
-                        {solverInputs && solverBaseInputs && (
-                          <FinishTimeRangePanel
-                            fittedRaces={fittedRaces}
-                            ceilingParams={solverInputs.ceilingParams ?? {}}
-                            solverBaseInputs={solverBaseInputs}
-                            targetSegments={courseResult.segments}
-                          />
+                        {targetTimeResult && targetTimeS !== null && (
+                          <p className="field-group-note">
+                            Splits and charts below show your {formatDuration(targetTimeS)} target
+                            {Math.abs(targetTimeResult.result.finishTimeS - targetTimeS) > 60
+                              ? " (closest achievable pace, not exact)"
+                              : ""}
+                            . Clear it to go back to the theoretical ceiling.
+                          </p>
                         )}
-                        <RouteMap
-                          routePoints={courseResult.routePoints}
-                          splitPoints={chartPoints}
+                        <ElevationProfileChart
+                          points={chartPoints}
                           highlightedDistanceKm={highlightedDistanceKm}
-                          onHighlight={setHighlightedDistanceKm}
                           savedPointsKm={savedPointsKm}
-                          onSavePoint={saveHighlightedPoint}
-                          onRemoveSavedPoint={removeSavedPoint}
-                          onClearSavedPoints={clearSavedPoints}
+                          onPointClick={setHighlightedDistanceKm}
                         />
-                        {/* A handful of segments (e.g. an immediate bonk) isn't
-                            enough for a meaningful chart axis/scale. */}
-                        {chartPoints.length >= 5 && (
-                          <>
-                            {targetTimeResult && targetTimeS !== null && (
-                              <p className="field-group-note">
-                                Splits and charts below show your {formatDuration(targetTimeS)} target
-                                {Math.abs(targetTimeResult.result.finishTimeS - targetTimeS) > 60
-                                  ? " (closest achievable pace, not exact)"
-                                  : ""}
-                                . Clear it to go back to the theoretical ceiling.
-                              </p>
-                            )}
-                            <ElevationProfileChart
-                              points={chartPoints}
-                              highlightedDistanceKm={highlightedDistanceKm}
-                              savedPointsKm={savedPointsKm}
-                              onPointClick={setHighlightedDistanceKm}
-                            />
-                            <FuelChart points={chartPoints} />
-                            <SplitTable
-                              points={chartPoints}
-                              splitLengthKm={formInputs.splitLengthKm}
-                              onSplitLengthChange={(splitLengthKm) => setFormInputs((prev) => ({ ...prev, splitLengthKm }))}
-                              savedPointsKm={savedPointsKm}
-                              onClearSavedPoints={clearSavedPoints}
-                              intakeGPerH={formInputs.intakeGPerH}
-                            />
-                          </>
-                        )}
+                        <FuelChart points={chartPoints} />
+                        <SplitTable
+                          points={chartPoints}
+                          splitLengthKm={formInputs.splitLengthKm}
+                          onSplitLengthChange={(splitLengthKm) => setFormInputs((prev) => ({ ...prev, splitLengthKm }))}
+                          savedPointsKm={savedPointsKm}
+                          onClearSavedPoints={clearSavedPoints}
+                          intakeGPerH={formInputs.intakeGPerH}
+                        />
                       </>
                     )}
-
-                    {resultMode === "analysis" && !courseResult.hasTimestamps && (
-                      <p className="warning">
-                        This GPX has no timestamps — Analysis mode needs a recorded run, not a course. Switch to
-                        Planning, or upload a run with a recorded time.
-                      </p>
-                    )}
-                    {resultMode === "analysis" && analysisResult && (
+                  </>
+                )}
+              </>
+            ),
+          },
+          {
+            label: "Analyze",
+            content: (
+              <>
+                {!courseResult && <p className="placeholder">Upload a course GPX on the Course page to get started.</p>}
+                {courseResult && !courseResult.hasTimestamps && (
+                  <p className="warning">
+                    This GPX has no timestamps — Analyze needs a recorded run, not a course. Upload a run with a
+                    recorded time to use this page.
+                  </p>
+                )}
+                {courseResult && analysisResult && (
+                  <>
+                    <AnalysisSummary result={analysisResult} totalDistanceM={courseResult.totalDistance3D} summaryStats={analysisSummaryStats} />
+                    <RouteMap
+                      routePoints={courseResult.routePoints}
+                      splitPoints={analysisChartPoints}
+                      highlightedDistanceKm={highlightedDistanceKm}
+                      onHighlight={setHighlightedDistanceKm}
+                      savedPointsKm={savedPointsKm}
+                      onSavePoint={saveHighlightedPoint}
+                      onRemoveSavedPoint={removeSavedPoint}
+                      onClearSavedPoints={clearSavedPoints}
+                    />
+                    {analysisChartPoints.length >= 5 && (
                       <>
-                        <AnalysisSummary result={analysisResult} totalDistanceM={courseResult.totalDistance3D} summaryStats={analysisSummaryStats} />
-                        <RouteMap
-                          routePoints={courseResult.routePoints}
-                          splitPoints={analysisChartPoints}
+                        <ElevationProfileChart
+                          points={analysisChartPoints}
                           highlightedDistanceKm={highlightedDistanceKm}
-                          onHighlight={setHighlightedDistanceKm}
                           savedPointsKm={savedPointsKm}
-                          onSavePoint={saveHighlightedPoint}
-                          onRemoveSavedPoint={removeSavedPoint}
-                          onClearSavedPoints={clearSavedPoints}
+                          onPointClick={setHighlightedDistanceKm}
                         />
-                        {analysisChartPoints.length >= 5 && (
-                          <>
-                            <ElevationProfileChart
-                              points={analysisChartPoints}
-                              highlightedDistanceKm={highlightedDistanceKm}
-                              savedPointsKm={savedPointsKm}
-                              onPointClick={setHighlightedDistanceKm}
-                            />
-                            {solverResult && (
-                              <PaceEffortChart
-                                actual={paceEffortActualPoints}
-                                planned={paceEffortPlannedPoints}
-                                plannedThetaFraction={solverResult.theta}
-                                highlightedDistanceKm={highlightedDistanceKm}
-                              />
-                            )}
-                            {(courseResult.hasPower || courseResult.hasHeartRate) && (
-                              <PowerHrChart
-                                points={powerHrPoints}
-                                hasPower={courseResult.hasPower}
-                                hasHeartRate={courseResult.hasHeartRate}
-                                hasCalibratedPower={
-                                  courseResult.hasHeartRate &&
-                                  formInputs.hrPowerCalibrationSlope !== null &&
-                                  formInputs.hrPowerCalibrationIntercept !== null
-                                }
-                              />
-                            )}
-                            {analysisInputs && (
-                              <PacingFitPanel
-                                points={pacingFitPoints}
-                                ceilingParams={analysisInputs.ceilingParams ?? {}}
-                                onApplyTau={(tauMin) => setFormInputs((prev) => ({ ...prev, tauMin }))}
-                                onApplyDrift={(durabilityDriftPerHour) =>
-                                  setFormInputs((prev) => ({ ...prev, durabilityDriftPerHour }))
-                                }
-                              />
-                            )}
-                            <FuelChart points={analysisChartPoints} />
-                            <SubstrateChart points={substratePoints} />
-                            <SplitTable
-                              points={analysisChartPoints}
-                              splitLengthKm={formInputs.splitLengthKm}
-                              onSplitLengthChange={(splitLengthKm) => setFormInputs((prev) => ({ ...prev, splitLengthKm }))}
-                              savedPointsKm={savedPointsKm}
-                              onClearSavedPoints={clearSavedPoints}
-                              intakeGPerH={formInputs.intakeGPerH}
-                            />
-                          </>
+                        {solverResult && (
+                          <PaceEffortChart
+                            actual={paceEffortActualPoints}
+                            planned={paceEffortPlannedPoints}
+                            plannedThetaFraction={solverResult.theta}
+                            highlightedDistanceKm={highlightedDistanceKm}
+                          />
                         )}
+                        {(courseResult.hasPower || courseResult.hasHeartRate) && (
+                          <PowerHrChart
+                            points={powerHrPoints}
+                            hasPower={courseResult.hasPower}
+                            hasHeartRate={courseResult.hasHeartRate}
+                            hasCalibratedPower={
+                              courseResult.hasHeartRate &&
+                              formInputs.hrPowerCalibrationSlope !== null &&
+                              formInputs.hrPowerCalibrationIntercept !== null
+                            }
+                          />
+                        )}
+                        {analysisInputs && (
+                          <PacingFitPanel
+                            points={pacingFitPoints}
+                            ceilingParams={analysisInputs.ceilingParams ?? {}}
+                            onApplyTau={(tauMin) => setFormInputs((prev) => ({ ...prev, tauMin }))}
+                            onApplyDrift={(durabilityDriftPerHour) =>
+                              setFormInputs((prev) => ({ ...prev, durabilityDriftPerHour }))
+                            }
+                          />
+                        )}
+                        <FuelChart points={analysisChartPoints} />
+                        <SubstrateChart points={substratePoints} />
+                        <SplitTable
+                          points={analysisChartPoints}
+                          splitLengthKm={formInputs.splitLengthKm}
+                          onSplitLengthChange={(splitLengthKm) => setFormInputs((prev) => ({ ...prev, splitLengthKm }))}
+                          savedPointsKm={savedPointsKm}
+                          onClearSavedPoints={clearSavedPoints}
+                          intakeGPerH={formInputs.intakeGPerH}
+                        />
                       </>
                     )}
                   </>
