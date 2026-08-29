@@ -88,6 +88,17 @@ export function ElevationProfileChart({ points, highlightedDistanceKm, savedPoin
               const label = state?.activeLabel;
               if (onPointClick && typeof label === "number") onPointClick(label);
             }}
+            // Recharts maps a touch-drag to the same synthetic mousemove
+            // events a mouse hover produces, so this is what makes dragging
+            // a finger across the chart scrub the map marker continuously --
+            // onClick alone only fires once per discrete tap, not per move
+            // during a drag. Also fires on plain mouse hover (no button
+            // down) on desktop, which is a reasonable bonus: the map stays
+            // in sync as you scan the chart, not just when you click it.
+            onMouseMove={(state) => {
+              const label = state?.activeLabel;
+              if (onPointClick && typeof label === "number") onPointClick(label);
+            }}
           >
             <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
             <XAxis
@@ -109,11 +120,25 @@ export function ElevationProfileChart({ points, highlightedDistanceKm, savedPoin
                 ifOverflow="hidden"
               />
             ))}
-            <YAxis yAxisId="elevation" label={{ value: "m", angle: -90, position: "insideLeft" }} />
+            {/* Explicit dataMin/dataMax domains (with a little padding) --
+                Recharts' own "auto" domain still pins an Area's axis to
+                include 0 as the fill baseline, which is right for something
+                genuinely zero-based but wastes most of the chart's height
+                on a course that never goes near sea level, and does the
+                same to the pace axis whenever the whole course is run at a
+                fairly uniform pace far from either extreme. */}
+            <YAxis
+              yAxisId="elevation"
+              domain={[(min: number) => Math.floor(min - 5), (max: number) => Math.ceil(max + 5)]}
+              tickFormatter={(v: number) => v.toFixed(0)}
+              label={{ value: "m", angle: -90, position: "insideLeft" }}
+            />
             <YAxis
               yAxisId="pace"
               orientation="right"
               reversed
+              domain={[(min: number) => min - 0.2, (max: number) => max + 0.2]}
+              tickFormatter={(v: number) => formatPace(1000 / (v * 60))}
               label={{ value: "min/km", angle: 90, position: "insideRight" }}
             />
             <Tooltip
