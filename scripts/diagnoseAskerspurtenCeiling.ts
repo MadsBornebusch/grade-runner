@@ -27,6 +27,7 @@ import { runPipeline } from "../src/gpx/pipeline.ts";
 import { anaerobicCapacityMultiplier, ceilingPower, maxAerobicPower, type CeilingParams } from "../src/model/ceiling.ts";
 import {
   buildThresholdPowerAnchorPoints,
+  DEFAULT_HR_INERTIA_TAU_S,
   fitHrToPowerCalibrationAcrossRaces,
   fitHrToPowerCalibrationFromThresholds,
   predictHeartRateFromPower,
@@ -189,12 +190,40 @@ async function main() {
   if (hrCalibration) {
     const chartPoints = buildChartPoints(course.segments, result.segments, { calibration: hrCalibration });
     const stats = summarizeChartPoints(chartPoints);
-    console.log(`Predicted avg HR (threshold-only calibration): ~${stats.avgHrBpm?.toFixed(0)}bpm`);
+    console.log(`Predicted avg HR (threshold-only calibration, WITH HR inertia -- buildChartPoints applies it now): ~${stats.avgHrBpm?.toFixed(0)}bpm`);
   }
   if (lockedCalibration) {
     const chartPoints = buildChartPoints(course.segments, result.segments, { calibration: lockedCalibration });
     const stats = summarizeChartPoints(chartPoints);
-    console.log(`Predicted avg HR (LOCKED-through-LT2 calibration, closer to the real app): ~${stats.avgHrBpm?.toFixed(0)}bpm\n`);
+    console.log(`Predicted avg HR (LOCKED calibration, WITH HR inertia): ~${stats.avgHrBpm?.toFixed(0)}bpm\n`);
+
+    // Three-way comparison, all using the locked (closest-to-real-app)
+    // calibration: (a) the OLD memoryless per-segment estimate (what the
+    // app showed before this conversation's inertia fix), (b) WITH HR
+    // inertia (already printed above), (c) a "hold effort on descents"
+    // PROXY -- every segment targets the flat/uphill max power instead of
+    // whatever the descent-speed cap would otherwise allow, i.e. the
+    // athlete doesn't ease off on downhills at all. (c) isn't a real
+    // solver change (that would need maxDescentSpeedMs itself reworked),
+    // just a quick way to see how much of the gap each mechanism explains.
+    let memorylessWeightedSum = 0;
+    let holdEffortWeightedSum = 0;
+    let weightSum = 0;
+    const maxPowerForHold = Math.max(...result.segments.map((s) => s.grossPowerWPerKg));
+    let prevTimeS = 0;
+    for (const seg of result.segments) {
+      const dtS = seg.cumulativeTimeS - prevTimeS;
+      prevTimeS = seg.cumulativeTimeS;
+      if (dtS <= 0) continue;
+      memorylessWeightedSum += predictHeartRateFromPower(seg.grossPowerWPerKg, lockedCalibration) * dtS;
+      holdEffortWeightedSum += predictHeartRateFromPower(maxPowerForHold, lockedCalibration) * dtS;
+      weightSum += dtS;
+    }
+    console.log("Three-way comparison (all using the locked calibration):");
+    console.log(`  (a) OLD memoryless (no inertia):        ~${(memorylessWeightedSum / weightSum).toFixed(1)}bpm`);
+    console.log(`  (b) WITH HR inertia (${DEFAULT_HR_INERTIA_TAU_S}s time constant): ~${summarizeChartPoints(buildChartPoints(course.segments, result.segments, { calibration: lockedCalibration })).avgHrBpm?.toFixed(1)}bpm`);
+    console.log(`  (c) "Hold effort" proxy (never eases off on descents): ~${(holdEffortWeightedSum / weightSum).toFixed(1)}bpm`);
+    console.log(`  Real recorded average: 171.6bpm\n`);
   }
 
   // Segment-by-segment breakdown of what's actually limiting theta: is the

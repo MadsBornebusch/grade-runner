@@ -3,6 +3,7 @@ import { ceilingPower, maxAerobicPower, type CeilingParams } from "./ceiling";
 import type { EffortTrendPoint } from "./pacingFit";
 import { splitPower } from "./substrate";
 import {
+  applyHrInertia,
   fitHrToPowerCalibrationAcrossRaces,
   fitHrToPowerCalibrationFromThresholds,
   predictHeartRateFromPower,
@@ -394,5 +395,58 @@ describe("HR-derived power feeding the existing substrate pipeline", () => {
     expect(split.fatRateWPerKg).toBeGreaterThanOrEqual(0);
     expect(Number.isFinite(split.carbRateWPerKg)).toBe(true);
     expect(Number.isFinite(split.fatRateWPerKg)).toBe(true);
+  });
+});
+
+describe("applyHrInertia", () => {
+  it("starts AT the first target -- no artificial ramp from 0 for a course that opens at steady effort", () => {
+    const points = [
+      { cumulativeTimeS: 0, targetHrBpm: 150 },
+      { cumulativeTimeS: 10, targetHrBpm: 150 },
+    ];
+    const lagged = applyHrInertia(points, 30);
+    expect(lagged[0]).toBe(150);
+    expect(lagged[1]).toBe(150);
+  });
+
+  it("lags behind a step change instead of jumping instantly", () => {
+    const points = [
+      { cumulativeTimeS: 0, targetHrBpm: 160 },
+      { cumulativeTimeS: 5, targetHrBpm: 100 }, // sudden sharp descent -- target power/HR craters
+      { cumulativeTimeS: 10, targetHrBpm: 100 },
+    ];
+    const lagged = applyHrInertia(points, 30);
+    expect(lagged[0]).toBe(160);
+    // Real HR can't have dropped all the way to 100 in 5 seconds -- should
+    // sit somewhere strictly between the old (160) and new (100) target.
+    expect(lagged[1]!).toBeGreaterThan(100);
+    expect(lagged[1]!).toBeLessThan(160);
+    // Given enough time at the new target, it should converge close to it.
+    expect(lagged[2]!).toBeLessThan(lagged[1]!);
+  });
+
+  it("converges to a flat target over several time constants", () => {
+    const tau = 30;
+    const points = Array.from({ length: 20 }, (_, i) => ({ cumulativeTimeS: i * tau, targetHrBpm: i === 0 ? 160 : 120 }));
+    const lagged = applyHrInertia(points, tau);
+    expect(lagged[lagged.length - 1]!).toBeCloseTo(120, 0);
+  });
+
+  it("passes null through unchanged (e.g. no calibration applied) without disturbing neighboring lag state", () => {
+    const points = [
+      { cumulativeTimeS: 0, targetHrBpm: 150 },
+      { cumulativeTimeS: 10, targetHrBpm: null },
+      { cumulativeTimeS: 20, targetHrBpm: 150 },
+    ];
+    const lagged = applyHrInertia(points, 30);
+    expect(lagged[0]).toBe(150);
+    expect(lagged[1]).toBeNull();
+    expect(lagged[2]).not.toBeNull();
+  });
+
+  it("is a no-op smoothing-wise when every point already shares the same target (flat course)", () => {
+    const points = Array.from({ length: 10 }, (_, i) => ({ cumulativeTimeS: i * 20, targetHrBpm: 145 }));
+    const lagged = applyHrInertia(points, 30);
+    expect(lagged.every((v) => v === 145)).toBe(true);
   });
 });

@@ -428,6 +428,58 @@ export function predictHeartRateFromPower(powerWPerKg: number, calibration: HrPo
   return calibration.intercept + calibration.slope * powerWPerKg;
 }
 
+/** Time constant for the HR-inertia filter below, seconds -- a first-order
+ * approximation of real HR on/off kinetics' "fast component" (commonly
+ * cited in the 20-40s range; this doesn't attempt the fast+slow two-
+ * component or on/off-asymmetric kinetics real physiology shows, just a
+ * single symmetric exponential lag, which is enough to fix the specific
+ * failure mode this exists for -- see applyHrInertia's own doc). */
+export const DEFAULT_HR_INERTIA_TAU_S = 30;
+
+/**
+ * Smooths a sequence of instantaneous, power-implied HR estimates into a
+ * physiologically-laggy one: real heart rate can't jump to a new value the
+ * instant power changes (a rider hitting a steep descent doesn't have
+ * their pulse crash 30bpm in one second just because the model's target
+ * power did) -- it ramps over tens of seconds. predictHeartRateFromPower
+ * on its own is memoryless (one power value -> one HR value), which on a
+ * hilly course systematically UNDER-predicts the course-average HR: every
+ * brief, sharp downhill power dip gets full weight in the average as if
+ * the athlete's heart rate genuinely dropped and re-settled there, when
+ * in reality it barely has time to move before the terrain changes again.
+ *
+ * `targetHrBpm` is per-point predictHeartRateFromPower output (null passes
+ * through unchanged -- e.g. a walk-break/no-calibration point); points
+ * must be in ascending cumulativeTimeS order (both ChartPoint builders
+ * already produce them that way). Starts AT the first real target (no
+ * artificial ramp from 0), so a course opening at steady effort doesn't
+ * show a fake first-minute ramp-up that never happened.
+ */
+export function applyHrInertia<T extends { cumulativeTimeS: number; targetHrBpm: number | null }>(
+  points: T[],
+  tauSeconds: number = DEFAULT_HR_INERTIA_TAU_S,
+): (number | null)[] {
+  const result: (number | null)[] = [];
+  let laggedHr: number | null = null;
+  let lastTimeS: number | null = null;
+  for (const p of points) {
+    if (p.targetHrBpm === null) {
+      result.push(null);
+      continue;
+    }
+    if (laggedHr === null) {
+      laggedHr = p.targetHrBpm;
+    } else {
+      const dtS = lastTimeS !== null ? p.cumulativeTimeS - lastTimeS : 0;
+      const alpha = dtS > 0 && tauSeconds > 0 ? 1 - Math.exp(-dtS / tauSeconds) : 1;
+      laggedHr = laggedHr + (p.targetHrBpm - laggedHr) * alpha;
+    }
+    lastTimeS = p.cumulativeTimeS;
+    result.push(laggedHr);
+  }
+  return result;
+}
+
 /** Structural subset of formInputs.ts's FatOxPoint this module actually
  * needs -- avoids importing a ui/ type into model/ (this file stays a leaf
  * the UI depends on, not the other way around); any object shaped like this

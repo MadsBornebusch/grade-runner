@@ -1,6 +1,6 @@
 import type { CourseSegment } from "../gpx/pipeline";
 import type { AnalysisSegmentResult } from "../model/analysis";
-import { type HrPowerCalibration, predictHeartRateFromPower } from "../model/hrCalibration";
+import { applyHrInertia, type HrPowerCalibration, predictHeartRateFromPower } from "../model/hrCalibration";
 import { gradeAdjustedSpeedMs } from "../model/minetti";
 import type { SegmentResult } from "../model/solver";
 
@@ -45,6 +45,18 @@ function estimateHeartRateBpm(grossPowerWPerKg: number, hrEstimateInputs: HrEsti
   return predictHeartRateFromPower(grossPowerWPerKg, hrEstimateInputs.calibration);
 }
 
+/** Runs the raw, memoryless per-point HR estimates back through
+ * applyHrInertia -- shared by both builders below so the lag is applied
+ * identically regardless of which one built the points. Real heart rate
+ * can't track a sharp downhill power dip instantly (see applyHrInertia's
+ * own doc); without this, a hilly course's course-average estimated HR
+ * reads systematically low, since every brief power dip gets full weight
+ * as if the athlete's pulse genuinely settled there. */
+function withHrInertia(points: ChartPoint[]): ChartPoint[] {
+  const lagged = applyHrInertia(points.map((p) => ({ cumulativeTimeS: p.cumulativeTimeS, targetHrBpm: p.estimatedHeartRateBpm })));
+  return points.map((p, i) => ({ ...p, estimatedHeartRateBpm: lagged[i] }));
+}
+
 /** Merges solver output back with the original course segments (for
  * elevation/gradient, which the solver doesn't carry) into one series. */
 export function buildChartPoints(
@@ -52,7 +64,7 @@ export function buildChartPoints(
   results: SegmentResult[],
   hrEstimateInputs?: HrEstimateInputs,
 ): ChartPoint[] {
-  return results.map((r) => {
+  const points = results.map((r) => {
     const seg = courseSegments[r.index];
     return {
       distanceKm: r.cumulativeDistance3D / 1000,
@@ -66,6 +78,7 @@ export function buildChartPoints(
       estimatedHeartRateBpm: estimateHeartRateBpm(r.grossPowerWPerKg, hrEstimateInputs),
     };
   });
+  return withHrInertia(points);
 }
 
 /** Same shape as buildChartPoints, for analysis mode's reconstructed run.
@@ -78,14 +91,14 @@ export function buildAnalysisChartPoints(
   walkMaxMs = 2.0,
   hrEstimateInputs?: HrEstimateInputs,
 ): ChartPoint[] {
-  return results.map((r) => {
+  const points: ChartPoint[] = results.map((r) => {
     const seg = courseSegments[r.index];
     return {
       distanceKm: r.cumulativeDistance3D / 1000,
       elevationM: seg?.elevation ?? 0,
       gradient: seg?.gradient ?? 0,
       speedMs: r.speedMs,
-      mode: r.speedMs <= walkMaxMs ? "walk" : "run",
+      mode: r.speedMs <= walkMaxMs ? "walk" : ("run" as const),
       glycogenG: r.glycogenG,
       cumulativeTimeS: r.cumulativeElapsedTimeS,
       surfaceUnpaved: seg?.surfaceUnpaved,
@@ -93,6 +106,7 @@ export function buildAnalysisChartPoints(
       recordedHeartRateBpm: seg?.heartRateBpm ?? undefined,
     };
   });
+  return withHrInertia(points);
 }
 
 export interface CourseSummaryStats {
