@@ -24,7 +24,9 @@
 // Usage: npx tsx scripts/diagnoseAskerspurtenCeiling.ts
 
 import { runPipeline } from "../src/gpx/pipeline.ts";
+import { analyzeRun } from "../src/model/analysis.ts";
 import { anaerobicCapacityMultiplier, ceilingPower, maxAerobicPower, type CeilingParams } from "../src/model/ceiling.ts";
+import { maxDescentSpeedMs } from "../src/model/minetti.ts";
 import {
   buildThresholdPowerAnchorPoints,
   DEFAULT_HR_INERTIA_TAU_S,
@@ -224,6 +226,72 @@ async function main() {
     console.log(`  (b) WITH HR inertia (${DEFAULT_HR_INERTIA_TAU_S}s time constant): ~${summarizeChartPoints(buildChartPoints(course.segments, result.segments, { calibration: lockedCalibration })).avgHrBpm?.toFixed(1)}bpm`);
     console.log(`  (c) "Hold effort" proxy (never eases off on descents): ~${(holdEffortWeightedSum / weightSum).toFixed(1)}bpm`);
     console.log(`  Real recorded average: 171.6bpm\n`);
+  }
+
+  // What if we skip the solver entirely and cost the athlete's ACTUAL
+  // recorded GPS speed (analyzeRun -- no maxDescentSpeedMs cap involved at
+  // all, see analysis.ts: grossPower is derived straight from seg.dtS /
+  // seg.distance3D) through the same locked calibration? This answers two
+  // separate questions at once: (1) is the descent-speed cap itself just
+  // wrong for a short, fresh-legs race like this (as opposed to the fatigued
+  // ultra it was calibrated against), and (2) how far off is the model's
+  // predicted downhill pace from what this athlete actually ran.
+  if (lockedCalibration) {
+    const analysis = analyzeRun(course.segments, {
+      bodyMassKg: formInputs.bodyMassKg,
+      ceilingParams: baseCeilingParams,
+      substrateParams: { x0, k, intensityIsAbsolutePower, foPeakGPerMin: formInputs.foPeakGPerMin },
+      fueling: { intakeGPerH: formInputs.intakeGPerH },
+      glycogenStoreG: resolveGlycogenStoreG(formInputs),
+      walkMaxMs: formInputs.walkMaxMs,
+      altitudeAdjustment: formInputs.altitudeAdjustment,
+    });
+    const { buildAnalysisChartPoints } = await import("../src/ui/chartData.ts");
+    const analysisChartPoints = buildAnalysisChartPoints(course.segments, analysis.segments, formInputs.walkMaxMs, {
+      calibration: lockedCalibration,
+    });
+    const analysisStats = summarizeChartPoints(analysisChartPoints);
+    console.log(`Predicted avg HR from ACTUAL recorded GPS speed (no descent cap, WITH inertia, locked calibration): ~${analysisStats.avgHrBpm?.toFixed(1)}bpm`);
+    console.log(`  Real recorded average: 171.6bpm\n`);
+
+    // Descent-only speed comparison: for every segment steep enough that the
+    // solver's cap can bind (gradient below the ramp-start grade), compare
+    // the solver's predicted (possibly capped) speed against what this
+    // athlete actually ran on that exact same piece of ground.
+    let cappedCount = 0;
+    let predictedDescentSpeedSum = 0;
+    let actualDescentSpeedSum = 0;
+    let descentSegCount = 0;
+    let maxActualOverCap = 0;
+    let maxActualOverCapGrade = 0;
+    for (let i = 0; i < course.segments.length; i++) {
+      const seg = course.segments[i];
+      const cap = maxDescentSpeedMs(seg.gradient);
+      if (!Number.isFinite(cap)) continue; // not a steep-enough descent to be cap-eligible at all
+      const predicted = result.segments[i];
+      const actual = analysis.segments.find((a) => a.index === seg.index);
+      if (!predicted || !actual || actual.paused) continue;
+      descentSegCount++;
+      predictedDescentSpeedSum += predicted.speedMs;
+      actualDescentSpeedSum += actual.speedMs;
+      if (predicted.speedMs >= cap - 1e-6) {
+        cappedCount++;
+        if (actual.speedMs > cap) {
+          const over = actual.speedMs - cap;
+          if (over > maxActualOverCap) {
+            maxActualOverCap = over;
+            maxActualOverCapGrade = seg.gradient;
+          }
+        }
+      }
+    }
+    console.log(`Descent-cap-eligible segments (gradient steep enough for maxDescentSpeedMs to potentially bind): ${descentSegCount}`);
+    console.log(`  Of those, solver's predicted speed is AT the cap on: ${cappedCount} (${((100 * cappedCount) / descentSegCount).toFixed(0)}%)`);
+    console.log(`  Avg solver-predicted speed on these:  ${(predictedDescentSpeedSum / descentSegCount).toFixed(2)} m/s`);
+    console.log(`  Avg ACTUAL recorded speed on these:   ${(actualDescentSpeedSum / descentSegCount).toFixed(2)} m/s`);
+    console.log(
+      `  Largest single case of actual speed exceeding the cap: +${maxActualOverCap.toFixed(2)} m/s at grade ${(maxActualOverCapGrade * 100).toFixed(1)}% (cap there: ${maxDescentSpeedMs(maxActualOverCapGrade).toFixed(2)} m/s)\n`,
+    );
   }
 
   // Segment-by-segment breakdown of what's actually limiting theta: is the
