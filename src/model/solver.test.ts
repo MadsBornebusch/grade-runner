@@ -101,6 +101,24 @@ describe("simulate", () => {
     expect(result.feasible).toBe(true);
     expect(result.segments).toHaveLength(2000);
   });
+
+  it("scales the descent-speed cap by the WHOLE course's total distance (minetti.ts's descentPacingMultiplier), not just each segment's own grade", () => {
+    // Same steep-descent grade (-0.15, past the cap's onset) simulated as a
+    // short course vs. a long one, at an effort high enough that the
+    // aerobic ceiling alone would ask for a speed well above either cap --
+    // so the descent-speed cap is what actually binds on every descent
+    // segment in both cases, and only the course's total distance differs.
+    const shortDescent = simulate(1, baseInputs({ segments: makeSegments(100, 50, -0.15) })); // 5km
+    const longDescent = simulate(1, baseInputs({ segments: makeSegments(2000, 50, -0.15) })); // 100km
+    expect(shortDescent.feasible).toBe(true);
+    expect(longDescent.feasible).toBe(true);
+    // A 5km race's descent-cap-eligible segments should be paced faster
+    // (descentPacingMultiplier > 1 there) than the same grade on a 100km
+    // race (descentPacingMultiplier < 1) -- confirms totalDistanceKm is
+    // actually threaded from inputs.segments into maxDescentSpeedMs, not
+    // silently ignored.
+    expect(shortDescent.segments[0].speedMs).toBeGreaterThan(longDescent.segments[0].speedMs);
+  });
 });
 
 describe("findSustainableTheta", () => {
@@ -155,10 +173,12 @@ describe("findSustainableTheta", () => {
     const hillyInputs = baseInputs({
       segments: hilly,
       fueling: { intakeGPerH: 30 },
-      // 390, not 450 -- preserves the same usable-glycogen margin as before
-      // the reserve floor moved from 60 to 0 (450-60 == 390-0), so this
-      // scenario still lands on the same fuel-bound-not-ceiling-bound edge.
-      glycogenStoreG: 390,
+      // 280, not 390 -- this 100km course's descents are now scaled by
+      // descentPacingMultiplier (minetti.ts), which caps descent speed (and
+      // so carb burn) more tightly at ultra distance than the old flat
+      // grade-only cap did, so less glycogen headroom is needed to keep
+      // this scenario landing on the same fuel-bound-not-ceiling-bound edge.
+      glycogenStoreG: 280,
     });
     const { theta, result } = findSustainableTheta(hillyInputs);
     expect(result.feasible).toBe(true);

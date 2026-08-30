@@ -36,7 +36,7 @@ interface CachedActivityPoints {
   points: Array<Omit<GpxPoint, "time"> & { time: string | null }>;
 }
 
-function loadCachedPoints(stravaId: number): GpxPoint[] | null {
+export function loadCachedPoints(stravaId: number): GpxPoint[] | null {
   const path = `${CACHE_DIR}activity-${stravaId}.json`;
   if (!existsSync(path)) return null;
   const cached = JSON.parse(readFileSync(path, "utf8")) as CachedActivityPoints;
@@ -56,7 +56,7 @@ interface DescentStats {
   cappedSegmentDistanceM: number;
 }
 
-function computeDescentStats(points: GpxPoint[]): DescentStats | null {
+export function computeDescentStats(points: GpxPoint[]): DescentStats | null {
   const course = runPipeline(points);
   let weightedActual = 0;
   let weightedCap = 0;
@@ -99,6 +99,52 @@ function correlation(xs: number[], ys: number[]): number {
   return cov / Math.sqrt(varX * varY);
 }
 
+/**
+ * Manual judgment call, same discipline predictARaces.ts's own
+ * CONFIRMED_RACE_NAMES documents in its header comment: named-and-cached
+ * isn't the same as "a race" -- these are structured/deliberately-easy
+ * training sessions (an interval workout, a repeated fixed loop, and a run
+ * literally named "long and slow" in Norwegian) that happen to have real
+ * elevation change and a real name. Their deliberately-restrained descent
+ * pacing would bias a fit that's trying to isolate RACE-day pacing
+ * specifically. Kept in the printed table (so the exclusion is visible and
+ * correctable) but dropped from the correlation/fit.
+ */
+const NOT_A_RACE = new Set(["Evening Intervals", "2.5 km loop every hour", "Langt Og Langsomt"]);
+
+export interface RaceDescentRatio {
+  name: string;
+  date: string;
+  distanceKm: number;
+  ratio: number;
+}
+
+/** Loads this athlete's real races (see NOT_A_RACE above) with usable
+ * descent-cap-eligible data, for fitDescentPacingMultiplier.ts's fit. */
+export function loadRaceDescentRatios(): RaceDescentRatio[] {
+  const activities = JSON.parse(readFileSync(`${CACHE_DIR}activities.json`, "utf8")) as ActivityMeta[];
+  const cachedIds = new Set(
+    readdirSync(CACHE_DIR)
+      .filter((f) => f.startsWith("activity-"))
+      .map((f) => Number(f.slice("activity-".length, -".json".length))),
+  );
+  const candidates = activities
+    .filter((a) => cachedIds.has(a.stravaId))
+    .filter((a) => a.distanceKm >= 3 && a.elevationGainM >= 50)
+    .filter((a) => !looksLikeGenericStravaTitle(a.name))
+    .filter((a) => !NOT_A_RACE.has(a.name));
+
+  const out: RaceDescentRatio[] = [];
+  for (const a of candidates) {
+    const points = loadCachedPoints(a.stravaId);
+    if (!points) continue;
+    const stats = computeDescentStats(points);
+    if (!stats || stats.cappedSegmentDistanceM < 200) continue;
+    out.push({ name: a.name, date: a.date.slice(0, 10), distanceKm: a.distanceKm, ratio: stats.avgActualSpeedMs / stats.avgCapSpeedMs });
+  }
+  return out.sort((a, b) => a.distanceKm - b.distanceKm);
+}
+
 async function main() {
   const activities = JSON.parse(readFileSync(`${CACHE_DIR}activities.json`, "utf8")) as ActivityMeta[];
   const cachedIds = new Set(
@@ -137,17 +183,19 @@ async function main() {
   );
   for (const r of rows) {
     const ratio = r.stats.avgActualSpeedMs / r.stats.avgCapSpeedMs;
+    const excluded = NOT_A_RACE.has(r.name) ? "  [excluded from fit -- not a race]" : "";
     console.log(
       `${r.distanceKm.toFixed(1).padStart(11)}  ${r.date}  ${r.stats.avgActualSpeedMs.toFixed(2).padStart(24)}  ` +
         `${r.stats.avgCapSpeedMs.toFixed(2).padStart(9)}  ${ratio.toFixed(2).padStart(9)}  ` +
-        `${(r.stats.fractionOverCap * 100).toFixed(0).padStart(18)}%   ${r.name}`,
+        `${(r.stats.fractionOverCap * 100).toFixed(0).padStart(18)}%   ${r.name}${excluded}`,
     );
   }
 
-  const xs = rows.map((r) => r.distanceKm);
-  const ysActual = rows.map((r) => r.stats.avgActualSpeedMs);
-  const ysRatio = rows.map((r) => r.stats.avgActualSpeedMs / r.stats.avgCapSpeedMs);
-  console.log(`\n${rows.length} races/runs analyzed, spanning ${Math.min(...xs).toFixed(1)}km to ${Math.max(...xs).toFixed(1)}km.`);
+  const raceRows = rows.filter((r) => !NOT_A_RACE.has(r.name));
+  const xs = raceRows.map((r) => r.distanceKm);
+  const ysActual = raceRows.map((r) => r.stats.avgActualSpeedMs);
+  const ysRatio = raceRows.map((r) => r.stats.avgActualSpeedMs / r.stats.avgCapSpeedMs);
+  console.log(`\n${raceRows.length} real races analyzed (${rows.length - raceRows.length} non-race training sessions excluded), spanning ${Math.min(...xs).toFixed(1)}km to ${Math.max(...xs).toFixed(1)}km.`);
   console.log(`Correlation(total distance, actual descent speed):        r = ${correlation(xs, ysActual).toFixed(3)}`);
   console.log(`Correlation(total distance, actual/cap speed ratio):      r = ${correlation(xs, ysRatio).toFixed(3)}`);
 
@@ -157,7 +205,7 @@ async function main() {
   // opposed to being roughly flat throughout (consistent with a pace chosen
   // up front for the whole distance, not decided mid-run).
   console.log("\nWithin-run trend (does descent speed fall off as distance-so-far increases, WITHIN one run?):");
-  const longest = [...rows].sort((a, b) => b.distanceKm - a.distanceKm).slice(0, 3);
+  const longest = [...raceRows].sort((a, b) => b.distanceKm - a.distanceKm).slice(0, 3);
   for (const r of longest) {
     const a = candidates.find((c) => c.name === r.name && c.date.slice(0, 10) === r.date);
     if (!a) continue;

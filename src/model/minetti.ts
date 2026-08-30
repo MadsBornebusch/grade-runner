@@ -143,7 +143,7 @@ const DESCENT_LIMIT_SPEED_AT_CLAMP_MS = 1.0;
  * pieces, not one step), then continues the original, separately
  * calibrated onset-to-clamp line unchanged.
  */
-export function maxDescentSpeedMs(i: number): number {
+function gradeOnlyMaxDescentSpeedMs(i: number): number {
   if (i >= DESCENT_LIMIT_RAMP_START_GRADE) return Infinity;
   if (i >= DESCENT_LIMIT_ONSET_GRADE) {
     const t = (i - DESCENT_LIMIT_RAMP_START_GRADE) / (DESCENT_LIMIT_ONSET_GRADE - DESCENT_LIMIT_RAMP_START_GRADE);
@@ -152,4 +152,63 @@ export function maxDescentSpeedMs(i: number): number {
   const clamped = Math.max(-GRADE_CLAMP, i);
   const t = (clamped - DESCENT_LIMIT_ONSET_GRADE) / (-GRADE_CLAMP - DESCENT_LIMIT_ONSET_GRADE);
   return DESCENT_LIMIT_SPEED_AT_ONSET_MS + (DESCENT_LIMIT_SPEED_AT_CLAMP_MS - DESCENT_LIMIT_SPEED_AT_ONSET_MS) * t;
+}
+
+/**
+ * Fitted (f0, fInf, tauKm) for descentPacingMultiplier below -- same
+ * exponential-decay shape and naming convention as ceiling.ts's own
+ * duration-decay fit (f0/fInf/tau), but over total race DISTANCE rather
+ * than elapsed time. See descentPacingMultiplier's own doc for what this
+ * represents and scripts/fitDescentPacingMultiplier.ts for how these three
+ * numbers were derived (least-squares grid search against 8 real races,
+ * 10.2km-171.4km, SSE=0.040).
+ */
+const DESCENT_PACING_F0 = 1.23;
+const DESCENT_PACING_FINF = 0.59;
+const DESCENT_PACING_TAU_KM = 41;
+
+/**
+ * Scales gradeOnlyMaxDescentSpeedMs by how conservatively this athlete
+ * actually paces descents, as a function of the RACE's total distance --
+ * not a universal constant the way the grade-only cap above is treated.
+ * Real GPS data (scripts/descentSpeedVsDistance.ts) shows this athlete runs
+ * descents noticeably faster than that flat grade-only cap on a short race
+ * (10.2km: 1.12x) and settles to roughly 55-60% of it by ultra distance
+ * (113km: 0.57x, 171km: 0.58x) -- and critically, the effect is much
+ * stronger BETWEEN races of different total distance (r=-0.79 to -0.84)
+ * than WITHIN a single long race as distance-so-far accumulates (r=-0.20
+ * to -0.36 across the three longest races checked). That asymmetry is why
+ * this is keyed on total race distance (a pacing choice made for the
+ * day, from the start) rather than cumulative distance run so far within
+ * the simulation (which would model an in-race fatigue decay this
+ * athlete's own data doesn't support nearly as strongly).
+ *
+ * Bounded to [DESCENT_PACING_FINF, DESCENT_PACING_F0] by construction (the
+ * exponential can't overshoot either asymptote) -- deliberately NOT
+ * extrapolated further than that for a hypothetical race shorter than the
+ * shortest one actually observed (10.2km), since there's no real data below
+ * that to support an even larger boost.
+ *
+ * Single-athlete, n=8 races -- a real, data-informed default, not a
+ * validated universal curve, same epistemic status as
+ * DESCENT_LIMIT_SPEED_AT_ONSET_MS above.
+ */
+export function descentPacingMultiplier(totalDistanceKm: number): number {
+  if (!(totalDistanceKm > 0)) return 1;
+  return DESCENT_PACING_FINF + (DESCENT_PACING_F0 - DESCENT_PACING_FINF) * Math.exp(-totalDistanceKm / DESCENT_PACING_TAU_KM);
+}
+
+/**
+ * Max running speed on a descent, independent of metabolic cost --
+ * gradeOnlyMaxDescentSpeedMs's biomechanical/technical control shape,
+ * scaled by descentPacingMultiplier when `totalDistanceKm` is given (the
+ * race's total distance, known up front by any planning-mode caller).
+ * Omitting it (analysis of a real recorded run, or any caller with no
+ * whole-course context) keeps the original grade-only cap unchanged --
+ * byte-for-byte identical to before this parameter existed.
+ */
+export function maxDescentSpeedMs(i: number, totalDistanceKm?: number): number {
+  const cap = gradeOnlyMaxDescentSpeedMs(i);
+  if (totalDistanceKm === undefined || !Number.isFinite(cap)) return cap;
+  return cap * descentPacingMultiplier(totalDistanceKm);
 }

@@ -3,6 +3,7 @@ import {
   GRADE_CLAMP,
   costOfRunning,
   costOfWalking,
+  descentPacingMultiplier,
   gradeAdjustedSpeedMs,
   maxDescentSpeedMs,
 } from "./minetti";
@@ -118,6 +119,60 @@ describe("maxDescentSpeedMs", () => {
     // by Cr(i) near its minimum implies an absurd speed; the cap should hold
     // it to something a person could plausibly control on a technical descent.
     expect(maxDescentSpeedMs(-0.18)).toBeLessThan(4);
+  });
+
+  it("is unaffected by totalDistanceKm on flat/uphill/mild-downhill (still Infinity)", () => {
+    expect(maxDescentSpeedMs(0.1, 10)).toBe(Infinity);
+    expect(maxDescentSpeedMs(-0.03, 200)).toBe(Infinity);
+  });
+
+  it("omitting totalDistanceKm is byte-for-byte identical to the grade-only cap", () => {
+    for (const grade of [-0.1, -0.2, -0.3]) {
+      expect(maxDescentSpeedMs(grade, undefined)).toBe(maxDescentSpeedMs(grade));
+    }
+  });
+
+  it("scales the grade-only cap up for a short race and down for a long one", () => {
+    const gradeOnly = maxDescentSpeedMs(-0.15);
+    const short = maxDescentSpeedMs(-0.15, 10);
+    const long = maxDescentSpeedMs(-0.15, 150);
+    expect(short).toBeGreaterThan(gradeOnly);
+    expect(long).toBeLessThan(gradeOnly);
+    expect(long).toBeLessThan(short);
+  });
+});
+
+describe("descentPacingMultiplier", () => {
+  it("is 1 for zero, negative, or non-finite distance (no scaling applied)", () => {
+    expect(descentPacingMultiplier(0)).toBe(1);
+    expect(descentPacingMultiplier(-5)).toBe(1);
+    expect(descentPacingMultiplier(NaN)).toBe(1);
+  });
+
+  it("decreases monotonically as total distance grows", () => {
+    const distances = [5, 10, 20, 40, 80, 100, 150, 200];
+    const multipliers = distances.map(descentPacingMultiplier);
+    for (let k = 1; k < multipliers.length; k++) {
+      expect(multipliers[k]).toBeLessThan(multipliers[k - 1]);
+    }
+  });
+
+  it("is above 1 for a short race and below 1 for a long one, matching the real fit data it's calibrated from", () => {
+    // scripts/fitDescentPacingMultiplier.ts: 10.2km real ratio 1.12,
+    // 113.2km real ratio 0.57 -- not asserting the exact fitted numbers
+    // here (that's the fit script's job), just the qualitative shape a
+    // regression on these constants should never invert.
+    expect(descentPacingMultiplier(10)).toBeGreaterThan(1);
+    expect(descentPacingMultiplier(110)).toBeLessThan(0.7);
+  });
+
+  it("converges to a stable floor rather than continuing to fall for an absurdly long extrapolated distance", () => {
+    // The exponential decay's fInf asymptote -- an extrapolation guard by
+    // construction, not a separate clamp: a 1000km "race" shouldn't produce
+    // a multiplier meaningfully different from a 500km one.
+    const far = descentPacingMultiplier(500);
+    const fartherStill = descentPacingMultiplier(5000);
+    expect(Math.abs(far - fartherStill)).toBeLessThan(0.01);
   });
 });
 

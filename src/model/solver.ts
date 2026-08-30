@@ -213,6 +213,12 @@ export function simulate(theta: number, inputs: SolverInputs, opts: SimulateOpti
   let cumulativeDescentImpactSquared = 0;
   let previousElevation: number | null = null;
   const unpavedCostMultiplier = inputs.unpavedCostMultiplier ?? 1;
+  // Whole-course distance, known up front for every real caller (this is
+  // always the FULL target course being planned, never a partial/remaining
+  // slice -- see maxDescentSpeedMs's own doc on why total distance, not
+  // distance-so-far, is what should drive the descent-pacing scale).
+  const totalDistanceKm =
+    inputs.segments.length > 0 ? inputs.segments[inputs.segments.length - 1].cumulativeDistance3D / 1000 : 0;
 
   for (const seg of inputs.segments) {
     const elapsedMin = cumulativeTimeS / 60;
@@ -249,7 +255,7 @@ export function simulate(theta: number, inputs: SolverInputs, opts: SimulateOpti
     const terrainMultiplier = perCategoryMultiplier ?? (seg.surfaceUnpaved ? unpavedCostMultiplier : 1);
     const costRun = costOfRunning(seg.gradient) * terrainMultiplier;
     const costWalk = costOfWalking(seg.gradient) * terrainMultiplier;
-    const vRun = Math.min(targetNet / costRun, maxDescentSpeedMs(seg.gradient));
+    const vRun = Math.min(targetNet / costRun, maxDescentSpeedMs(seg.gradient, totalDistanceKm));
     const vWalk = Math.min(walkMaxMs, targetNet / costWalk);
 
     const forceWalk =
