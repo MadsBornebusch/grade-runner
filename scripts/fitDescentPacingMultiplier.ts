@@ -8,7 +8,13 @@
 // printed residuals table.
 //
 // Usage: npx tsx scripts/fitDescentPacingMultiplier.ts
+//        npx tsx scripts/fitDescentPacingMultiplier.ts --before=2025-05-24
+//          (leakage-free: fits only on races strictly before this date, for
+//          backtesting "what would this curve have looked like using only
+//          data available before race X" -- see predictARaces.ts's own
+//          trainingUntil cutoffs for the same idea applied to tau/fInf etc.)
 
+import { arg } from "./stravaScriptHelpers.ts";
 import { loadRaceDescentRatios } from "./descentSpeedVsDistance.ts";
 
 function multiplierAt(distanceKm: number, f0: number, fInf: number, tauKm: number): number {
@@ -48,9 +54,21 @@ function gridSearch(
 }
 
 function main() {
-  const races = loadRaceDescentRatios();
+  const beforeDate = arg("before", "");
+  const allRaces = loadRaceDescentRatios();
+  const races = beforeDate ? allRaces.filter((r) => r.date < beforeDate) : allRaces;
+  if (beforeDate) {
+    console.log(`Leakage-free mode: only races strictly before ${beforeDate} (${races.length} of ${allRaces.length} total).\n`);
+  }
   console.log(`Fitting against ${races.length} real races:`);
   for (const r of races) console.log(`  ${r.distanceKm.toFixed(1).padStart(6)}km  ratio=${r.ratio.toFixed(2)}  ${r.name}`);
+  if (races.length <= 3) {
+    console.log(
+      `\nWARNING: only ${races.length} data points for a 3-parameter (f0/fInf/tauKm) fit -- this will fit ` +
+        `(near-)perfectly with an SSE close to 0 regardless of whether the shape actually generalizes. Treat the ` +
+        `result below as illustrative of the data-scarcity problem, not a trustworthy independent fit.`,
+    );
+  }
 
   const points = races.map((r) => ({ distanceKm: r.distanceKm, ratio: r.ratio }));
 
