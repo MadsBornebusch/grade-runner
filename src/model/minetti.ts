@@ -143,7 +143,7 @@ const DESCENT_LIMIT_SPEED_AT_CLAMP_MS = 1.0;
  * pieces, not one step), then continues the original, separately
  * calibrated onset-to-clamp line unchanged.
  */
-function gradeOnlyMaxDescentSpeedMs(i: number): number {
+export function gradeOnlyMaxDescentSpeedMs(i: number): number {
   if (i >= DESCENT_LIMIT_RAMP_START_GRADE) return Infinity;
   if (i >= DESCENT_LIMIT_ONSET_GRADE) {
     const t = (i - DESCENT_LIMIT_RAMP_START_GRADE) / (DESCENT_LIMIT_ONSET_GRADE - DESCENT_LIMIT_RAMP_START_GRADE);
@@ -155,17 +155,36 @@ function gradeOnlyMaxDescentSpeedMs(i: number): number {
 }
 
 /**
- * Fitted (f0, fInf, tauKm) for descentPacingMultiplier below -- same
+ * (f0, fInf, tauKm) for descentPacingMultiplier below -- same
  * exponential-decay shape and naming convention as ceiling.ts's own
  * duration-decay fit (f0/fInf/tau), but over total race DISTANCE rather
- * than elapsed time. See descentPacingMultiplier's own doc for what this
- * represents and scripts/fitDescentPacingMultiplier.ts for how these three
- * numbers were derived (least-squares grid search against 8 real races,
- * 10.2km-171.4km, SSE=0.040).
+ * than elapsed time. f0 is the multiplier approached at zero distance
+ * (typically >1: descents run FASTER than the grade-only cap on a short
+ * race), fInf the asymptote approached at ultra distance (typically <1),
+ * tauKm the distance scale over which one decays to the other.
  */
-const DESCENT_PACING_F0 = 1.23;
-const DESCENT_PACING_FINF = 0.59;
-const DESCENT_PACING_TAU_KM = 41;
+export interface DescentPacingCurve {
+  f0: number;
+  fInf: number;
+  tauKm: number;
+}
+
+/**
+ * Default curve, used when this athlete has no fitted one of their own
+ * (FormInputs.descentPacingCurve === null). Derived from ONE athlete's 8
+ * real races (10.2km-171.4km, SSE=0.040) via
+ * scripts/fitDescentPacingMultiplier.ts -- a real, data-informed starting
+ * point, but emphatically that athlete's own descending behavior, not a
+ * validated universal curve. Same epistemic status as
+ * DESCENT_LIMIT_SPEED_AT_ONSET_MS above, and the reason
+ * fitDescentPacingCurveAcrossRaces (pacingFit.ts) exists to replace it
+ * per-athlete once a library has enough confirmed races to identify one.
+ */
+export const DEFAULT_DESCENT_PACING_CURVE: DescentPacingCurve = {
+  f0: 1.23,
+  fInf: 0.59,
+  tauKm: 41,
+};
 
 /**
  * Scales gradeOnlyMaxDescentSpeedMs by how conservatively this athlete
@@ -183,19 +202,22 @@ const DESCENT_PACING_TAU_KM = 41;
  * the simulation (which would model an in-race fatigue decay this
  * athlete's own data doesn't support nearly as strongly).
  *
- * Bounded to [DESCENT_PACING_FINF, DESCENT_PACING_F0] by construction (the
- * exponential can't overshoot either asymptote) -- deliberately NOT
- * extrapolated further than that for a hypothetical race shorter than the
- * shortest one actually observed (10.2km), since there's no real data below
- * that to support an even larger boost.
+ * Bounded to [curve.fInf, curve.f0] by construction (the exponential can't
+ * overshoot either asymptote) -- deliberately NOT extrapolated further than
+ * that for a hypothetical race shorter than the shortest one actually
+ * observed, since there's no real data below that to support an even
+ * larger boost.
  *
- * Single-athlete, n=8 races -- a real, data-informed default, not a
- * validated universal curve, same epistemic status as
- * DESCENT_LIMIT_SPEED_AT_ONSET_MS above.
+ * `curve` defaults to DEFAULT_DESCENT_PACING_CURVE (see its own doc on why
+ * that's one athlete's numbers, not a universal constant); pass this
+ * athlete's own fitted curve wherever one is available.
  */
-export function descentPacingMultiplier(totalDistanceKm: number): number {
+export function descentPacingMultiplier(
+  totalDistanceKm: number,
+  curve: DescentPacingCurve = DEFAULT_DESCENT_PACING_CURVE,
+): number {
   if (!(totalDistanceKm > 0)) return 1;
-  return DESCENT_PACING_FINF + (DESCENT_PACING_F0 - DESCENT_PACING_FINF) * Math.exp(-totalDistanceKm / DESCENT_PACING_TAU_KM);
+  return curve.fInf + (curve.f0 - curve.fInf) * Math.exp(-totalDistanceKm / curve.tauKm);
 }
 
 /**
@@ -205,10 +227,12 @@ export function descentPacingMultiplier(totalDistanceKm: number): number {
  * race's total distance, known up front by any planning-mode caller).
  * Omitting it (analysis of a real recorded run, or any caller with no
  * whole-course context) keeps the original grade-only cap unchanged --
- * byte-for-byte identical to before this parameter existed.
+ * byte-for-byte identical to before this parameter existed. `curve`
+ * likewise defaults to DEFAULT_DESCENT_PACING_CURVE when this athlete has
+ * no fitted one.
  */
-export function maxDescentSpeedMs(i: number, totalDistanceKm?: number): number {
+export function maxDescentSpeedMs(i: number, totalDistanceKm?: number, curve?: DescentPacingCurve): number {
   const cap = gradeOnlyMaxDescentSpeedMs(i);
   if (totalDistanceKm === undefined || !Number.isFinite(cap)) return cap;
-  return cap * descentPacingMultiplier(totalDistanceKm);
+  return cap * descentPacingMultiplier(totalDistanceKm, curve);
 }

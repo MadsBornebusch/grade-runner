@@ -27,6 +27,10 @@ import {
   bootstrapTauConfidenceInterval,
   buildEffortTrendPoints,
   fitSurfaceCostMultipliersFromIntensity,
+  buildDescentPacingObservation,
+  type DescentPacingFitResult,
+  type DescentPacingObservation,
+  fitDescentPacingCurveAcrossRaces,
   fitTauFInfWithSupportGate,
   type EffortTrendPoint,
   type FInfTauFitResult,
@@ -36,6 +40,7 @@ import {
   type TauConfidenceInterval,
 } from "../model/pacingFit";
 import { fitPacingMarginAcrossRaces, type PacingMarginFitResult } from "../model/pacingMarginFit";
+import type { DescentPacingCurve } from "../model/minetti";
 import { buildSegmentLibrary } from "../model/segmentLibrary";
 import { DURABILITY_MIN_DURATION_S } from "../model/suggestRuns";
 import { attachSurfaceData } from "../model/surfaceExposure";
@@ -94,6 +99,7 @@ export interface RunFitResult {
   surfaceFit: SurfaceCostMultiplierFitResult | null;
   hrCalibrationFit: HrPowerCalibration | null;
   marginFit: PacingMarginFitResult | null;
+  descentPacingFit: DescentPacingFitResult | null;
   transitGapCount: number;
   excludedForDurationCount: number;
   races: EffortTrendPoint[][];
@@ -141,6 +147,7 @@ export interface RunFitCallbacks {
   onApplySurfaceCostMultipliers: (multipliers: SurfaceCostMultiplierFitResult["surfaceCostMultipliers"]) => void;
   onApplyHrCalibration: (slope: number, intercept: number) => void;
   onApplyPacingMargin: (fit: PacingMarginFitResult) => void;
+  onApplyDescentPacingCurve: (curve: DescentPacingCurve) => void;
   onRacesFitted?: (races: EffortTrendPoint[][], raceDates: (Date | null)[]) => void;
 }
 
@@ -184,6 +191,7 @@ export async function runFitBatch(
     // user-confirmed races (raceTag === "race"), never a name heuristic.
     const confirmedRaceTrendPoints: EffortTrendPoint[][] = [];
     const confirmedRaceNames: string[] = [];
+    const confirmedRaceDescentObservations: DescentPacingObservation[] = [];
     let detectedTransitGaps = 0;
     let excludedForDuration = 0;
 
@@ -217,6 +225,15 @@ export async function runFitBatch(
         if (run.raceTag === "race") {
           confirmedRaceTrendPoints.push(buildEffortTrendPoints(segments, analysis.segments, formInputs.altitudeAdjustment));
           confirmedRaceNames.push(pointLegs.length > 1 ? `${run.name} (leg ${i + 1})` : run.name);
+          // Descent-pacing curve: confirmed races only, deliberately not the
+          // wider training-run pool the surface fit uses. This measures a
+          // deliberate race-day pacing CHOICE, and a training run's descents
+          // are run at whatever intent that session had -- pooling them in
+          // would fit the average of "racing" and "jogging", not racing.
+          // Returns null for a race with too little steep descent to say
+          // anything, which is the common flat-road-race case.
+          const descentObservation = buildDescentPacingObservation(segments);
+          if (descentObservation) confirmedRaceDescentObservations.push(descentObservation);
         }
         // Below DURABILITY_MIN_DURATION_S, a run can't span a meaningful
         // fraction of any realistic tau -- pooling it in anyway doesn't
@@ -319,6 +336,20 @@ export async function runFitBatch(
       : null;
     if (marginFit) callbacks.onApplyPacingMargin(marginFit);
 
+    // Descent-pacing curve: replaces minetti.ts's DEFAULT_DESCENT_PACING_CURVE
+    // (one specific athlete's real numbers) with this athlete's own. Tiered
+    // internally -- only applied when the race pool actually identifies a
+    // curve, since a 3-parameter exponential will otherwise return a
+    // confident-looking near-zero-SSE fit off races clustered at one
+    // distance (see fitDescentPacingCurveAcrossRaces's own doc).
+    const descentPacingFit = fitDescentPacingCurveAcrossRaces(
+      confirmedRaceDescentObservations,
+      formInputs.descentPacingCurve ?? undefined,
+    );
+    if (descentPacingFit.tier !== "defaults") {
+      callbacks.onApplyDescentPacingCurve(descentPacingFit.curve);
+    }
+
     // Auto-apply once fitTauFInfWithSupportGate picks a well-supported,
     // internally-consistent (fInf, tau) pair. Deliberately NOT applying
     // tauFit/fInfFit independently: they're two different searches (one
@@ -346,6 +377,7 @@ export async function runFitBatch(
         surfaceFit,
         hrCalibrationFit,
         marginFit,
+        descentPacingFit,
         transitGapCount: detectedTransitGaps,
         excludedForDurationCount: excludedForDuration,
         races,

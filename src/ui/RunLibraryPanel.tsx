@@ -26,6 +26,8 @@ import {
 } from "../storage/runLibrary";
 import { looksLikeGenericStravaTitle } from "../model/raceCandidates";
 import { MIN_MARGIN_FIT_RACES, type PacingMarginFitResult } from "../model/pacingMarginFit";
+import { MIN_DESCENT_DISTANCE_SPAN_RATIO, MIN_DESCENT_PACING_RACES } from "../model/pacingFit";
+import type { DescentPacingCurve } from "../model/minetti";
 import { resolveCeilingParams, resolveGlycogenStoreG, resolveLt1Lt2Fractions, type FormInputs, type Vo2MaxEntry } from "./formInputs";
 import { ensurePointsForRun, getAutoFetchStatus, runAutoFetchBatch, subscribeToAutoFetch } from "./autoFetchRuns";
 import { getBackfillStatus, runBackfillBatch, subscribeToBackfill } from "./backfillRuns";
@@ -48,6 +50,7 @@ interface RunLibraryPanelProps {
   onApplySurfaceCostMultipliers: (multipliers: Partial<Record<SurfaceCategory, number>>) => void;
   onApplyHrCalibration: (slope: number, intercept: number) => void;
   onApplyPacingMargin: (fit: PacingMarginFitResult) => void;
+  onApplyDescentPacingCurve: (curve: DescentPacingCurve) => void;
   onAddVo2MaxEntry: (entry: Vo2MaxEntry) => void;
   /** Reports the races/raceDates behind the just-completed fit up to the
    * parent -- lets the Results tab's finish-time-range feature reuse the
@@ -153,6 +156,7 @@ export function RunLibraryPanel({
   onApplyFInf,
   onApplySurfaceCostMultipliers,
   onApplyPacingMargin,
+  onApplyDescentPacingCurve,
   onApplyHrCalibration,
   onAddVo2MaxEntry,
   onRacesFitted,
@@ -172,6 +176,7 @@ export function RunLibraryPanel({
   const surfaceCostMultiplierFitResult = runFitStatus.result?.surfaceFit ?? null;
   const hrCalibrationFitResult = runFitStatus.result?.hrCalibrationFit ?? null;
   const pacingMarginFitResult = runFitStatus.result?.marginFit ?? null;
+  const descentPacingFitResult = runFitStatus.result?.descentPacingFit ?? null;
   const safeFitTier = runFitStatus.result?.safeFitTier ?? null;
   const transitGapCount = runFitStatus.result?.transitGapCount ?? 0;
   const excludedForDurationCount = runFitStatus.result?.excludedForDurationCount ?? 0;
@@ -521,6 +526,7 @@ export function RunLibraryPanel({
       onApplySurfaceCostMultipliers,
       onApplyHrCalibration,
       onApplyPacingMargin,
+      onApplyDescentPacingCurve,
       onRacesFitted,
     }).then(refresh);
   };
@@ -974,6 +980,42 @@ export function RunLibraryPanel({
             </tbody>
           </table>
           <p className="field-group-note">Applied automatically -- {pacingMarginFitResult.raceCount} confirmed races cleared the minimum to fit this curve.</p>
+        </div>
+      )}
+
+      {descentPacingFitResult && (
+        <div className="run-library__experimental-fit">
+          <p className="field-group-note">Descent pacing -- how hard you let yourself go downhill</p>
+          <p className="field-group-help">
+            How fast you actually run steep descents compared with the model's grade-only speed limit, as a function of
+            the race's TOTAL distance -- faster than the limit on a short race, progressively more conservative as the
+            distance grows. Fit from your confirmed races' own recorded GPS speed.
+          </p>
+          {descentPacingFitResult.tier === "defaults" ? (
+            <p className="field-group-note">
+              NOT APPLIED (needs at least {MIN_DESCENT_PACING_RACES} confirmed races with real steep descent; had{" "}
+              {descentPacingFitResult.raceCount}) -- using the built-in default curve, which came from one specific
+              athlete's races rather than yours.
+            </p>
+          ) : (
+            <>
+              <p className="field-group-note">
+                Fit from {descentPacingFitResult.raceCount} confirmed race
+                {descentPacingFitResult.raceCount === 1 ? "" : "s"}: {descentPacingFitResult.curve.f0.toFixed(2)}x the
+                speed limit on a very short race, easing to {descentPacingFitResult.curve.fInf.toFixed(2)}x by ultra
+                distance (half-way point around {(descentPacingFitResult.curve.tauKm * Math.LN2).toFixed(0)}km).
+              </p>
+              {descentPacingFitResult.tier === "fInfTau" && (
+                <p className="field-group-note">
+                  Your races span too narrow a range of distances (longest / shortest ={" "}
+                  {descentPacingFitResult.distanceSpanRatio.toFixed(1)}x, want at least{" "}
+                  {MIN_DESCENT_DISTANCE_SPAN_RATIO}x) to tell how you descend on a SHORT race, so that end of the curve
+                  is held at the default rather than guessed. Confirm a race noticeably shorter or longer than the ones
+                  you have to pin it down.
+                </p>
+              )}
+            </>
+          )}
         </div>
       )}
 

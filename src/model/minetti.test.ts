@@ -77,7 +77,7 @@ describe("maxDescentSpeedMs", () => {
 
   it("decreases monotonically as the descent steepens past the ramp-start grade", () => {
     const grades = [-0.04, -0.06, -0.08, -0.1, -0.15, -0.2, -0.25, -0.3, -0.35, -0.4, -0.45];
-    const speeds = grades.map(maxDescentSpeedMs);
+    const speeds = grades.map((g) => maxDescentSpeedMs(g));
     for (let k = 1; k < speeds.length; k++) {
       expect(speeds[k]).toBeLessThan(speeds[k - 1]);
     }
@@ -151,7 +151,7 @@ describe("descentPacingMultiplier", () => {
 
   it("decreases monotonically as total distance grows", () => {
     const distances = [5, 10, 20, 40, 80, 100, 150, 200];
-    const multipliers = distances.map(descentPacingMultiplier);
+    const multipliers = distances.map((d) => descentPacingMultiplier(d));
     for (let k = 1; k < multipliers.length; k++) {
       expect(multipliers[k]).toBeLessThan(multipliers[k - 1]);
     }

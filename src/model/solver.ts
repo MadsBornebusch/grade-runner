@@ -4,7 +4,7 @@
 // constraints) and §6 (walk/run transition).
 
 import type { CourseSegment, SurfaceCategory } from "../gpx/pipeline";
-import { costOfRunning, costOfWalking, maxDescentSpeedMs } from "./minetti";
+import { costOfRunning, costOfWalking, type DescentPacingCurve, maxDescentSpeedMs } from "./minetti";
 import { grossToNet, netToGross } from "./energetics";
 import { anaerobicCapacityMultiplier, type CeilingParams, ceilingPower, maxAerobicPower, sustainableFraction } from "./ceiling";
 import type { DescentExposureBasis } from "./pacingFit";
@@ -81,6 +81,16 @@ export interface SolverInputs {
    * simulation.
    */
   anaerobicCapacityMin?: number;
+  /**
+   * This athlete's own fitted descent-pacing curve (minetti.ts's
+   * DescentPacingCurve), scaling the descent-speed cap by the race's total
+   * distance. Undefined falls back to DEFAULT_DESCENT_PACING_CURVE, which
+   * is ONE athlete's real numbers -- see its own doc. Fit per-athlete by
+   * pacingFit.ts's fitDescentPacingCurveAcrossRaces. Not a CeilingParams
+   * field, for the same reason unpavedCostMultiplier isn't: it's a
+   * cost/speed-of-locomotion effect, not an aerobic-ceiling one.
+   */
+  descentPacingCurve?: DescentPacingCurve;
 }
 
 export interface SegmentResult {
@@ -255,7 +265,7 @@ export function simulate(theta: number, inputs: SolverInputs, opts: SimulateOpti
     const terrainMultiplier = perCategoryMultiplier ?? (seg.surfaceUnpaved ? unpavedCostMultiplier : 1);
     const costRun = costOfRunning(seg.gradient) * terrainMultiplier;
     const costWalk = costOfWalking(seg.gradient) * terrainMultiplier;
-    const vRun = Math.min(targetNet / costRun, maxDescentSpeedMs(seg.gradient, totalDistanceKm));
+    const vRun = Math.min(targetNet / costRun, maxDescentSpeedMs(seg.gradient, totalDistanceKm, inputs.descentPacingCurve));
     const vWalk = Math.min(walkMaxMs, targetNet / costWalk);
 
     const forceWalk =

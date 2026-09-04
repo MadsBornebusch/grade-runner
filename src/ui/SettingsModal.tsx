@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { SurfaceCategory } from "../gpx/pipeline";
 import type { EffortTrendPoint } from "../model/pacingFit";
 import type { PacingMarginFitResult } from "../model/pacingMarginFit";
+import type { DescentPacingCurve } from "../model/minetti";
 import { AthleteFields } from "./InputsPanel";
 import { RunLibraryPanel } from "./RunLibraryPanel";
 import { StravaConnectionStatus } from "./StravaConnectionStatus";
@@ -17,6 +18,7 @@ interface SettingsModalProps {
   onApplySurfaceCostMultipliers: (multipliers: Partial<Record<SurfaceCategory, number>>) => void;
   onApplyHrCalibration: (slope: number, intercept: number) => void;
   onApplyPacingMargin: (fit: PacingMarginFitResult) => void;
+  onApplyDescentPacingCurve: (curve: DescentPacingCurve) => void;
   onAddVo2MaxEntry: (entry: Vo2MaxEntry) => void;
   onRacesFitted: (races: EffortTrendPoint[][], raceDates: (Date | null)[]) => void;
 }
@@ -40,6 +42,7 @@ export function SettingsModal({
   onApplySurfaceCostMultipliers,
   onApplyHrCalibration,
   onApplyPacingMargin,
+  onApplyDescentPacingCurve,
   onAddVo2MaxEntry,
   onRacesFitted,
 }: SettingsModalProps) {
@@ -90,6 +93,7 @@ export function SettingsModal({
             onApplySurfaceCostMultipliers={onApplySurfaceCostMultipliers}
             onApplyHrCalibration={onApplyHrCalibration}
             onApplyPacingMargin={onApplyPacingMargin}
+            onApplyDescentPacingCurve={onApplyDescentPacingCurve}
             onAddVo2MaxEntry={onAddVo2MaxEntry}
             onRacesFitted={onRacesFitted}
           />

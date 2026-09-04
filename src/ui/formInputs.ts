@@ -4,6 +4,7 @@
 import type { SurfaceCategory } from "../gpx/pipeline";
 import type { CeilingParams } from "../model/ceiling";
 import { maxAerobicPower } from "../model/ceiling";
+import type { DescentPacingCurve } from "../model/minetti";
 import { fatOxPacePointToPowerFraction, fitCarbFractionAnchors, paceToGrossPowerWPerKg } from "../model/substrate";
 
 export interface FatOxPoint {
@@ -93,6 +94,15 @@ export interface FormInputs {
    * that function's own doc for why this replaced it as the auto-fit
    * RunLibraryPanel applies). */
   surfaceCostMultipliers: Partial<Record<SurfaceCategory, number>> | null;
+  /** This athlete's own fitted descent-pacing curve -- how much faster (short
+   * race) or slower (ultra) than minetti.ts's grade-only descent-speed cap
+   * they actually descend, as a function of the race's TOTAL distance. null =
+   * not yet fit, falling back to DEFAULT_DESCENT_PACING_CURVE, which is one
+   * specific athlete's numbers rather than anything universal (see its own
+   * doc). Fit by pacingFit.ts's fitDescentPacingCurveAcrossRaces, which
+   * refuses to return a trustworthy tier until the race library spans a wide
+   * enough range of distances to identify the curve at all. */
+  descentPacingCurve: DescentPacingCurve | null;
   /** Fitted HR-to-power linear mapping (PLAN.md §11 stage 3, reworked
    * 2026-08-21 to fit raw power instead of effortFraction -- see
    * hrCalibration.ts's header doc) -- both null together means not yet
@@ -160,6 +170,7 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   anaerobicCapacityMin: 1,
   unpavedCostMultiplier: 1,
   surfaceCostMultipliers: null,
+  descentPacingCurve: null,
   hrPowerCalibrationSlope: null,
   hrPowerCalibrationIntercept: null,
   pacingMargin: null,

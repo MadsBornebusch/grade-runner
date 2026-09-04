@@ -255,6 +255,7 @@ function App() {
       unpavedCostMultiplier: formInputs.unpavedCostMultiplier,
       surfaceCostMultipliers: formInputs.surfaceCostMultipliers ?? undefined,
       anaerobicCapacityMin: formInputs.anaerobicCapacityMin,
+      descentPacingCurve: formInputs.descentPacingCurve ?? undefined,
     };
     lastSolverInputsRef.current = built;
     return built;
@@ -292,6 +293,7 @@ function App() {
     formInputs.anaerobicCapacityMin,
     formInputs.unpavedCostMultiplier,
     formInputs.surfaceCostMultipliers,
+    formInputs.descentPacingCurve,
   ]);
 
   const solverResult = useMemo(() => {
@@ -754,6 +756,7 @@ function App() {
         onApplyTau={(tauMin) => setFormInputs((prev) => ({ ...prev, tauMin }))}
         onApplyFInf={(fInf) => setFormInputs((prev) => ({ ...prev, fInf }))}
         onApplySurfaceCostMultipliers={(surfaceCostMultipliers) => setFormInputs((prev) => ({ ...prev, surfaceCostMultipliers }))}
+        onApplyDescentPacingCurve={(descentPacingCurve) => setFormInputs((prev) => ({ ...prev, descentPacingCurve }))}
         onApplyHrCalibration={(hrPowerCalibrationSlope, hrPowerCalibrationIntercept) =>
           setFormInputs((prev) => ({ ...prev, hrPowerCalibrationSlope, hrPowerCalibrationIntercept }))
         }
