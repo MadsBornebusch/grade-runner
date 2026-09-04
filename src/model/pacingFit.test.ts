@@ -1188,6 +1188,25 @@ describe("fitDescentPacingCurveAcrossRaces", () => {
     expect(fit.curve).toEqual(fallback);
   });
 
+  it("demotes a boundary-hit f0 even when the distance span passes the gate", () => {
+    // Real case: this athlete's races under 60km span 5.5x (clearing the 4x
+    // gate) yet still rail f0 to its 1.3 search bound, because none of them
+    // is short enough to constrain the short-race end. A pinned parameter is
+    // not a fitted one -- same guard fitTauFInfWithSupportGate applies via
+    // its own hitSearchBoundary flags.
+    const railing: DescentPacingObservation[] = [
+      { totalDistanceKm: 11, ratio: 1.6 },
+      { totalDistanceKm: 20, ratio: 1.4 },
+      { totalDistanceKm: 45, ratio: 1.0 },
+      { totalDistanceKm: 60, ratio: 0.8 },
+    ];
+    const fallback: DescentPacingCurve = { f0: 1.11, fInf: 0.5, tauKm: 30 };
+    const fit = fitDescentPacingCurveAcrossRaces(railing, fallback);
+    expect(fit.distanceSpanRatio).toBeGreaterThanOrEqual(MIN_DESCENT_DISTANCE_SPAN_RATIO);
+    expect(fit.tier).toBe("fInfTau");
+    expect(fit.curve.f0).toBe(fallback.f0);
+  });
+
   it("reports raceCount and distanceSpanRatio for the panel's support message", () => {
     const fit = fitDescentPacingCurveAcrossRaces(syntheticRaces([10, 20, 100]));
     expect(fit.raceCount).toBe(3);

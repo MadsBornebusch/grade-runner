@@ -1664,6 +1664,23 @@ export interface DescentPacingFitResult {
   sse: number;
 }
 
+/** Physically sane outer search bounds. A best fit sitting exactly ON one
+ * of these is a boundary hit: the search wanted to keep going and was
+ * clamped, so that parameter is pinned by the bound rather than identified
+ * by the data -- the same failure fitTauFInfWithSupportGate guards with its
+ * own hitSearchBoundary flags. Found in real data: this athlete's races
+ * under 60km clear the distance-span gate (5.5x) yet still rail f0 to 1.3,
+ * because no race short enough to constrain the short-race end exists in
+ * that pool. */
+const DESCENT_F0_BOUNDS: [number, number] = [0.9, 1.3];
+const DESCENT_FINF_BOUNDS: [number, number] = [0.3, 0.9];
+const DESCENT_TAU_BOUNDS: [number, number] = [5, 200];
+
+function atBoundary(value: number, [lo, hi]: [number, number]): boolean {
+  const tolerance = (hi - lo) * 1e-6;
+  return value <= lo + tolerance || value >= hi - tolerance;
+}
+
 function descentSse(points: DescentPacingObservation[], curve: DescentPacingCurve): number {
   let sum = 0;
   for (const p of points) {
@@ -1708,14 +1725,11 @@ function searchDescentCurve(
     return best;
   };
 
-  // Physically sane outer bounds: f0 in [0.9, 1.3] (a short race can be run
-  // somewhat faster than the grade-only cap, but not implausibly so), fInf
-  // in [0.3, 0.9], tau 5-200km.
-  const coarse = run([0.9, 1.3], [0.3, 0.9], [5, 200], 40);
+  const coarse = run(DESCENT_F0_BOUNDS, DESCENT_FINF_BOUNDS, DESCENT_TAU_BOUNDS, 40);
   return run(
-    [Math.max(0.9, coarse.curve.f0 - 0.05), Math.min(1.3, coarse.curve.f0 + 0.05)],
-    [Math.max(0.3, coarse.curve.fInf - 0.05), Math.min(0.9, coarse.curve.fInf + 0.05)],
-    [Math.max(5, coarse.curve.tauKm - 15), coarse.curve.tauKm + 15],
+    [Math.max(DESCENT_F0_BOUNDS[0], coarse.curve.f0 - 0.05), Math.min(DESCENT_F0_BOUNDS[1], coarse.curve.f0 + 0.05)],
+    [Math.max(DESCENT_FINF_BOUNDS[0], coarse.curve.fInf - 0.05), Math.min(DESCENT_FINF_BOUNDS[1], coarse.curve.fInf + 0.05)],
+    [Math.max(DESCENT_TAU_BOUNDS[0], coarse.curve.tauKm - 15), Math.min(DESCENT_TAU_BOUNDS[1], coarse.curve.tauKm + 15)],
     60,
   );
 }
@@ -1752,11 +1766,18 @@ export function fitDescentPacingCurveAcrossRaces(
 
   if (distanceSpanRatio >= minSpan) {
     const full = searchDescentCurve(points, fallback, true);
-    return { curve: full.curve, tier: "full", ...base, sse: full.sse };
+    // A wide distance span is necessary but not sufficient: f0 can still
+    // rail to its search bound when the pool has no genuinely SHORT race
+    // (see DESCENT_F0_BOUNDS' own doc for the real case). Demote to the
+    // f0-held tier rather than shipping a pinned parameter as a fit.
+    if (!atBoundary(full.curve.f0, DESCENT_F0_BOUNDS)) {
+      return { curve: full.curve, tier: "full", ...base, sse: full.sse };
+    }
   }
 
-  // Enough races, but clustered too tightly in distance to identify the
-  // short-race end -- hold f0 at the fallback and fit only fInf/tau.
+  // Either clustered too tightly in distance to identify the short-race
+  // end, or f0 railed to its search boundary above -- either way, hold f0
+  // at the fallback and fit only fInf/tau.
   const partial = searchDescentCurve(points, fallback, false);
   return { curve: partial.curve, tier: "fInfTau", ...base, sse: partial.sse };
 }
