@@ -53,6 +53,16 @@ export interface FormInputs {
   f0: number;
   fInf: number;
   tauMin: number;
+  /** Which duration->fraction ceiling shape to use (see
+   * CeilingParams.durationCurve). "exponential" is the historical default;
+   * "powerLaw" spans short and ultra durations the exponential provably
+   * cannot, at the cost of needing its own between-race fit. */
+  durationCurve: "exponential" | "powerLaw";
+  /** Power-law anchor: sustainable fraction of VO2max at 60 minutes. Should
+   * land near lt2Fraction (LT2 is conventionally ~60-minute power). */
+  powerLawFraction60Min: number;
+  /** Power-law decay exponent b in f(t) = f60 * (t/60)^-b. */
+  powerLawExponent: number;
   /** Master on/off switch for the whole pacing/fade curve (the f0->fInf
    * decay AND durability drift below, which layers on top of it) -- see
    * CeilingParams.pacingCurveEnabled's own doc. Default true (on); off
@@ -153,6 +163,9 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   f0: 0.94,
   fInf: 0.38,
   tauMin: 250,
+  durationCurve: "exponential",
+  powerLawFraction60Min: 0.81,
+  powerLawExponent: 0.16,
   pacingCurveEnabled: true,
   intakeGPerH: 60,
   // ~7-8 g/kg (liver + muscle glycogen) is a standard range for a fed,
@@ -363,6 +376,9 @@ export function resolveCeilingParams(inputs: FormInputs): CeilingParams {
     f0: inputs.f0,
     fInf: inputs.fInf,
     tauMin: inputs.tauMin,
+    durationCurve: inputs.durationCurve,
+    powerLawFraction60Min: inputs.powerLawFraction60Min,
+    powerLawExponent: inputs.powerLawExponent,
     pacingCurveEnabled: inputs.pacingCurveEnabled,
     durabilityDriftPerHour: inputs.durabilityDriftPerHour,
   };

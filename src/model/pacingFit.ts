@@ -15,7 +15,7 @@
 
 import type { CourseSegment, SurfaceCategory } from "../gpx/pipeline";
 import type { AnalysisSegmentResult } from "./analysis";
-import { type CeilingParams, ceilingPower } from "./ceiling";
+import { type CeilingParams, ceilingPower, forceExponentialCurve } from "./ceiling";
 import { descentStepForSegment } from "./descentImpact";
 import { fitIntensityConditionedSlowdownModel } from "./intensityConditionedSlowdownFit";
 import {
@@ -826,9 +826,20 @@ export interface SafeFitResult {
  */
 export function fitTauFInfWithSupportGate(
   races: EffortTrendPoint[][],
-  ceilingParams: CeilingParams,
+  rawCeilingParams: CeilingParams,
   opts: FitTauAcrossRacesOptions & { minDurationDiversityRatio?: number } = {},
 ): SafeFitResult {
+  // These searches solve for EXPONENTIAL (f0/fInf/tau) parameters, so they
+  // must evaluate the ceiling in exponential mode -- fitting them against a
+  // power-law ceiling would be searching for parameters the curve doesn't
+  // even use. See CeilingParams.durationCurve's own doc.
+  // ...but only for EVALUATING the fits. The params handed back to callers
+  // keep the athlete's configured curve mode: they're used for prediction,
+  // where a powerLaw athlete must stay on the power law. Stripping the mode
+  // from the RETURN value silently reverted prediction to the exponential
+  // (caught by a backtest whose numbers came back byte-identical).
+  const ceilingParams = forceExponentialCurve(rawCeilingParams);
+  const withFitted = (fitted: Partial<CeilingParams>): CeilingParams => ({ ...rawCeilingParams, ...fitted });
   const minDurationDiversityRatio = opts.minDurationDiversityRatio ?? MIN_DURATION_DIVERSITY_RATIO;
   const fInfFit = fitFInfAndTauAcrossRaces(races, ceilingParams, opts);
   const tauFit = fitTauAcrossRaces(races, ceilingParams, opts);
@@ -841,7 +852,7 @@ export function fitTauFInfWithSupportGate(
     !fInfFit.hitSearchBoundary.tau
   ) {
     return {
-      ceilingParams: { ...ceilingParams, fInf: fInfFit.fInf, tauMin: fInfFit.tauMin },
+      ceilingParams: withFitted({ fInf: fInfFit.fInf, tauMin: fInfFit.tauMin }),
       tier: "joint",
       fInfFit,
       tauFit,
@@ -850,14 +861,14 @@ export function fitTauFInfWithSupportGate(
 
   if (tauFit && tauFit.informativeRaceCount >= MIN_INFORMATIVE_RACES && !tauFit.hitSearchBoundary) {
     return {
-      ceilingParams: { ...ceilingParams, tauMin: tauFit.tauMin },
+      ceilingParams: withFitted({ tauMin: tauFit.tauMin }),
       tier: "tauOnly",
       fInfFit,
       tauFit,
     };
   }
 
-  return { ceilingParams, tier: "defaults", fInfFit, tauFit };
+  return { ceilingParams: rawCeilingParams, tier: "defaults", fInfFit, tauFit };
 }
 
 /** Linear-interpolation percentile over an already-sorted array. Shared by

@@ -36,6 +36,53 @@ export interface CeilingParams {
    * or doesn't want, any fade modeling in their plan.
    */
   pacingCurveEnabled?: boolean;
+  /**
+   * Which duration->fraction shape to use. "exponential" (the default, and
+   * byte-for-byte the behavior that existed before this field) is the
+   * f0/fInf/tauMin bounded decay above. "powerLaw" instead uses
+   * powerLawFraction60Min/powerLawExponent below.
+   *
+   * Motivated by a measured failure of the exponential across this
+   * athlete's own 8 confirmed races (42min-24h): real sustained fraction of
+   * VO2max spans 86%->41% (a factor of 2.1), while the fitted exponential
+   * spans only 83%->66% (a factor of 1.26). fInf is the culprit -- it's an
+   * asymptote no single race ever reaches, so the within-race fit that
+   * produces it leaves it essentially unconstrained, and it ends up far too
+   * high (0.66 against a real 24h value of 0.41). A power law has no
+   * absorbing asymptote and fits the whole range.
+   *
+   * IMPORTANT: pacingFit.ts's tau/fInf fits call ceilingPower directly on
+   * real recorded elapsed time to search EXPONENTIAL parameters. Handing
+   * them params in "powerLaw" mode would have them fitting an exponential
+   * against a power-law ceiling -- meaningless. Those fits force
+   * "exponential" explicitly; see forceExponentialCurve below.
+   */
+  durationCurve?: "exponential" | "powerLaw";
+  /**
+   * Sustainable fraction of VO2max at 60 minutes -- the power law's anchor.
+   * Deliberately anchored at 60min rather than at t=1 (whose raw
+   * coefficient is a meaningless extrapolation well above 1.0): LT2 is
+   * conventionally about an athlete's 60-minute power, so this should land
+   * near lt2Fraction and is directly checkable against it. For the athlete
+   * this was developed against, the envelope fit gave 0.813 versus a
+   * lab-measured lt2Fraction of 0.814.
+   */
+  powerLawFraction60Min?: number;
+  /** Decay exponent b in f(t) = f60 * (t/60)^-b. Positive; larger means a
+   * steeper fall-off with duration. ~0.16 for the athlete this was
+   * developed against. */
+  powerLawExponent?: number;
+}
+
+/**
+ * Strips `durationCurve` back to "exponential" -- for pacingFit.ts's
+ * tau/fInf searches, which are only meaningful against the exponential
+ * shape they're searching parameters of (see durationCurve's own doc). A
+ * no-op for params already in exponential mode, so it's safe to apply
+ * unconditionally at those call sites.
+ */
+export function forceExponentialCurve(params: CeilingParams): CeilingParams {
+  return params.durationCurve === "powerLaw" ? { ...params, durationCurve: "exponential" } : params;
 }
 
 const DEFAULTS: Required<CeilingParams> = {
@@ -47,7 +94,25 @@ const DEFAULTS: Required<CeilingParams> = {
   durabilityDriftPerHour: 0,
   durabilityDriftPerDescentUnit: 0,
   pacingCurveEnabled: true,
+  durationCurve: "exponential",
+  powerLawFraction60Min: 0.81,
+  powerLawExponent: 0.16,
 };
+
+/** Aerobic ceiling in powerLaw mode is capped here rather than at
+ * lt2Fraction: a power law has no plateau and climbs past 100% of VO2max
+ * below ~16 minutes, which is not a thing aerobic metabolism can do. The
+ * supra-VO2max part of a genuinely short race is anaerobic, and is modeled
+ * separately (and additively) by anaerobicCapacityMultiplier -- so clamping
+ * the AEROBIC term at VO2max here doesn't cap total power at VO2max.
+ *
+ * Note this replaces the lt2Fraction clamp in powerLaw mode, deliberately:
+ * that clamp is what held every race under ~2h to an identical ceiling, and
+ * it sat BELOW a real 42-minute race this athlete had already run (86.1%
+ * actual vs an 81.4% clamp), so it was not functioning as an upper bound at
+ * all. The fitted power law encodes the short-race behavior directly
+ * instead. */
+const MAX_AEROBIC_FRACTION = 1;
 
 /**
  * Sustainable fraction of VO2max as a function of event duration so far,
@@ -58,8 +123,15 @@ export function sustainableFraction(
   tMin: number,
   params: CeilingParams = {},
 ): number {
-  const { f0, fInf, tauMin, lt2Fraction, pacingCurveEnabled } = { ...DEFAULTS, ...params };
+  const { f0, fInf, tauMin, lt2Fraction, pacingCurveEnabled, durationCurve, powerLawFraction60Min, powerLawExponent } =
+    { ...DEFAULTS, ...params };
   if (!pacingCurveEnabled) return Math.min(f0, lt2Fraction);
+  if (durationCurve === "powerLaw") {
+    // Guard t<=0 (and the t->0 blow-up generally) via the same VO2max cap
+    // that bounds the short end -- see MAX_AEROBIC_FRACTION's own doc.
+    if (!(tMin > 0)) return MAX_AEROBIC_FRACTION;
+    return Math.min(powerLawFraction60Min * Math.pow(tMin / 60, -powerLawExponent), MAX_AEROBIC_FRACTION);
+  }
   const fraction = fInf + (f0 - fInf) * Math.exp(-tMin / tauMin);
   return Math.min(fraction, lt2Fraction);
 }

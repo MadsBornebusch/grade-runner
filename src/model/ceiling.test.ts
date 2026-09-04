@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { altitudeFraction, anaerobicCapacityMultiplier, ceilingPower, sustainableFraction } from "./ceiling";
+import { altitudeFraction, anaerobicCapacityMultiplier, ceilingPower, sustainableFraction,
+  forceExponentialCurve
+} from "./ceiling";
+import type { CeilingParams } from "./ceiling";
 
 describe("sustainableFraction", () => {
   it("starts near f0 and decays toward f_inf, capped by LT2", () => {
@@ -146,5 +149,83 @@ describe("ceilingPower", () => {
       expect(curveOff).toBeGreaterThan(withEverything);
       expect(curveOff).toBeCloseTo(fresh, 10); // flat regardless of how far into the event
     });
+  });
+});
+
+describe("power-law duration curve", () => {
+  const POWER_LAW: CeilingParams = {
+    durationCurve: "powerLaw",
+    powerLawFraction60Min: 0.813,
+    powerLawExponent: 0.1602,
+    lt2Fraction: 0.814,
+  };
+
+  it("is byte-for-byte unchanged when durationCurve is omitted (exponential default)", () => {
+    const params: CeilingParams = { f0: 0.94, fInf: 0.66, tauMin: 220, lt2Fraction: 0.814 };
+    for (const tMin of [10, 42, 92, 505, 1464]) {
+      expect(sustainableFraction(tMin, { ...params, durationCurve: "exponential" })).toBe(
+        sustainableFraction(tMin, params),
+      );
+    }
+  });
+
+  it("spans the real measured range the exponential could not", () => {
+    // The measured failure this mode exists for: this athlete's actual
+    // sustained fraction ran 86.1% (42min) down to 40.8% (24h24m), a factor
+    // of 2.1, where the fitted exponential only spanned 83%->66% (1.26x).
+    const short = sustainableFraction(42, POWER_LAW);
+    const long = sustainableFraction(1464, POWER_LAW);
+    expect(short / long).toBeGreaterThan(1.7);
+  });
+
+  it("reaches a 42-minute race the LT2 clamp sat below", () => {
+    // Askerspurten: 86.1% actually sustained, against an 81.4% LT2 clamp --
+    // the ceiling has to reach a race already run, which the clamp did not.
+    // This race is one of the two hull points the envelope fit touches
+    // exactly, so the bar here is "meets it", not "clears it by a margin";
+    // the 3-4 digit rounding of the params above is why this is a
+    // tolerance rather than a plain >=.
+    expect(sustainableFraction(42, POWER_LAW)).toBeCloseTo(0.861, 3);
+    expect(sustainableFraction(42, POWER_LAW)).toBeGreaterThan(0.814); // the old clamp
+  });
+
+  it("caps the aerobic term at VO2max instead of climbing past it on a short race", () => {
+    // A raw power law crosses 100% around 16 minutes and keeps going.
+    expect(sustainableFraction(10, POWER_LAW)).toBe(1);
+    expect(sustainableFraction(1, POWER_LAW)).toBe(1);
+    expect(sustainableFraction(0, POWER_LAW)).toBe(1);
+  });
+
+  it("is not clamped by lt2Fraction in power-law mode", () => {
+    // The exponential mode's Math.min(fraction, lt2Fraction) is exactly what
+    // held every sub-2h race to an identical ceiling; power-law mode must
+    // not reintroduce it.
+    expect(sustainableFraction(42, POWER_LAW)).toBeGreaterThan(POWER_LAW.lt2Fraction!);
+  });
+
+  it("lands on lt2Fraction at 60 minutes, the conventional LT2 anchor", () => {
+    // Independent check, not a fitted constraint: LT2 is conventionally
+    // ~60-minute power, and the envelope fit from race GPS data alone landed
+    // within 0.1% of this athlete's lab-measured lt2Fraction.
+    expect(sustainableFraction(60, POWER_LAW)).toBeCloseTo(0.813, 3);
+  });
+
+  it("decreases monotonically with duration past the VO2max cap", () => {
+    const f = [20, 42, 92, 240, 505, 816, 1464, 2880].map((t) => sustainableFraction(t, POWER_LAW));
+    for (let i = 1; i < f.length; i++) expect(f[i]).toBeLessThan(f[i - 1]);
+  });
+});
+
+describe("forceExponentialCurve", () => {
+  it("strips power-law mode so pacingFit's exponential searches stay meaningful", () => {
+    expect(forceExponentialCurve({ durationCurve: "powerLaw", fInf: 0.5 })).toEqual({
+      durationCurve: "exponential",
+      fInf: 0.5,
+    });
+  });
+
+  it("leaves exponential params untouched", () => {
+    const params: CeilingParams = { durationCurve: "exponential", fInf: 0.5 };
+    expect(forceExponentialCurve(params)).toBe(params);
   });
 });

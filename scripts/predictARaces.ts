@@ -137,6 +137,9 @@ async function main() {
     intakeGPerH: 80,
     bodyMassKg: 85,
     vo2MaxHistory: [{ date: "2026-06-01", value: 54, source: "manual" as const }],
+    durationCurve: "powerLaw" as const,
+    powerLawFraction60Min: 0.8133,
+    powerLawExponent: 0.1602,
     lt2PaceMinPerKm: 4.25, // 4:15/km
     lt2HeartRateBpm: 165,
     fatOxPoints,
