@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { baseUrl, handleErrors, redirect } from "../_lib/http.js";
-import { requireEnv } from "../_lib/session.js";
+import { createOAuthState, requireEnv } from "../_lib/session.js";
 
 export default handleErrors((req: IncomingMessage, res: ServerResponse) => {
   const redirectUri = `${baseUrl(req)}/api/strava/callback`;
@@ -12,5 +12,9 @@ export default handleErrors((req: IncomingMessage, res: ServerResponse) => {
   // read_all (not just read) -- the athlete is importing their own runs,
   // including ones marked private.
   authorizeUrl.searchParams.set("scope", "activity:read_all");
-  redirect(res, authorizeUrl.toString());
+  // CSRF nonce echoed back by Strava and checked in the callback -- see
+  // createOAuthState's own doc for the attack this closes.
+  const { state, cookie } = createOAuthState();
+  authorizeUrl.searchParams.set("state", state);
+  redirect(res, authorizeUrl.toString(), [cookie]);
 });

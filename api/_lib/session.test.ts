@@ -1,6 +1,15 @@
 import type { IncomingMessage } from "node:http";
 import { beforeEach, describe, expect, it } from "vitest";
-import { clearedCookieHeaders, getSession, getSettings, sessionCookieHeader, settingsCookieHeader } from "./session.ts";
+import {
+  clearedCookieHeaders,
+  clearedOAuthStateCookie,
+  createOAuthState,
+  getSession,
+  getSettings,
+  sessionCookieHeader,
+  settingsCookieHeader,
+  verifyOAuthState,
+} from "./session.ts";
 
 function fakeRequest(cookieHeader: string | undefined): IncomingMessage {
   return { headers: { cookie: cookieHeader } } as IncomingMessage;
@@ -51,5 +60,60 @@ describe("session cookies", () => {
     for (const h of headers) {
       expect(h).toContain("Max-Age=0");
     }
+  });
+});
+
+describe("OAuth state (CSRF protection)", () => {
+  const reqWithCookie = fakeRequest;
+
+  it("issues a high-entropy nonce and a cookie carrying it", () => {
+    const { state, cookie } = createOAuthState();
+    expect(state.length).toBeGreaterThanOrEqual(32);
+    expect(cookie).toContain(`gr_oauth_state=${state}`);
+    expect(cookie).toContain("HttpOnly");
+    expect(cookie).toContain("Secure");
+  });
+
+  it("issues a different nonce every time", () => {
+    expect(createOAuthState().state).not.toBe(createOAuthState().state);
+  });
+
+  it("uses SameSite=Lax, which still rides the cross-site callback navigation", () => {
+    // Lax sends cookies on cross-site TOP-LEVEL GET navigations, which is
+    // exactly what Strava's callback redirect is -- so None would be
+    // needlessly permissive here.
+    expect(createOAuthState().cookie).toMatch(/SameSite=Lax/i);
+  });
+
+  it("scopes the nonce to /api/strava, not the whole site", () => {
+    expect(createOAuthState().cookie).toContain("Path=/api/strava");
+  });
+
+  it("accepts a callback whose state matches the issued nonce", () => {
+    const { state } = createOAuthState();
+    expect(verifyOAuthState(reqWithCookie(`gr_oauth_state=${state}`), state)).toBe(true);
+  });
+
+  it("rejects the forged-callback attack: attacker's code, no matching nonce", () => {
+    const { state } = createOAuthState();
+    expect(verifyOAuthState(reqWithCookie(`gr_oauth_state=${state}`), "attacker-supplied-state")).toBe(false);
+  });
+
+  it("rejects a callback with no state cookie at all", () => {
+    expect(verifyOAuthState(reqWithCookie(undefined), "anything")).toBe(false);
+  });
+
+  it("rejects a callback with no state query parameter", () => {
+    const { state } = createOAuthState();
+    expect(verifyOAuthState(reqWithCookie(`gr_oauth_state=${state}`), null)).toBe(false);
+  });
+
+  it("rejects a state that merely prefixes the real nonce", () => {
+    const { state } = createOAuthState();
+    expect(verifyOAuthState(reqWithCookie(`gr_oauth_state=${state}`), state.slice(0, -1))).toBe(false);
+  });
+
+  it("expires the nonce so it is good for exactly one callback", () => {
+    expect(clearedOAuthStateCookie()).toMatch(/Max-Age=0/i);
   });
 });

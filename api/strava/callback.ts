@@ -1,6 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getQuery, handleErrors, redirect } from "../_lib/http.js";
-import { requireEnv, sessionCookieHeader, type StravaSession } from "../_lib/session.js";
+import {
+  clearedOAuthStateCookie,
+  requireEnv,
+  sessionCookieHeader,
+  verifyOAuthState,
+  type StravaSession,
+} from "../_lib/session.js";
 
 interface StravaTokenExchangeResponse {
   access_token: string;
@@ -10,9 +16,17 @@ interface StravaTokenExchangeResponse {
 }
 
 export default handleErrors(async (req: IncomingMessage, res: ServerResponse) => {
-  const code = getQuery(req).get("code");
+  const query = getQuery(req);
+  const code = query.get("code");
   if (!code) {
-    redirect(res, "/?strava=error");
+    redirect(res, "/?strava=error", [clearedOAuthStateCookie()]);
+    return;
+  }
+  // Reject a callback we didn't initiate: without this an attacker can get
+  // a victim's browser to complete the flow with the ATTACKER's code,
+  // binding the victim's session to the attacker's Strava account.
+  if (!verifyOAuthState(req, query.get("state"))) {
+    redirect(res, "/?strava=error", [clearedOAuthStateCookie()]);
     return;
   }
 
@@ -27,7 +41,7 @@ export default handleErrors(async (req: IncomingMessage, res: ServerResponse) =>
     }),
   });
   if (!tokenRes.ok) {
-    redirect(res, "/?strava=error");
+    redirect(res, "/?strava=error", [clearedOAuthStateCookie()]);
     return;
   }
 
@@ -39,5 +53,6 @@ export default handleErrors(async (req: IncomingMessage, res: ServerResponse) =>
     accessTokenExpiresAt: body.expires_at,
     athleteName,
   };
-  redirect(res, "/", [sessionCookieHeader(session)]);
+  // Nonce is one-shot: cleared whether the exchange succeeded or not.
+  redirect(res, "/", [sessionCookieHeader(session), clearedOAuthStateCookie()]);
 });
