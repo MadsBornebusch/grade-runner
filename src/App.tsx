@@ -757,6 +757,21 @@ function App() {
         onApplyFInf={(fInf) => setFormInputs((prev) => ({ ...prev, fInf }))}
         onApplySurfaceCostMultipliers={(surfaceCostMultipliers) => setFormInputs((prev) => ({ ...prev, surfaceCostMultipliers }))}
         onApplyDescentPacingCurve={(descentPacingCurve) => setFormInputs((prev) => ({ ...prev, descentPacingCurve }))}
+        onApplyDurationCeiling={(powerLawFraction60Min, powerLawExponent) =>
+          // Switching to powerLaw here is the point: the fit only runs on
+          // confirmed races and only applies above its support gates, so a
+          // non-defaults result IS the evidence that this athlete's own
+          // curve is better than the exponential default.
+          setFormInputs((prev) => ({
+            ...prev,
+            powerLawFraction60Min,
+            powerLawExponent,
+            durationCurve: "powerLaw",
+          }))
+        }
+        onApplyAnaerobicCapacityMin={(anaerobicCapacityMin) =>
+          setFormInputs((prev) => ({ ...prev, anaerobicCapacityMin }))
+        }
         onApplyHrCalibration={(hrPowerCalibrationSlope, hrPowerCalibrationIntercept) =>
           setFormInputs((prev) => ({ ...prev, hrPowerCalibrationSlope, hrPowerCalibrationIntercept }))
         }

@@ -26,7 +26,12 @@ import {
 } from "../storage/runLibrary";
 import { looksLikeGenericStravaTitle } from "../model/raceCandidates";
 import { MIN_MARGIN_FIT_RACES, type PacingMarginFitResult } from "../model/pacingMarginFit";
-import { MIN_DESCENT_DISTANCE_SPAN_RATIO, MIN_DESCENT_PACING_RACES } from "../model/pacingFit";
+import {
+  MIN_DESCENT_DISTANCE_SPAN_RATIO,
+  MIN_DESCENT_PACING_RACES,
+  MIN_DURATION_CEILING_RACES,
+  MIN_DURATION_CEILING_SPAN_RATIO,
+} from "../model/pacingFit";
 import type { DescentPacingCurve } from "../model/minetti";
 import { resolveCeilingParams, resolveGlycogenStoreG, resolveLt1Lt2Fractions, type FormInputs, type Vo2MaxEntry } from "./formInputs";
 import { ensurePointsForRun, getAutoFetchStatus, runAutoFetchBatch, subscribeToAutoFetch } from "./autoFetchRuns";
@@ -51,6 +56,8 @@ interface RunLibraryPanelProps {
   onApplyHrCalibration: (slope: number, intercept: number) => void;
   onApplyPacingMargin: (fit: PacingMarginFitResult) => void;
   onApplyDescentPacingCurve: (curve: DescentPacingCurve) => void;
+  onApplyDurationCeiling: (fraction60Min: number, exponent: number) => void;
+  onApplyAnaerobicCapacityMin: (anaerobicCapacityMin: number) => void;
   onAddVo2MaxEntry: (entry: Vo2MaxEntry) => void;
   /** Reports the races/raceDates behind the just-completed fit up to the
    * parent -- lets the Results tab's finish-time-range feature reuse the
@@ -157,6 +164,8 @@ export function RunLibraryPanel({
   onApplySurfaceCostMultipliers,
   onApplyPacingMargin,
   onApplyDescentPacingCurve,
+  onApplyDurationCeiling,
+  onApplyAnaerobicCapacityMin,
   onApplyHrCalibration,
   onAddVo2MaxEntry,
   onRacesFitted,
@@ -177,6 +186,8 @@ export function RunLibraryPanel({
   const hrCalibrationFitResult = runFitStatus.result?.hrCalibrationFit ?? null;
   const pacingMarginFitResult = runFitStatus.result?.marginFit ?? null;
   const descentPacingFitResult = runFitStatus.result?.descentPacingFit ?? null;
+  const durationCeilingFitResult = runFitStatus.result?.durationCeilingFit ?? null;
+  const anaerobicFitResult = runFitStatus.result?.anaerobicFit ?? null;
   const safeFitTier = runFitStatus.result?.safeFitTier ?? null;
   const transitGapCount = runFitStatus.result?.transitGapCount ?? 0;
   const excludedForDurationCount = runFitStatus.result?.excludedForDurationCount ?? 0;
@@ -527,6 +538,8 @@ export function RunLibraryPanel({
       onApplyHrCalibration,
       onApplyPacingMargin,
       onApplyDescentPacingCurve,
+      onApplyDurationCeiling,
+      onApplyAnaerobicCapacityMin,
       onRacesFitted,
     }).then(refresh);
   };
@@ -980,6 +993,49 @@ export function RunLibraryPanel({
             </tbody>
           </table>
           <p className="field-group-note">Applied automatically -- {pacingMarginFitResult.raceCount} confirmed races cleared the minimum to fit this curve.</p>
+        </div>
+      )}
+
+      {durationCeilingFitResult && (
+        <div className="run-library__experimental-fit">
+          <p className="field-group-note">Duration ceiling -- how hard you can go, by race length</p>
+          <p className="field-group-help">
+            The upper bound on sustainable effort as a function of race duration, fit as an envelope over your
+            confirmed races -- the tightest curve that no race of yours sits above. Drives the "Theoretical ceiling"
+            finish time.
+          </p>
+          {durationCeilingFitResult.tier === "defaults" ? (
+            <p className="field-group-note">
+              NOT APPLIED (needs at least {MIN_DURATION_CEILING_RACES} confirmed races; had{" "}
+              {durationCeilingFitResult.raceCount}) -- using the built-in default curve.
+            </p>
+          ) : (
+            <>
+              <p className="field-group-note">
+                Fit from {durationCeilingFitResult.raceCount} confirmed races:{" "}
+                {(durationCeilingFitResult.fraction60Min * 100).toFixed(1)}% of VO2max sustainable for an hour,
+                falling with an exponent of {durationCeilingFitResult.exponent.toFixed(3)}.
+                {durationCeilingFitResult.bindingRaceNames.length > 0 && (
+                  <> Your ceiling rests on {durationCeilingFitResult.bindingRaceNames.join(" and ")}.</>
+                )}
+              </p>
+              {durationCeilingFitResult.tier === "anchorOnly" && (
+                <p className="field-group-note">
+                  Your races are too close together in duration (longest / shortest ={" "}
+                  {durationCeilingFitResult.durationSpanRatio.toFixed(1)}x, want at least{" "}
+                  {MIN_DURATION_CEILING_SPAN_RATIO}x) to tell how steeply the curve falls, so the shape is held at the
+                  default and only its height is fit. Confirm a race of a very different length to pin the shape down.
+                </p>
+              )}
+              {anaerobicFitResult && (
+                <p className="field-group-note">
+                  {anaerobicFitResult.identifiable
+                    ? `Short-race (anaerobic) capacity fit to ${anaerobicFitResult.anaerobicCapacityMin.toFixed(1)} min of W'/CP.`
+                    : `Short-race (anaerobic) capacity left at its default -- your shortest confirmed race (${anaerobicFitResult.shortestRaceMin?.toFixed(0) ?? "?"} min) is long enough that your aerobic curve alone already explains it. Confirm a race under ~15 minutes to measure this.`}
+                </p>
+              )}
+            </>
+          )}
         </div>
       )}
 

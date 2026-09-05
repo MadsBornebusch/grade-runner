@@ -17,7 +17,10 @@ import {
   fitDurabilityDriftPerHour,
   MIN_DESCENT_DISTANCE_SPAN_RATIO,
   type DescentPacingObservation,
+  fitAnaerobicCapacityMin,
   fitDescentPacingCurveAcrossRaces,
+  fitDurationCeilingAcrossRaces,
+  type DurationCeilingObservation,
   fitFInfAndTauAcrossRaces,
   fitSurfaceCostMultipliersFromIntensity,
   fitTauAcrossRaces,
@@ -1261,5 +1264,139 @@ describe("buildDescentPacingObservation", () => {
     const segs = segmentsAt(40, gradient, cap * 0.8);
     const withPause = segs.map((s, i) => (i % 4 === 0 ? { ...s, paused: true } : s));
     expect(buildDescentPacingObservation(withPause)!.ratio).toBeCloseTo(0.8, 6);
+  });
+});
+
+describe("fitDurationCeilingAcrossRaces", () => {
+  const FALLBACK = { fraction60Min: 0.81, exponent: 0.16 };
+  /** This athlete's 8 real confirmed races, measured time-weighted sustained
+   * fraction of VO2max -- the data the power-law mode was built from. */
+  const REAL: DurationCeilingObservation[] = [
+    { durationMin: 42, sustainedFraction: 0.861, name: "Askerspurten 10k" },
+    { durationMin: 92, sustainedFraction: 0.692, name: "Saksumdal 17" },
+    { durationMin: 93, sustainedFraction: 0.676, name: "Saksumdal 17 (2)" },
+    { durationMin: 432, sustainedFraction: 0.474, name: "OTC 55" },
+    { durationMin: 480, sustainedFraction: 0.42, name: "OTC 55 (2)" },
+    { durationMin: 505, sustainedFraction: 0.578, name: "Ecotrail 80" },
+    { durationMin: 816, sustainedFraction: 0.463, name: "Backyard" },
+    { durationMin: 1464, sustainedFraction: 0.408, name: "Soria Moria" },
+  ];
+
+  const ceilingAt = (fit: { fraction60Min: number; exponent: number }, tMin: number) =>
+    Math.min(fit.fraction60Min * Math.pow(tMin / 60, -fit.exponent), 1);
+
+  it("produces a ceiling no confirmed race exceeds -- the whole point of an envelope", () => {
+    const fit = fitDurationCeilingAcrossRaces(REAL, FALLBACK);
+    expect(fit.tier).toBe("full");
+    for (const r of REAL) {
+      expect(ceilingAt(fit, r.durationMin)).toBeGreaterThanOrEqual(r.sustainedFraction - 1e-9);
+    }
+  });
+
+  it("reproduces the hand-derived envelope, anchored near the athlete's measured LT2", () => {
+    // Independent check, not a fitted constraint: LT2 is conventionally
+    // ~60-minute power, and this athlete's lab-measured lt2Fraction is 0.814.
+    const fit = fitDurationCeilingAcrossRaces(REAL, FALLBACK);
+    expect(fit.fraction60Min).toBeCloseTo(0.813, 2);
+    expect(fit.exponent).toBeCloseTo(0.16, 2);
+  });
+
+  it("rests on the two races that actually bind the hull", () => {
+    const fit = fitDurationCeilingAcrossRaces(REAL, FALLBACK);
+    expect(fit.bindingRaceNames).toEqual(["Askerspurten 10k", "Ecotrail 80"]);
+  });
+
+  it("beats a least-squares trend line, which a real race sits above", () => {
+    // The concrete failure that rejected least squares: fit through the
+    // middle of these races and Ecotrail lands ~9.7% ABOVE its own ceiling,
+    // reproducing the original bug at a different duration.
+    const n = REAL.length;
+    let sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (const r of REAL) {
+      const x = Math.log(r.durationMin), y = Math.log(r.sustainedFraction);
+      sx += x; sy += y; sxx += x * x; sxy += x * y;
+    }
+    const b = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+    const a = (sy - b * sx) / n;
+    const lsAtEcotrail = Math.exp(a + b * Math.log(505));
+    expect(lsAtEcotrail).toBeLessThan(0.578); // least squares IS exceeded
+
+    const fit = fitDurationCeilingAcrossRaces(REAL, FALLBACK);
+    expect(ceilingAt(fit, 505)).toBeGreaterThanOrEqual(0.578); // the envelope is not
+  });
+
+  it("holds the exponent when races are clustered too tightly to identify a slope", () => {
+    const clustered: DurationCeilingObservation[] = [
+      { durationMin: 90, sustainedFraction: 0.68 },
+      { durationMin: 100, sustainedFraction: 0.66 },
+      { durationMin: 110, sustainedFraction: 0.64 },
+    ];
+    const fit = fitDurationCeilingAcrossRaces(clustered, FALLBACK);
+    expect(fit.tier).toBe("anchorOnly");
+    expect(fit.exponent).toBe(FALLBACK.exponent);
+    // Still an envelope: every race must sit under it.
+    for (const r of clustered) {
+      expect(ceilingAt(fit, r.durationMin)).toBeGreaterThanOrEqual(r.sustainedFraction - 1e-9);
+    }
+  });
+
+  it("applies nothing with too few races", () => {
+    const fit = fitDurationCeilingAcrossRaces(REAL.slice(0, 2), FALLBACK);
+    expect(fit.tier).toBe("defaults");
+    expect(fit.fraction60Min).toBe(FALLBACK.fraction60Min);
+    expect(fit.exponent).toBe(FALLBACK.exponent);
+  });
+
+  it("rejects a nonsense exponent rather than shipping it", () => {
+    // Two near-identical efforts a long way apart in duration imply an
+    // almost flat curve -- physiologically not a thing.
+    const flat: DurationCeilingObservation[] = [
+      { durationMin: 40, sustainedFraction: 0.6 },
+      { durationMin: 400, sustainedFraction: 0.599 },
+      { durationMin: 1000, sustainedFraction: 0.598 },
+    ];
+    expect(fitDurationCeilingAcrossRaces(flat, FALLBACK).tier).not.toBe("full");
+  });
+});
+
+describe("fitAnaerobicCapacityMin", () => {
+  const CURVE = { fraction60Min: 0.813, exponent: 0.1602 };
+
+  it("reports not-identifiable when the aerobic envelope already covers every race", () => {
+    // The normal outcome, and the correct one: the power law is itself fit
+    // as an envelope over these same races, so nothing is left above it for
+    // W'/CP to explain. Chained off the real fit exactly as runFitBatch
+    // does, rather than off hand-rounded params.
+    const races: DurationCeilingObservation[] = [
+      { durationMin: 42, sustainedFraction: 0.861 },
+      { durationMin: 505, sustainedFraction: 0.578 },
+      { durationMin: 1464, sustainedFraction: 0.408 },
+    ];
+    const curve = fitDurationCeilingAcrossRaces(races, { fraction60Min: 0.81, exponent: 0.16 });
+    const fit = fitAnaerobicCapacityMin(races, curve, 1);
+    expect(fit.identifiable).toBe(false);
+    expect(fit.anaerobicCapacityMin).toBe(1); // fallback held, NOT overwritten with 0
+    expect(fit.shortestRaceMin).toBe(42);
+  });
+
+  it("fits W'/CP from a short race the VO2max-capped aerobic curve cannot reach", () => {
+    // A 10-minute race: the aerobic term is capped at 1.0, so anything above
+    // that is necessarily anaerobic and does pin the parameter.
+    const fit = fitAnaerobicCapacityMin([{ durationMin: 10, sustainedFraction: 1.15 }], CURVE, 1);
+    expect(fit.identifiable).toBe(true);
+    // (1 + k/10) * 1.0 >= 1.15  ->  k >= 1.5
+    expect(fit.anaerobicCapacityMin).toBeCloseTo(1.5, 6);
+  });
+
+  it("takes the binding race when several short races constrain it", () => {
+    const fit = fitAnaerobicCapacityMin(
+      [
+        { durationMin: 10, sustainedFraction: 1.1 },
+        { durationMin: 8, sustainedFraction: 1.2 },
+      ],
+      CURVE,
+      1,
+    );
+    expect(fit.anaerobicCapacityMin).toBeCloseTo(1.6, 6); // 8 * (1.2 - 1)
   });
 });

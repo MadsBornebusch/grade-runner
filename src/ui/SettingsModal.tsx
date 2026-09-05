@@ -19,6 +19,8 @@ interface SettingsModalProps {
   onApplyHrCalibration: (slope: number, intercept: number) => void;
   onApplyPacingMargin: (fit: PacingMarginFitResult) => void;
   onApplyDescentPacingCurve: (curve: DescentPacingCurve) => void;
+  onApplyDurationCeiling: (fraction60Min: number, exponent: number) => void;
+  onApplyAnaerobicCapacityMin: (anaerobicCapacityMin: number) => void;
   onAddVo2MaxEntry: (entry: Vo2MaxEntry) => void;
   onRacesFitted: (races: EffortTrendPoint[][], raceDates: (Date | null)[]) => void;
 }
@@ -43,6 +45,8 @@ export function SettingsModal({
   onApplyHrCalibration,
   onApplyPacingMargin,
   onApplyDescentPacingCurve,
+  onApplyDurationCeiling,
+  onApplyAnaerobicCapacityMin,
   onAddVo2MaxEntry,
   onRacesFitted,
 }: SettingsModalProps) {
@@ -94,6 +98,8 @@ export function SettingsModal({
             onApplyHrCalibration={onApplyHrCalibration}
             onApplyPacingMargin={onApplyPacingMargin}
             onApplyDescentPacingCurve={onApplyDescentPacingCurve}
+            onApplyDurationCeiling={onApplyDurationCeiling}
+            onApplyAnaerobicCapacityMin={onApplyAnaerobicCapacityMin}
             onAddVo2MaxEntry={onAddVo2MaxEntry}
             onRacesFitted={onRacesFitted}
           />

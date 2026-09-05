@@ -1792,3 +1792,216 @@ export function fitDescentPacingCurveAcrossRaces(
   const partial = searchDescentCurve(points, fallback, false);
   return { curve: partial.curve, tier: "fInfTau", ...base, sse: partial.sse };
 }
+
+/**
+ * One race's contribution to the duration-ceiling fit: how long it took and
+ * what fraction of VO2max was actually sustained over it (time-weighted).
+ * The "fraction" here is measured against a FIXED sea-level maxAerobicPower
+ * reference, not against the ceiling curve -- fitting the curve against a
+ * quantity derived from the curve would be circular.
+ */
+export interface DurationCeilingObservation {
+  durationMin: number;
+  sustainedFraction: number;
+  name?: string;
+}
+
+/** Plausibility bounds on the fitted exponent. A power law that decays far
+ * faster or slower than this across a race library is far more likely to be
+ * two anomalous races defining a hull than a real physiological curve. */
+const DURATION_EXPONENT_BOUNDS: [number, number] = [0.03, 0.4];
+/** Plausibility bounds on the 60-minute anchor, as a fraction of VO2max.
+ * LT2 is conventionally about 60-minute power, so a sane athlete lands
+ * roughly in the 0.6-0.95 band; the wider range here is deliberately
+ * permissive, catching only nonsense. */
+const DURATION_ANCHOR_BOUNDS: [number, number] = [0.3, 1];
+
+/** Minimum confirmed races before any duration-ceiling tier is trusted. */
+export const MIN_DURATION_CEILING_RACES = 3;
+/** Longest/shortest race duration ratio needed to fit the EXPONENT as well
+ * as the anchor. Same identifiability logic as the descent curve's own span
+ * gate: two races an hour apart cannot tell you how the curve behaves from
+ * 40 minutes to 24 hours, however well a 2-parameter fit appears to do. */
+export const MIN_DURATION_CEILING_SPAN_RATIO = 4;
+
+export interface DurationCeilingFitResult {
+  fraction60Min: number;
+  exponent: number;
+  /** "full" = anchor and exponent both fit; "anchorOnly" = exponent held at
+   * the fallback because the race durations are clustered too tightly to
+   * identify it; "defaults" = nothing trustworthy, fallback returned
+   * unchanged and callers must not apply it as a fit. */
+  tier: "full" | "anchorOnly" | "defaults";
+  raceCount: number;
+  durationSpanRatio: number;
+  /** The races the fitted curve touches exactly -- the hull points that
+   * actually determined it. Worth surfacing: these are the performances the
+   * athlete's whole ceiling is resting on. */
+  bindingRaceNames: string[];
+}
+
+/**
+ * Fits the tightest power-law ceiling that DOMINATES every confirmed race
+ * -- the upper hull in log-log space, not a least-squares trend through the
+ * middle of them.
+ *
+ * Dominance is the point. A ceiling is an upper bound, so a curve that any
+ * completed race sits above is by definition wrong -- and that was the
+ * original reported bug (a 42-minute race run at 86.1% of VO2max against a
+ * ceiling of 81.4%). A least-squares fit reproduces it: fit through this
+ * athlete's 8 races and Ecotrail lands 9.7% ABOVE its own ceiling.
+ *
+ * Deterministic and hand-tuning-free: with two parameters the tightest
+ * dominating line touches exactly two races, so scanning all pairs and
+ * keeping the lowest dominating one finds it exactly. O(n^2) on a handful
+ * of races.
+ */
+export function fitDurationCeilingAcrossRaces(
+  observations: DurationCeilingObservation[],
+  fallback: { fraction60Min: number; exponent: number },
+  opts: { minRaces?: number; minDurationSpanRatio?: number } = {},
+): DurationCeilingFitResult {
+  const minRaces = opts.minRaces ?? MIN_DURATION_CEILING_RACES;
+  const minSpan = opts.minDurationSpanRatio ?? MIN_DURATION_CEILING_SPAN_RATIO;
+  const points = observations.filter(
+    (o) => o.durationMin > 0 && o.sustainedFraction > 0 && Number.isFinite(o.sustainedFraction),
+  );
+
+  const durations = points.map((p) => p.durationMin);
+  const durationSpanRatio = durations.length > 0 ? Math.max(...durations) / Math.min(...durations) : 0;
+  const base = { raceCount: points.length, durationSpanRatio };
+  const asDefaults = (): DurationCeilingFitResult => ({
+    ...fallback,
+    tier: "defaults",
+    ...base,
+    bindingRaceNames: [],
+  });
+
+  if (points.length < minRaces) return asDefaults();
+
+  const xs = points.map((p) => Math.log(p.durationMin));
+  const ys = points.map((p) => Math.log(p.sustainedFraction));
+  const dominatesAll = (a: number, b: number): boolean =>
+    xs.every((x, i) => a + b * x >= ys[i] - 1e-9);
+  const namesTouching = (a: number, b: number): string[] =>
+    points
+      .map((p, i) => ({ name: p.name ?? `race ${i + 1}`, touching: Math.abs(a + b * xs[i] - ys[i]) < 1e-6 }))
+      .filter((r) => r.touching)
+      .map((r) => r.name);
+
+  if (durationSpanRatio >= minSpan) {
+    // Tightest dominating line over all pairs -- "tightest" measured at the
+    // 60-minute anchor, which is the curve's own reference point.
+    let best: { a: number; b: number; anchor: number } | null = null;
+    for (let i = 0; i < points.length; i++) {
+      for (let j = i + 1; j < points.length; j++) {
+        if (xs[i] === xs[j]) continue;
+        const b = (ys[j] - ys[i]) / (xs[j] - xs[i]);
+        const a = ys[i] - b * xs[i];
+        if (!dominatesAll(a, b)) continue;
+        const anchor = a + b * Math.log(60);
+        if (!best || anchor < best.anchor) best = { a, b, anchor };
+      }
+    }
+    if (best) {
+      const exponent = -best.b;
+      const fraction60Min = Math.exp(best.anchor);
+      const sane =
+        exponent >= DURATION_EXPONENT_BOUNDS[0] &&
+        exponent <= DURATION_EXPONENT_BOUNDS[1] &&
+        fraction60Min >= DURATION_ANCHOR_BOUNDS[0] &&
+        fraction60Min <= DURATION_ANCHOR_BOUNDS[1];
+      if (sane) {
+        return {
+          fraction60Min,
+          exponent,
+          tier: "full",
+          ...base,
+          bindingRaceNames: namesTouching(best.a, best.b),
+        };
+      }
+    }
+  }
+
+  // Exponent held at the fallback; slide the anchor up until the curve
+  // clears every race. Needs no duration span -- one race is enough to
+  // raise an anchor, it just can't tell you the slope.
+  let anchorLn = -Infinity;
+  for (let i = 0; i < points.length; i++) {
+    anchorLn = Math.max(anchorLn, ys[i] + fallback.exponent * (xs[i] - Math.log(60)));
+  }
+  const fraction60Min = Math.exp(anchorLn);
+  if (fraction60Min < DURATION_ANCHOR_BOUNDS[0] || fraction60Min > DURATION_ANCHOR_BOUNDS[1]) return asDefaults();
+  const aHeld = anchorLn + fallback.exponent * Math.log(60);
+  return {
+    fraction60Min,
+    exponent: fallback.exponent,
+    tier: "anchorOnly",
+    ...base,
+    bindingRaceNames: namesTouching(aHeld, -fallback.exponent),
+  };
+}
+
+/** A race must exceed the capped aerobic curve by more than this relative
+ * margin before it counts as evidence for W'/CP -- see its use below. */
+const ANAEROBIC_IDENTIFIABILITY_TOLERANCE = 0.005;
+
+export interface AnaerobicCapacityFitResult {
+  anaerobicCapacityMin: number;
+  /**
+   * False when no race in the library actually constrains W'/CP, in which
+   * case anaerobicCapacityMin is the unchanged fallback and callers must
+   * not treat it as fitted. This is the normal outcome for an athlete
+   * whose shortest race is long enough that the aerobic curve alone already
+   * covers it -- W'/CP only becomes visible once the VO2max cap binds,
+   * which is roughly the sub-15-minute range.
+   */
+  identifiable: boolean;
+  /** Shortest race duration in the library, minutes -- what the message
+   * "confirm a shorter race to pin this down" is based on. */
+  shortestRaceMin: number | null;
+}
+
+/**
+ * Fits the critical-power capacity term W'/CP (ceiling.ts's
+ * anaerobicCapacityMultiplier) as the smallest value making the FULL
+ * ceiling -- aerobic curve, VO2max-capped, times the anaerobic
+ * multiplier -- dominate every race.
+ *
+ * Usually returns identifiable: false, and that is the correct answer, not
+ * a failure: the aerobic power law is itself fit as an envelope over the
+ * same races, so it already covers them all and leaves nothing for W'/CP to
+ * explain. The term only becomes identifiable from a race short enough that
+ * the VO2max cap binds and the aerobic curve alone therefore CAN'T reach
+ * the observed effort. Reporting that honestly beats fitting 0 and silently
+ * deleting the short-race boost from an athlete's future 5k plan.
+ */
+export function fitAnaerobicCapacityMin(
+  observations: DurationCeilingObservation[],
+  curve: { fraction60Min: number; exponent: number },
+  fallbackAnaerobicCapacityMin: number,
+): AnaerobicCapacityFitResult {
+  const points = observations.filter((o) => o.durationMin > 0 && o.sustainedFraction > 0);
+  if (points.length === 0) {
+    return { anaerobicCapacityMin: fallbackAnaerobicCapacityMin, identifiable: false, shortestRaceMin: null };
+  }
+  const shortestRaceMin = Math.min(...points.map((p) => p.durationMin));
+
+  let required = 0;
+  for (const p of points) {
+    const aerobic = Math.min(curve.fraction60Min * Math.pow(p.durationMin / 60, -curve.exponent), 1);
+    // Relative tolerance, not a bare >=: the aerobic curve is fit as an
+    // envelope touching its hull races EXACTLY, so rounding alone (stored
+    // params carry a few digits; the fit does not) can leave a hull race a
+    // hair above its own curve. Without this, that noise "identifies"
+    // W'/CP at some meaningless near-zero value.
+    if (aerobic >= p.sustainedFraction * (1 - ANAEROBIC_IDENTIFIABILITY_TOLERANCE)) continue;
+    // Need (1 + k/t) * aerobic >= actual, i.e. k >= t * (actual/aerobic - 1).
+    required = Math.max(required, Math.max(p.durationMin, 2) * (p.sustainedFraction / aerobic - 1));
+  }
+
+  if (required <= 0) {
+    return { anaerobicCapacityMin: fallbackAnaerobicCapacityMin, identifiable: false, shortestRaceMin };
+  }
+  return { anaerobicCapacityMin: required, identifiable: true, shortestRaceMin };
+}

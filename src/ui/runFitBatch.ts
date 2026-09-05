@@ -30,7 +30,12 @@ import {
   buildDescentPacingObservation,
   type DescentPacingFitResult,
   type DescentPacingObservation,
+  fitAnaerobicCapacityMin,
+  type AnaerobicCapacityFitResult,
   fitDescentPacingCurveAcrossRaces,
+  fitDurationCeilingAcrossRaces,
+  type DurationCeilingFitResult,
+  type DurationCeilingObservation,
   fitTauFInfWithSupportGate,
   type EffortTrendPoint,
   type FInfTauFitResult,
@@ -100,6 +105,8 @@ export interface RunFitResult {
   hrCalibrationFit: HrPowerCalibration | null;
   marginFit: PacingMarginFitResult | null;
   descentPacingFit: DescentPacingFitResult | null;
+  durationCeilingFit: DurationCeilingFitResult | null;
+  anaerobicFit: AnaerobicCapacityFitResult | null;
   transitGapCount: number;
   excludedForDurationCount: number;
   races: EffortTrendPoint[][];
@@ -148,6 +155,8 @@ export interface RunFitCallbacks {
   onApplyHrCalibration: (slope: number, intercept: number) => void;
   onApplyPacingMargin: (fit: PacingMarginFitResult) => void;
   onApplyDescentPacingCurve: (curve: DescentPacingCurve) => void;
+  onApplyDurationCeiling: (fraction60Min: number, exponent: number) => void;
+  onApplyAnaerobicCapacityMin: (anaerobicCapacityMin: number) => void;
   onRacesFitted?: (races: EffortTrendPoint[][], raceDates: (Date | null)[]) => void;
 }
 
@@ -192,6 +201,9 @@ export async function runFitBatch(
     const confirmedRaceTrendPoints: EffortTrendPoint[][] = [];
     const confirmedRaceNames: string[] = [];
     const confirmedRaceDescentObservations: DescentPacingObservation[] = [];
+    const confirmedRaceDurationObservations: DurationCeilingObservation[] = [];
+    // Fixed sea-level reference for the duration-ceiling fit's denominator.
+    const refMaxAerobicPower = maxAerobicPower(0, ceilingParams);
     let detectedTransitGaps = 0;
     let excludedForDuration = 0;
 
@@ -234,6 +246,25 @@ export async function runFitBatch(
           // anything, which is the common flat-road-race case.
           const descentObservation = buildDescentPacingObservation(segments);
           if (descentObservation) confirmedRaceDescentObservations.push(descentObservation);
+          // Duration-ceiling envelope: what fraction of VO2max this race
+          // actually sustained, against a FIXED sea-level reference -- NOT
+          // against the ceiling curve, which would make the fit circular.
+          if (analysis.totalMovingTimeS > 0 && refMaxAerobicPower > 0) {
+            let weighted = 0;
+            let weight = 0;
+            for (const seg of analysis.segments) {
+              if (seg.paused || seg.timeS <= 0) continue;
+              weighted += (seg.grossPowerWPerKg / refMaxAerobicPower) * seg.timeS;
+              weight += seg.timeS;
+            }
+            if (weight > 0) {
+              confirmedRaceDurationObservations.push({
+                durationMin: analysis.totalMovingTimeS / 60,
+                sustainedFraction: weighted / weight,
+                name: pointLegs.length > 1 ? `${run.name} (leg ${i + 1})` : run.name,
+              });
+            }
+          }
         }
         // Below DURABILITY_MIN_DURATION_S, a run can't span a meaningful
         // fraction of any realistic tau -- pooling it in anyway doesn't
@@ -350,6 +381,26 @@ export async function runFitBatch(
       callbacks.onApplyDescentPacingCurve(descentPacingFit.curve);
     }
 
+    // Duration ceiling (power-law envelope) + the W'/CP capacity term that
+    // sits on top of it. Fit together and in this order: W'/CP is only
+    // identifiable relative to a known aerobic curve, so it chains off
+    // whatever curve the envelope fit actually produced, not the stored one.
+    const durationCeilingFit = fitDurationCeilingAcrossRaces(confirmedRaceDurationObservations, {
+      fraction60Min: formInputs.powerLawFraction60Min,
+      exponent: formInputs.powerLawExponent,
+    });
+    const anaerobicFit = fitAnaerobicCapacityMin(
+      confirmedRaceDurationObservations,
+      durationCeilingFit,
+      formInputs.anaerobicCapacityMin,
+    );
+    if (durationCeilingFit.tier !== "defaults") {
+      callbacks.onApplyDurationCeiling(durationCeilingFit.fraction60Min, durationCeilingFit.exponent);
+      // Only ever applied alongside a real curve -- W'/CP is meaningless
+      // without knowing which aerobic ceiling it sits on top of.
+      if (anaerobicFit.identifiable) callbacks.onApplyAnaerobicCapacityMin(anaerobicFit.anaerobicCapacityMin);
+    }
+
     // Auto-apply once fitTauFInfWithSupportGate picks a well-supported,
     // internally-consistent (fInf, tau) pair. Deliberately NOT applying
     // tauFit/fInfFit independently: they're two different searches (one
@@ -378,6 +429,8 @@ export async function runFitBatch(
         hrCalibrationFit,
         marginFit,
         descentPacingFit,
+        durationCeilingFit,
+        anaerobicFit,
         transitGapCount: detectedTransitGaps,
         excludedForDurationCount: excludedForDuration,
         races,
