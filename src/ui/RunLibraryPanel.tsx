@@ -163,6 +163,19 @@ function interleave<T>(lists: T[][]): T[] {
   return result;
 }
 
+/** "just now" / "3 hours ago" / "2 days ago" -- so a stale fit is obvious
+ * at a glance rather than needing the timestamp read carefully. */
+function formatRelativeAge(epochMs: number, now = Date.now()): string {
+  const seconds = Math.max(0, Math.round((now - epochMs) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
 export function RunLibraryPanel({
   formInputs,
   onApplyTau,
@@ -186,6 +199,7 @@ export function RunLibraryPanel({
   const runFitStatus = useSyncExternalStore(subscribeToRunFit, getRunFitStatus);
   const fitting = runFitStatus.running;
   const fitRan = runFitStatus.result !== null;
+  const fitCompletedAt = runFitStatus.result?.completedAt ?? null;
   const fitResult = runFitStatus.result?.fitResult ?? null;
   const fInfFitResult = runFitStatus.result?.fInfFitResult ?? null;
   const surfaceCostMultiplierFitResult = runFitStatus.result?.surfaceFit ?? null;
@@ -663,7 +677,11 @@ export function RunLibraryPanel({
 
       <p className="run-library__status">
         {fitting ? (
-          "Fitting your athlete model — tau/f_inf, terrain cost, HR calibration, pacing margin…"
+          runFitStatus.progress ? (
+            `${runFitStatus.progress.phase} — ${runFitStatus.progress.done} of ${runFitStatus.progress.total}…`
+          ) : (
+            "Fitting your athlete model — tau/f_inf, terrain cost, HR calibration, pacing margin…"
+          )
         ) : backfillStatus.running ? (
           backfillStatus.progress ?? "Fetching your run history…"
         ) : autoFetchStatus.running ? (
@@ -783,6 +801,14 @@ export function RunLibraryPanel({
       {fitRan && (
         <details className="run-library__fit-details">
           <summary>Fit details</summary>
+
+          {fitCompletedAt !== null && (
+            <p className="field-group-note">
+              Fitted {new Date(fitCompletedAt).toLocaleString()} ({formatRelativeAge(fitCompletedAt)}) from{" "}
+              {runFitStatus.result?.races.length ?? 0} runs.
+              {runFitStatus.result?.tauCI === null && " Estimating the tau range… (this part runs in the background)"}
+            </p>
+          )}
 
           {transitGapCount > 0 && (
             <p className="field-group-note">

@@ -998,9 +998,17 @@ export interface BootstrapOptions {
 }
 
 export const DEFAULT_BOOTSTRAP_SAMPLES = 100;
-/** Yield to the event loop this often during a bootstrap loop so the
- * browser tab stays responsive across ~100 sequential refits. */
-export const BOOTSTRAP_YIELD_EVERY = 10;
+/**
+ * Yield to the event loop this often during a bootstrap loop so the browser
+ * tab stays responsive across ~100 sequential refits.
+ *
+ * 1, not 10: a single resample is a full tau refit across the whole race
+ * pool, measured at ~2.5 SECONDS against a 168-run library. Yielding every
+ * tenth one therefore froze the tab in ~25-second blocks for the several
+ * minutes the bootstrap runs -- indistinguishable from a hang. One
+ * setTimeout(0) per resample is negligible against 2.5s of work.
+ */
+export const BOOTSTRAP_YIELD_EVERY = 1;
 
 export interface TauConfidenceInterval {
   /** Which tier the POINT ESTIMATE (not each resample) used -- "defaults"
@@ -1068,6 +1076,7 @@ export async function bootstrapTauConfidenceInterval(
 
   for (let i = 0; i < bootstrapSamples; i++) {
     if (i > 0 && i % BOOTSTRAP_YIELD_EVERY === 0) {
+      // eslint-disable-next-line no-await-in-loop
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
 

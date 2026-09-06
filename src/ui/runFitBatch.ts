@@ -54,6 +54,7 @@ import type { FormInputs } from "./formInputs";
 import { resolveGlycogenStoreG, resolveLt1Lt2Fractions } from "./formInputs";
 import { ensurePointsForRun } from "./autoFetchRuns";
 import { fetchSurfaceEdges } from "./surfaceLookup";
+import type { ValhallaSurfaceEdge } from "../model/surfaceExposure";
 
 /** A run's own calendar date, for recency-weighting the multi-race fit --
  * Strava summaries carry it directly; GPX-derived runs (manual upload, or a
@@ -97,6 +98,72 @@ async function ensureSurfaceData(run: StoredRun, points: GpxPoint[]) {
   return edges;
 }
 
+/** Simultaneous Valhalla lookups. Sequential was the actual reason a fit
+ * over a large library looked like a hang: one network round-trip per
+ * uncached run, 168 of them nose to tail. Kept modest so this stays a
+ * politer client than a burst of 168 parallel requests would be. */
+const SURFACE_FETCH_CONCURRENCY = 6;
+
+/**
+ * Total wall-clock budget for surface lookups in ONE fit. Surface failures
+ * are deliberately never cached (see StoredRun.surfaceEdges -- a transient
+ * Valhalla outage shouldn't poison a run forever), which is right, but it
+ * also means every fit retries every run that has ever failed or returned
+ * nothing. Without a budget, a library with many such runs can never finish
+ * a fit at all. Whatever isn't fetched inside the budget simply goes
+ * without surface data this time and is retried by the next fit -- the
+ * surface multiplier degrades gracefully with fewer runs, and every other
+ * fit on the page is unaffected.
+ */
+const SURFACE_FETCH_BUDGET_MS = 20_000;
+
+/**
+ * Resolves surface edges for every run, in parallel and inside a time
+ * budget. Returns a map of run id -> edges; a run missing from it is
+ * treated exactly as "no surface data", which is already a supported case
+ * everywhere downstream.
+ */
+async function prefetchSurfaceEdges(
+  runs: { run: StoredRun; points: GpxPoint[] }[],
+  onProgress: (done: number, total: number) => void,
+  budgetMs: number = SURFACE_FETCH_BUDGET_MS,
+): Promise<Map<string, ValhallaSurfaceEdge[] | null>> {
+  const out = new Map<string, ValhallaSurfaceEdge[] | null>();
+  const deadline = Date.now() + budgetMs;
+  let next = 0;
+  let done = 0;
+
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = next++;
+      if (i >= runs.length) return;
+      const { run, points } = runs[i];
+      // Already cached costs nothing, so keep taking those even past the
+      // deadline -- the budget exists to bound NETWORK time.
+      if (run.surfaceEdges) {
+        out.set(run.id, run.surfaceEdges);
+      } else if (Date.now() < deadline) {
+        try {
+          out.set(run.id, await ensureSurfaceData(run, points));
+        } catch {
+          out.set(run.id, null);
+        }
+      }
+      onProgress(++done, runs.length);
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(SURFACE_FETCH_CONCURRENCY, runs.length) }, worker));
+  return out;
+}
+
+/** Hands the main thread back so the browser can paint. The fit is a few
+ * seconds of straight-line CPU over a large library; without this the tab
+ * is frozen for all of it and the progress display never renders. */
+function yieldToBrowser(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 export interface RunFitResult {
   fitResult: MultiRaceTauFitResult | null;
   fInfFitResult: FInfTauFitResult | null;
@@ -112,15 +179,22 @@ export interface RunFitResult {
   races: EffortTrendPoint[][];
   raceDates: (Date | null)[];
   tauCI: TauConfidenceInterval | "insufficient" | null;
+  /** When this fit finished, epoch ms -- so the panel can say how old the
+   * displayed numbers are rather than showing them undated. */
+  completedAt: number;
 }
 
 export interface RunFitStatus {
   running: boolean;
+  /** Coarse progress so a multi-minute fit doesn't look like a hang. The
+   * fit was previously a single opaque "Fitting…" for its whole duration,
+   * which on a large library is minutes. */
+  progress: { done: number; total: number; phase: string } | null;
   result: RunFitResult | null;
   error: string | null;
 }
 
-let status: RunFitStatus = { running: false, result: null, error: null };
+let status: RunFitStatus = { running: false, progress: null, result: null, error: null };
 /** Bumped per fit so a still-running bootstrap from an older fit can tell
  * it has been superseded and drop its result instead of overwriting a
  * newer one. */
@@ -149,7 +223,7 @@ export function getRunFitStatus(): RunFitStatus {
  * discipline as everywhere else in this file). */
 export function resetRunFitStatus(): void {
   if (status.running) return;
-  setStatus({ running: false, result: null, error: null });
+  setStatus({ running: false, progress: null, result: null, error: null });
 }
 
 export interface RunFitCallbacks {
@@ -182,7 +256,7 @@ export async function runFitBatch(
   callbacks: RunFitCallbacks,
 ): Promise<void> {
   if (status.running) return;
-  setStatus({ running: true, result: null, error: null });
+  setStatus({ running: true, progress: null, result: null, error: null });
 
   try {
     const races: EffortTrendPoint[][] = [];
@@ -211,8 +285,33 @@ export async function runFitBatch(
     let detectedTransitGaps = 0;
     let excludedForDuration = 0;
 
+    // Points first (a no-op read for readyRuns, which already have them),
+    // then every Valhalla lookup in parallel inside one time budget --
+    // this used to be one sequential network round-trip per run, inside
+    // the loop below, which is what made a large library's fit look like a
+    // hang rather than slow work.
+    const withPoints: { run: StoredRun; points: GpxPoint[] }[] = [];
     for (const run of readyRuns) {
-      const points = await ensurePointsForRun(run);
+      withPoints.push({ run, points: await ensurePointsForRun(run) });
+    }
+    const surfaceByRunId = await prefetchSurfaceEdges(withPoints, (done, total) =>
+      setStatus({ running: true, progress: { done, total, phase: "Looking up terrain surface" }, result: null, error: null }),
+    );
+
+    let processed = 0;
+    for (const { run, points } of withPoints) {
+      // Hand the thread back periodically so the tab can actually paint the
+      // progress below instead of freezing until the whole loop is done.
+      if (processed % 10 === 0) {
+        setStatus({
+          running: true,
+          progress: { done: processed, total: withPoints.length, phase: "Analyzing runs" },
+          result: null,
+          error: null,
+        });
+        await yieldToBrowser();
+      }
+      processed++;
       const pointLegs = splitAtTransitGaps(points);
       detectedTransitGaps += pointLegs.length - 1;
       // Cached surface edges were fetched (and are indexed by cumulative
@@ -222,7 +321,7 @@ export async function runFitBatch(
       // onto another's segments. Split runs are rare (most have no
       // transit gap at all, see transitGap.ts), so this only costs the
       // surface-cost fit a little data in the uncommon case.
-      const surfaceEdges = pointLegs.length === 1 ? await ensureSurfaceData(run, points) : null;
+      const surfaceEdges = pointLegs.length === 1 ? (surfaceByRunId.get(run.id) ?? null) : null;
       for (let i = 0; i < pointLegs.length; i++) {
         const legPoints = pointLegs[i];
         const course = runPipeline(legPoints);
@@ -286,6 +385,13 @@ export async function runFitBatch(
       }
     }
 
+    setStatus({
+      running: true,
+      progress: { done: withPoints.length, total: withPoints.length, phase: "Fitting pacing curve" },
+      result: null,
+      error: null,
+    });
+    await yieldToBrowser();
     const safeFit = fitTauFInfWithSupportGate(races, ceilingParams, { raceDates, halfLifeDays });
 
     // Per-category surface cost, conditioned on recorded heart rate as the
@@ -446,8 +552,9 @@ export async function runFitBatch(
         races,
         raceDates,
         tauCI: null,
+        completedAt: Date.now(),
     };
-    setStatus({ running: false, result: resultWithoutCI, error: null });
+    setStatus({ running: false, progress: null, result: resultWithoutCI, error: null });
 
     // Not awaited: this resolves long after runFitBatch returns. The
     // generation guard stops a slow bootstrap from clobbering a NEWER fit's
@@ -459,6 +566,7 @@ export async function runFitBatch(
         if (status.result !== resultWithoutCI) return;
         setStatus({
           running: false,
+          progress: null,
           result: { ...resultWithoutCI, tauCI: tauCI ?? "insufficient" },
           error: null,
         });
@@ -467,10 +575,13 @@ export async function runFitBatch(
         // A failed CI must not surface as a failed fit -- the fit itself
         // succeeded and its values are already applied.
         if (generation !== fitGeneration || status.result !== resultWithoutCI) return;
-        setStatus({ running: false, result: { ...resultWithoutCI, tauCI: "insufficient" }, error: null });
+        setStatus({ running: false, progress: null, result: { ...resultWithoutCI, tauCI: "insufficient" }, error: null });
       });
     return;
   } catch (err) {
-    setStatus({ running: false, result: null, error: err instanceof Error ? err.message : "Fit failed" });
+    setStatus({ running: false, progress: null, result: null, error: err instanceof Error ? err.message : "Fit failed" });
   }
 }
+
+/** Internals exposed for runFitBatch.test.ts only. */
+export const __testing = { prefetchSurfaceEdges, SURFACE_FETCH_CONCURRENCY, SURFACE_FETCH_BUDGET_MS };
