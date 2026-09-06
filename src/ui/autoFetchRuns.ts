@@ -12,7 +12,7 @@
 // stop it, which is a real, unavoidable stopping point either way.
 
 import type { GpxPoint } from "../gpx/pipeline";
-import { setStoredRunPoints, type StoredRun } from "../storage/runLibrary";
+import { recordRunFetchFailure, setStoredRunPoints, type StoredRun } from "../storage/runLibrary";
 import { fetchStravaActivity, StravaFetchError } from "./stravaClient";
 
 /** Paces fetches so a large batch doesn't hammer Strava's API all at once
@@ -62,10 +62,40 @@ export function getAutoFetchStatus(): AutoFetchStatus {
  * the batch has unmounted. */
 export async function ensurePointsForRun(run: StoredRun): Promise<GpxPoint[]> {
   if (run.points !== null) return run.points;
-  if (run.stravaId === undefined) return [];
-  const { points } = await fetchStravaActivity(run.stravaId);
-  await setStoredRunPoints(run.id, points);
-  return points;
+  if (run.stravaId === undefined) {
+    // Nothing to fetch from, ever -- record it so this run stops being
+    // re-queued on every launch (it used to be, silently and forever).
+    await recordRunFetchFailure(run.id);
+    return [];
+  }
+  try {
+    const { points } = await fetchStravaActivity(run.stravaId);
+    await setStoredRunPoints(run.id, points);
+    return points;
+  } catch (err) {
+    await recordRunFetchFailure(run.id);
+    throw err;
+  }
+}
+
+/**
+ * How long to wait before retrying a run whose fetch failed, by failure
+ * count -- 1 hour, then a day, then a week. After MAX_FETCH_FAILURES the
+ * run is dropped from the auto batch entirely (a manual refresh still
+ * retries it). This is what stops a permanently-broken run -- deleted
+ * upstream, no GPS stream, no stravaId -- from being re-requested every
+ * time the app opens.
+ */
+const FETCH_RETRY_BACKOFF_MS = [60 * 60 * 1000, 24 * 60 * 60 * 1000, 7 * 24 * 60 * 60 * 1000];
+export const MAX_FETCH_FAILURES = 3;
+
+/** True if this run is due for another auto-fetch attempt. */
+export function isDueForFetch(run: StoredRun, now = Date.now()): boolean {
+  const failures = run.fetchFailureCount ?? 0;
+  if (failures === 0) return true;
+  if (failures >= MAX_FETCH_FAILURES) return false;
+  const waitMs = FETCH_RETRY_BACKOFF_MS[Math.min(failures - 1, FETCH_RETRY_BACKOFF_MS.length - 1)];
+  return now - (run.lastFetchFailureAt ?? 0) >= waitMs;
 }
 
 /**

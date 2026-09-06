@@ -67,6 +67,17 @@ export interface StoredRun {
    */
   vo2MaxEstimable?: boolean;
   /**
+   * How many times fetching this run's full points has failed, and when we
+   * last tried. Without this, a run that can NEVER produce points -- no
+   * stravaId, deleted upstream, a persistent 404 -- stays
+   * `wantsFullData && points === null` forever, so the auto-fetch batch
+   * re-queued it on every single app launch and burned the same requests
+   * again. Cleared on success.
+   */
+  fetchFailureCount?: number;
+  /** Epoch ms of the last failed attempt; drives the retry backoff. */
+  lastFetchFailureAt?: number;
+  /**
    * User-confirmed: was this genuinely a race run to real effort, as
    * opposed to a training run, structured workout, or an enforced-rest
    * format (backyard ultra loops) that only LOOKS like a long sustained
@@ -174,7 +185,12 @@ export async function setStoredRunPoints(id: string, points: GpxPoint[]): Promis
     const getReq = store.get(id);
     getReq.onsuccess = () => {
       const existing = getReq.result as StoredRun | undefined;
-      if (existing) store.put({ ...existing, points });
+      // Success clears any failure history -- a run that finally downloads
+      // must not stay under a backoff it no longer needs.
+      if (existing) {
+        const { fetchFailureCount: _c, lastFetchFailureAt: _t, ...rest } = existing;
+        store.put({ ...rest, points });
+      }
     };
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
@@ -291,6 +307,29 @@ export async function clearStoredRuns(): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
     tx.objectStore(STORE_NAME).clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/** Records a failed points fetch so autoFetchRuns.ts can back off instead
+ * of retrying the same doomed run on every launch. */
+export async function recordRunFetchFailure(id: string): Promise<void> {
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const getReq = store.get(id);
+    getReq.onsuccess = () => {
+      const existing = getReq.result as StoredRun | undefined;
+      if (existing) {
+        store.put({
+          ...existing,
+          fetchFailureCount: (existing.fetchFailureCount ?? 0) + 1,
+          lastFetchFailureAt: Date.now(),
+        });
+      }
+    };
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });

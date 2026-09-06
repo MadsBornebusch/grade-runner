@@ -85,7 +85,10 @@ export function forceExponentialCurve(params: CeilingParams): CeilingParams {
   return params.durationCurve === "powerLaw" ? { ...params, durationCurve: "exponential" } : params;
 }
 
-const DEFAULTS: Required<CeilingParams> = {
+/** Exported so pacingFit.ts's tau/fInf hot loop can hoist this merge out
+ * of its per-point inner loop -- ceilingPower otherwise allocates a fresh
+ * merged object for every point of every candidate. */
+export const CEILING_DEFAULTS: Required<CeilingParams> = {
   vo2MaxMlPerKgPerMin: 50,
   lt2Fraction: 0.85,
   f0: 0.94,
@@ -124,7 +127,7 @@ export function sustainableFraction(
   params: CeilingParams = {},
 ): number {
   const { f0, fInf, tauMin, lt2Fraction, pacingCurveEnabled, durationCurve, powerLawFraction60Min, powerLawExponent } =
-    { ...DEFAULTS, ...params };
+    { ...CEILING_DEFAULTS, ...params };
   if (!pacingCurveEnabled) return Math.min(f0, lt2Fraction);
   if (durationCurve === "powerLaw") {
     // Guard t<=0 (and the t->0 blow-up generally) via the same VO2max cap
@@ -209,7 +212,7 @@ export function maxAerobicPower(
   altitudeM: number,
   params: CeilingParams = {},
 ): number {
-  const merged = { ...DEFAULTS, ...params };
+  const merged = { ...CEILING_DEFAULTS, ...params };
   const availableVo2 = altitudeFraction(altitudeM) * merged.vo2MaxMlPerKgPerMin;
   return vo2ToPower(availableVo2, O2_ENERGY_EQUIVALENT_CARB_KJ_PER_L);
 }
@@ -222,7 +225,7 @@ export function ceilingPower(
   input: CeilingInput,
   params: CeilingParams = {},
 ): number {
-  const merged = { ...DEFAULTS, ...params };
+  const merged = { ...CEILING_DEFAULTS, ...params };
   const altitudeM = input.altitudeM ?? 0;
   const elapsedHours = input.elapsedHours ?? input.tMin / 60;
 

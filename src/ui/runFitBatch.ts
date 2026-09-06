@@ -121,6 +121,10 @@ export interface RunFitStatus {
 }
 
 let status: RunFitStatus = { running: false, result: null, error: null };
+/** Bumped per fit so a still-running bootstrap from an older fit can tell
+ * it has been superseded and drop its result instead of overwriting a
+ * newer one. */
+let fitGeneration = 0;
 const listeners = new Set<() => void>();
 
 function setStatus(next: RunFitStatus) {
@@ -414,14 +418,20 @@ export async function runFitBatch(
     }
     callbacks.onRacesFitted?.(races, raceDates);
 
-    // Auto-estimate the tau range right after the fit, using the races
-    // computed just above directly -- part of the same atomic operation,
-    // not a separate manual step.
-    const tauCI = await bootstrapTauConfidenceInterval(races, raceDates, ceilingParams);
-
-    setStatus({
-      running: false,
-      result: {
+    // The tau confidence interval is BY FAR the most expensive thing here --
+    // 100 bootstrap resamples, each a full tau refit across the whole race
+    // pool. Measured at ~210s against a 168-run library, against ~10s for
+    // every other fit on this page combined. It used to be awaited before
+    // the fit reported anything, so the entire fit appeared to take three
+    // and a half minutes even though every value it applies was ready in
+    // the first few seconds.
+    //
+    // So: publish the fit NOW, with tauCI still pending, and let the
+    // interval fill in afterwards. Everything auto-applied above has
+    // already been handed to the callbacks, so nothing downstream is
+    // waiting on this -- the CI is a displayed diagnostic, not an input to
+    // any other fit.
+    const resultWithoutCI: RunFitResult = {
         fitResult: safeFit.tauFit,
         fInfFitResult: safeFit.fInfFit,
         safeFitTier: safeFit.tier,
@@ -435,11 +445,32 @@ export async function runFitBatch(
         excludedForDurationCount: excludedForDuration,
         races,
         raceDates,
-        tauCI: tauCI ?? "insufficient",
-      },
-      error: null,
-    });
+        tauCI: null,
+    };
+    setStatus({ running: false, result: resultWithoutCI, error: null });
+
+    // Not awaited: this resolves long after runFitBatch returns. The
+    // generation guard stops a slow bootstrap from clobbering a NEWER fit's
+    // result if the user refits while this one is still grinding.
+    const generation = ++fitGeneration;
+    void bootstrapTauConfidenceInterval(races, raceDates, ceilingParams)
+      .then((tauCI) => {
+        if (generation !== fitGeneration) return;
+        if (status.result !== resultWithoutCI) return;
+        setStatus({
+          running: false,
+          result: { ...resultWithoutCI, tauCI: tauCI ?? "insufficient" },
+          error: null,
+        });
+      })
+      .catch(() => {
+        // A failed CI must not surface as a failed fit -- the fit itself
+        // succeeded and its values are already applied.
+        if (generation !== fitGeneration || status.result !== resultWithoutCI) return;
+        setStatus({ running: false, result: { ...resultWithoutCI, tauCI: "insufficient" }, error: null });
+      });
+    return;
   } catch (err) {
-    setStatus({ running: false, result: null, error: err instanceof Error ? err.message : "Fit failed." });
+    setStatus({ running: false, result: null, error: err instanceof Error ? err.message : "Fit failed" });
   }
 }

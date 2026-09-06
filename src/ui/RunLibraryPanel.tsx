@@ -34,7 +34,13 @@ import {
 } from "../model/pacingFit";
 import type { DescentPacingCurve } from "../model/minetti";
 import { resolveCeilingParams, resolveGlycogenStoreG, resolveLt1Lt2Fractions, type FormInputs, type Vo2MaxEntry } from "./formInputs";
-import { ensurePointsForRun, getAutoFetchStatus, runAutoFetchBatch, subscribeToAutoFetch } from "./autoFetchRuns";
+import {
+  ensurePointsForRun,
+  getAutoFetchStatus,
+  isDueForFetch,
+  runAutoFetchBatch,
+  subscribeToAutoFetch,
+} from "./autoFetchRuns";
 import { getBackfillStatus, runBackfillBatch, subscribeToBackfill } from "./backfillRuns";
 import {
   getRunFitStatus,
@@ -575,7 +581,13 @@ export function RunLibraryPanel({
     void markNewFetchCandidates().then(refresh);
   }, [dedupedRuns, markNewFetchCandidates, refresh]);
 
-  const pendingFetchRuns = useMemo(() => dedupedRuns.filter((r) => r.wantsFullData && r.points === null), [dedupedRuns]);
+  // isDueForFetch keeps runs that have repeatedly failed to download out of
+  // the auto batch (see autoFetchRuns.ts) -- without it, a run that can
+  // never produce points is re-queued on every single app launch.
+  const pendingFetchRuns = useMemo(
+    () => dedupedRuns.filter((r) => r.wantsFullData && r.points === null && isDueForFetch(r)),
+    [dedupedRuns],
+  );
   // A plain string, not the array itself, so the effect below only kicks
   // off a new batch when the actual SET of pending ids changes -- not
   // every time dedupedRuns gets a new (but equivalent) array reference.

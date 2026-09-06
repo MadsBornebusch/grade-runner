@@ -15,7 +15,15 @@
 
 import type { CourseSegment, SurfaceCategory } from "../gpx/pipeline";
 import type { AnalysisSegmentResult } from "./analysis";
-import { type CeilingParams, ceilingPower, forceExponentialCurve } from "./ceiling";
+import {
+  altitudeFraction,
+  CEILING_DEFAULTS,
+  type CeilingParams,
+  ceilingPower,
+  forceExponentialCurve,
+  sustainableFraction,
+} from "./ceiling";
+import { O2_ENERGY_EQUIVALENT_CARB_KJ_PER_L, vo2ToPower } from "./energetics";
 import { descentStepForSegment } from "./descentImpact";
 import { fitIntensityConditionedSlowdownModel } from "./intensityConditionedSlowdownFit";
 import {
@@ -235,6 +243,87 @@ function percentileOfSorted(sortedValues: number[], p: number): number {
  * to bin meaningfully, so it only changes behavior on real, noisy,
  * walk-break-diluted, multi-hour data -- exactly where it's needed.
  */
+/**
+ * Per-point values that do NOT depend on fInf/tauMin, cached per points
+ * array so a tau/fInf grid search stops recomputing them for every
+ * candidate. This is the hot loop of the whole fit: with ~75 races and
+ * ~80k trend points, the searches below call computeFadeTrend hundreds of
+ * times, and each call was re-deriving the altitude fraction, the
+ * durability-drift factor, and each point's bin index -- none of which move
+ * as fInf/tau vary -- as well as allocating a fresh { ...DEFAULTS,
+ * ...params } object inside ceilingPower for every single point.
+ *
+ * Deliberately caches only the params-INDEPENDENT parts, and the consuming
+ * loop below reassembles the ceiling with exactly the same arithmetic, in
+ * the same order, that ceilingPower uses (fraction * altFraction *
+ * vo2Max -> vo2ToPower -> drift). The results are therefore bit-identical,
+ * not merely close -- there's a test pinning that.
+ *
+ * Keyed by array identity in a WeakMap: trimForPacingFit returns a stable
+ * array per race per fit, and entries disappear with the race data.
+ */
+interface PreparedFadeRace {
+  altFraction: Float64Array;
+  driftFactor: Float64Array;
+  gross: Float64Array;
+  tMin: Float64Array;
+  binOffset: Int32Array;
+  binCount: number;
+  firstBin: number;
+  /**
+   * Memoized trend per (fInf, tau, ...) signature for THIS race. The
+   * bootstrap resamples the same race pool 100 times WITH REPLACEMENT, so a
+   * single objective evaluation already asks for the same race at the same
+   * tau several times over (~37% of draws are duplicates at this pool
+   * size), and the coarse/fine passes of one tau search revisit values too.
+   * Cache hits return the identical numbers, so this is exact, not an
+   * approximation. Bounded because tau candidates are floats and a long
+   * bootstrap would otherwise grow this without limit.
+   */
+  trendCache: Map<string, TrendFit | null>;
+  /** Guards the cache against a params change that WOULD move these values
+   * (vo2Max, altitude toggling, drift rate) rather than silently reusing
+   * stale numbers. */
+  signature: string;
+}
+
+const preparedFadeRaces = new WeakMap<EffortTrendPoint[], PreparedFadeRace>();
+
+function prepareFadeRace(points: EffortTrendPoint[], merged: Required<CeilingParams>): PreparedFadeRace {
+  const signature = `${merged.vo2MaxMlPerKgPerMin}|${merged.durabilityDriftPerHour}|${merged.pacingCurveEnabled}`;
+  const cached = preparedFadeRaces.get(points);
+  if (cached && cached.signature === signature) return cached;
+
+  const binHours = PEAK_TREND_BIN_MINUTES / 60;
+  const firstBin = Math.floor(points[0].tHours / binHours);
+  const lastBin = Math.floor(points[points.length - 1].tHours / binHours);
+  const n = points.length;
+  const prepared: PreparedFadeRace = {
+    altFraction: new Float64Array(n),
+    driftFactor: new Float64Array(n),
+    gross: new Float64Array(n),
+    tMin: new Float64Array(n),
+    binOffset: new Int32Array(n),
+    binCount: lastBin - firstBin + 1,
+    firstBin,
+    signature,
+    trendCache: new Map(),
+  };
+  for (let i = 0; i < n; i++) {
+    const p = points[i];
+    prepared.altFraction[i] = altitudeFraction(p.altitudeM ?? 0);
+    prepared.gross[i] = p.grossPowerWPerKg;
+    prepared.tMin[i] = p.tHours * 60;
+    prepared.binOffset[i] = Math.floor(p.tHours / binHours) - firstBin;
+    prepared.driftFactor[i] =
+      merged.pacingCurveEnabled && merged.durabilityDriftPerHour > 0
+        ? Math.max(0, 1 - merged.durabilityDriftPerHour * p.tHours)
+        : 1;
+  }
+  preparedFadeRaces.set(points, prepared);
+  return prepared;
+}
+
 export function computeFadeTrend(points: EffortTrendPoint[], ceilingParams: CeilingParams): TrendFit | null {
   if (points.length === 0) return computeEffortTrend(points, ceilingParams);
 
@@ -244,13 +333,24 @@ export function computeFadeTrend(points: EffortTrendPoint[], ceilingParams: Ceil
   // called for many candidate values per race per fit, so per-call overhead
   // compounds quickly.
   const binHours = PEAK_TREND_BIN_MINUTES / 60;
-  const firstBin = Math.floor(points[0].tHours / binHours);
-  const lastBin = Math.floor(points[points.length - 1].tHours / binHours);
-  const bins: number[][] = Array.from({ length: lastBin - firstBin + 1 }, () => []);
-  for (const p of points) {
-    const ceiling = ceilingPower({ tMin: p.tHours * 60, altitudeM: p.altitudeM, elapsedHours: p.tHours }, ceilingParams);
+  const merged = { ...CEILING_DEFAULTS, ...ceilingParams };
+  const prep = prepareFadeRace(points, merged);
+  // Every field sustainableFraction actually reads -- a key that missed one
+  // would serve a stale trend for genuinely different params.
+  const cacheKey = `${merged.fInf}|${merged.tauMin}|${merged.f0}|${merged.lt2Fraction}|${merged.pacingCurveEnabled}|${merged.durationCurve}|${merged.powerLawFraction60Min}|${merged.powerLawExponent}`;
+  const memo = prep.trendCache.get(cacheKey);
+  if (memo !== undefined) return memo;
+  const firstBin = prep.firstBin;
+  const bins: number[][] = Array.from({ length: prep.binCount }, () => []);
+  for (let i = 0; i < prep.tMin.length; i++) {
+    // Same arithmetic as ceilingPower, in the same order -- only the
+    // params-independent factors come from the cache. See PreparedFadeRace.
+    const fraction = sustainableFraction(prep.tMin[i], merged);
+    const ceiling =
+      vo2ToPower(fraction * prep.altFraction[i] * merged.vo2MaxMlPerKgPerMin, O2_ENERGY_EQUIVALENT_CARB_KJ_PER_L) *
+      prep.driftFactor[i];
     if (ceiling <= 0) continue;
-    bins[Math.floor(p.tHours / binHours) - firstBin].push(p.grossPowerWPerKg / ceiling);
+    bins[prep.binOffset[i]].push(prep.gross[i] / ceiling);
   }
 
   const xs: number[] = [];
@@ -262,7 +362,7 @@ export function computeFadeTrend(points: EffortTrendPoint[], ceilingParams: Ceil
     xs.push((firstBin + i + 0.5) * binHours);
     ys.push(percentileOfSorted(vals, PEAK_TREND_PERCENTILE));
   }
-  if (xs.length < MIN_PEAK_BINS) return computeEffortTrend(points, ceilingParams);
+  if (xs.length < MIN_PEAK_BINS) return rememberTrend(prep, cacheKey, computeEffortTrend(points, ceilingParams));
 
   const meanX = xs.reduce((a, b) => a + b, 0) / xs.length;
   const meanY = ys.reduce((a, b) => a + b, 0) / ys.length;
@@ -272,8 +372,16 @@ export function computeFadeTrend(points: EffortTrendPoint[], ceilingParams: Ceil
     sxy += (xs[i] - meanX) * (ys[i] - meanY);
     sxx += (xs[i] - meanX) ** 2;
   }
-  if (sxx <= 0) return computeEffortTrend(points, ceilingParams);
-  return { slopePerHour: sxy / sxx };
+  if (sxx <= 0) return rememberTrend(prep, cacheKey, computeEffortTrend(points, ceilingParams));
+  return rememberTrend(prep, cacheKey, { slopePerHour: sxy / sxx });
+}
+
+/** Bounded memo write -- see PreparedFadeRace.trendCache. */
+const MAX_TREND_CACHE_ENTRIES = 4096;
+function rememberTrend(prep: PreparedFadeRace, key: string, value: TrendFit | null): TrendFit | null {
+  if (prep.trendCache.size >= MAX_TREND_CACHE_ENTRIES) prep.trendCache.clear();
+  prep.trendCache.set(key, value);
+  return value;
 }
 
 /**
