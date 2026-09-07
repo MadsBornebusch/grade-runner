@@ -1,7 +1,7 @@
 import type { CourseSegment } from "../gpx/pipeline";
 import type { AnalysisSegmentResult } from "../model/analysis";
 import { applyHrInertia, type HrPowerCalibration, predictHeartRateFromPower } from "../model/hrCalibration";
-import { gradeAdjustedSpeedMs } from "../model/minetti";
+import { gradeAdjustedSpeedMs, maxDescentSpeedMs } from "../model/minetti";
 import type { SegmentResult } from "../model/solver";
 
 export interface ChartPoint {
@@ -137,6 +137,144 @@ export interface CourseSummaryStats {
    * in analysis mode). Null iff avgHrBpm itself is null.
    */
   avgHrSource: "recorded" | "estimated" | "mixed" | null;
+  /** Longest single unbroken climb -- vertical metres gained and the
+   * along-course distance it takes. "Unbroken" tolerates small dips (see
+   * CLIMB_NOISE_TOLERANCE_M) so GPS jitter doesn't shred one real climb
+   * into dozens of fragments. Null if the course has no climb at all. */
+  longestAscent: { gainM: number; distanceKm: number; startKm: number } | null;
+  /** Same, for descent -- lossM is positive metres lost. */
+  longestDescent: { lossM: number; distanceKm: number; startKm: number } | null;
+  /** Time split by gait. Planning mode picks these per segment (walk
+   * emerges where walking is faster than running for the same effort);
+   * Analysis mode infers them from recorded speed. */
+  runTimeS: number;
+  walkTimeS: number;
+}
+
+/**
+ * Elevation noise ignored when deciding whether a climb has ended. Raw GPS
+ * elevation wobbles by a metre or two constantly, so a strict "any drop
+ * ends the climb" rule reports the longest climb on a real mountain course
+ * as a few hundred metres of it. Only a sustained reversal past this
+ * counts as the end.
+ */
+const CLIMB_NOISE_TOLERANCE_M = 10;
+
+interface ClimbRun {
+  gainM: number;
+  distanceKm: number;
+  startKm: number;
+}
+
+/**
+ * Finds the longest sustained climb (sign = +1) or descent (sign = -1),
+ * measured by total elevation change, tolerating CLIMB_NOISE_TOLERANCE_M of
+ * counter-movement before closing a run out.
+ */
+function findLongestClimb(points: ChartPoint[], sign: 1 | -1): ClimbRun | null {
+  let best: ClimbRun | null = null;
+  let startIdx: number | null = null;
+  let peakEle = 0;
+  let peakIdx = 0;
+
+  const close = () => {
+    if (startIdx === null) return;
+    const change = (points[peakIdx].elevationM - points[startIdx].elevationM) * sign;
+    if (change > 0 && (!best || change > best.gainM)) {
+      best = {
+        gainM: change,
+        distanceKm: points[peakIdx].distanceKm - points[startIdx].distanceKm,
+        startKm: points[startIdx].distanceKm,
+      };
+    }
+    startIdx = null;
+  };
+
+  for (let i = 0; i < points.length; i++) {
+    const ele = points[i].elevationM;
+    if (startIdx === null) {
+      startIdx = i;
+      peakEle = ele;
+      peakIdx = i;
+      continue;
+    }
+    if (ele * sign > peakEle * sign) {
+      // Strictly greater: a flat stretch after the summit is not part of
+      // the climb, so it must not extend the reported length.
+      peakEle = ele;
+      peakIdx = i;
+    } else if ((peakEle - ele) * sign > CLIMB_NOISE_TOLERANCE_M) {
+      // Sustained reversal -- this run is over; restart from the turning point.
+      close();
+      startIdx = i;
+      peakEle = ele;
+      peakIdx = i;
+    }
+  }
+  close();
+  return best;
+}
+
+/** One bar of the grade histogram. */
+export interface GradeBin {
+  /** Inclusive lower edge of the bin, as a gradient fraction (-0.20 = -20%). */
+  fromGradient: number;
+  toGradient: number;
+  /** Distance covered at a gradient in this bin, metres. */
+  distanceM: number;
+  timeS: number;
+  /** Any segment in this bin is walked -- on the uphill side this is where
+   * walking beats running for the same effort. */
+  hasWalking: boolean;
+  /** Any segment in this bin is held at the descent-speed cap rather than
+   * by the athlete's power target -- i.e. braking, limited by control and
+   * chosen descent pacing rather than by aerobic cost. */
+  hasBraking: boolean;
+}
+
+/** Width of each grade-histogram bin, as a gradient fraction (2%). */
+export const GRADE_BIN_WIDTH = 0.02;
+
+/**
+ * Distance/time distribution across gradient, flagging which bins involve
+ * walking and which are descent-speed-capped ("braking"). Bins with no
+ * distance at all are omitted, so a rolling course doesn't render dozens of
+ * empty bars out to +/-45%.
+ *
+ * `totalDistanceKm` is the whole course's distance, needed because the
+ * descent cap this compares against is itself scaled by it (see
+ * minetti.ts's descentPacingMultiplier).
+ */
+export function buildGradeHistogram(points: ChartPoint[], totalDistanceKm: number): GradeBin[] {
+  const byBin = new Map<number, GradeBin>();
+  for (let i = 1; i < points.length; i++) {
+    const cur = points[i];
+    const distanceM = (cur.distanceKm - points[i - 1].distanceKm) * 1000;
+    const timeS = cur.cumulativeTimeS - points[i - 1].cumulativeTimeS;
+    if (distanceM <= 0) continue;
+    const index = Math.floor(cur.gradient / GRADE_BIN_WIDTH);
+    const existing = byBin.get(index);
+    const cap = maxDescentSpeedMs(cur.gradient, totalDistanceKm);
+    // At the cap (not merely near it): the solver takes min(power-implied
+    // speed, cap), so "braking" means the cap is what bound this segment.
+    const braking = Number.isFinite(cap) && cur.speedMs >= cap - 1e-6;
+    if (existing) {
+      existing.distanceM += distanceM;
+      existing.timeS += Math.max(0, timeS);
+      existing.hasWalking ||= cur.mode === "walk";
+      existing.hasBraking ||= braking;
+    } else {
+      byBin.set(index, {
+        fromGradient: index * GRADE_BIN_WIDTH,
+        toGradient: (index + 1) * GRADE_BIN_WIDTH,
+        distanceM,
+        timeS: Math.max(0, timeS),
+        hasWalking: cur.mode === "walk",
+        hasBraking: braking,
+      });
+    }
+  }
+  return [...byBin.values()].sort((a, b) => a.fromGradient - b.fromGradient);
 }
 
 /** Summarizes a course/effort's chart points into whole-course averages --
@@ -144,7 +282,18 @@ export interface CourseSummaryStats {
  * available, else estimated). Needs at least 2 points (a single point has
  * no distance/time to weight against). */
 export function summarizeChartPoints(points: ChartPoint[]): CourseSummaryStats {
-  if (points.length < 2) return { avgPaceMinPerKm: null, avgGapMinPerKm: null, avgHrBpm: null, avgHrSource: null };
+  if (points.length < 2) {
+    return {
+      avgPaceMinPerKm: null,
+      avgGapMinPerKm: null,
+      avgHrBpm: null,
+      avgHrSource: null,
+      longestAscent: null,
+      longestDescent: null,
+      runTimeS: 0,
+      walkTimeS: 0,
+    };
+  }
 
   const totalDistanceKm = points[points.length - 1].distanceKm - points[0].distanceKm;
   const totalTimeS = points[points.length - 1].cumulativeTimeS - points[0].cumulativeTimeS;
@@ -154,6 +303,8 @@ export function summarizeChartPoints(points: ChartPoint[]): CourseSummaryStats {
   let hrWeightedSum = 0;
   let hrWeight = 0;
   let recordedHrWeight = 0;
+  let runTimeS = 0;
+  let walkTimeS = 0;
   for (let i = 1; i < points.length; i++) {
     const prev = points[i - 1];
     const cur = points[i];
@@ -162,6 +313,10 @@ export function summarizeChartPoints(points: ChartPoint[]): CourseSummaryStats {
     if (segDistanceM > 0 && cur.speedMs > 0) {
       const gapSpeedMs = gradeAdjustedSpeedMs(cur.speedMs, cur.gradient, cur.mode);
       totalGapTimeS += gapSpeedMs > 0 ? segDistanceM / gapSpeedMs : 0;
+    }
+    if (segTimeS > 0) {
+      if (cur.mode === "walk") walkTimeS += segTimeS;
+      else runTimeS += segTimeS;
     }
     const hrBpm = cur.recordedHeartRateBpm ?? cur.estimatedHeartRateBpm;
     if (hrBpm !== null && hrBpm !== undefined && segTimeS > 0) {
@@ -179,5 +334,12 @@ export function summarizeChartPoints(points: ChartPoint[]): CourseSummaryStats {
     avgGapMinPerKm: totalDistanceKm > 0 ? totalGapTimeS / 60 / totalDistanceKm : null,
     avgHrBpm: hrWeight > 0 ? hrWeightedSum / hrWeight : null,
     avgHrSource,
+    longestAscent: findLongestClimb(points, 1),
+    longestDescent: (() => {
+      const d = findLongestClimb(points, -1);
+      return d ? { lossM: d.gainM, distanceKm: d.distanceKm, startKm: d.startKm } : null;
+    })(),
+    runTimeS,
+    walkTimeS,
   };
 }

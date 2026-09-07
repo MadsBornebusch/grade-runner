@@ -158,12 +158,29 @@ export function ResultsSummary({
       {(summaryStats.avgPaceMinPerKm !== null || summaryStats.avgHrBpm !== null) && (
         <div className="results-summary__averages">
           <span>Avg pace {formatMinPerKm(summaryStats.avgPaceMinPerKm)}</span>
-          <span title="Grade-adjusted pace -- flat-equivalent pace for the same effort.">
+          <span title="Grade-adjusted pace -- the flat pace that would cost the same energy per unit time. On a course with a lot of braked descending it can read SLOWER than actual pace: braking downhill genuinely costs little aerobic energy, so its flat-equivalent is slow, even though it's hard on the legs.">
             GAP {formatMinPerKm(summaryStats.avgGapMinPerKm)}
           </span>
           {summaryStats.avgHrBpm !== null && (
             <span title="Estimated from your HR-effort calibration, not measured -- Planning mode has no recorded run to show instead.">
               Avg HR ~{Math.round(summaryStats.avgHrBpm)} bpm<sup className="results-summary__estimated-flag">est</sup>
+            </span>
+          )}
+          {summaryStats.walkTimeS > 0 && (
+            <span title="Walking is an emergent result, not a rule: the plan walks wherever walking is faster than running for the same effort.">
+              Run {formatDuration(summaryStats.runTimeS)} / walk {formatDuration(summaryStats.walkTimeS)}
+            </span>
+          )}
+          {summaryStats.longestAscent && (
+            <span title={`Longest unbroken climb, starting at ${summaryStats.longestAscent.startKm.toFixed(1)} km.`}>
+              Longest climb {Math.round(summaryStats.longestAscent.gainM)} m over{" "}
+              {summaryStats.longestAscent.distanceKm.toFixed(1)} km
+            </span>
+          )}
+          {summaryStats.longestDescent && (
+            <span title={`Longest unbroken descent, starting at ${summaryStats.longestDescent.startKm.toFixed(1)} km.`}>
+              Longest descent {Math.round(summaryStats.longestDescent.lossM)} m over{" "}
+              {summaryStats.longestDescent.distanceKm.toFixed(1)} km
             </span>
           )}
         </div>

@@ -944,3 +944,15 @@
     justify-self: end;
   }
 }
+
+.grade-histogram__swatch {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 2px;
+  vertical-align: middle;
+  margin-right: 0.15rem;
+}
+.grade-histogram__swatch--walk { background: #b45309; }
+.grade-histogram__swatch--brake { background: #2d6a4f; }
+.grade-histogram__swatch--plain { background: var(--accent-border); }

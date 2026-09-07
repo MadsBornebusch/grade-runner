@@ -13,6 +13,7 @@ import { saveCourse, updateStoredCourseCheckpoints } from "./storage/courseLibra
 import { FuelingFields } from "./ui/InputsPanel";
 import { PageCarousel } from "./ui/PageCarousel";
 import { ElevationProfileChart } from "./ui/ElevationProfileChart";
+import { GradeHistogram } from "./ui/GradeHistogram";
 import { FinishTimeRangePanel } from "./ui/FinishTimeRangePanel";
 import { FuelChart } from "./ui/FuelChart";
 import { SubstrateChart } from "./ui/SubstrateChart";
@@ -25,7 +26,13 @@ import { buildEffortTrendPoints, type EffortTrendPoint } from "./model/pacingFit
 import { SplitTable } from "./ui/SplitTable";
 import { ResultsSummary } from "./ui/ResultsSummary";
 import { AnalysisSummary } from "./ui/AnalysisSummary";
-import { buildAnalysisChartPoints, buildChartPoints, summarizeChartPoints, type HrEstimateInputs } from "./ui/chartData";
+import {
+  buildAnalysisChartPoints,
+  buildChartPoints,
+  buildGradeHistogram,
+  summarizeChartPoints,
+  type HrEstimateInputs,
+} from "./ui/chartData";
 import { formatDuration, parseDurationToSeconds } from "./ui/format";
 import {
   loadFormInputs,
@@ -393,6 +400,12 @@ function App() {
   }, [courseResult, activeResult, hrEstimateInputs]);
 
   const planSummaryStats = useMemo(() => summarizeChartPoints(chartPoints), [chartPoints]);
+  // The descent cap the histogram's "braking" flag compares against is
+  // scaled by the whole course's distance, so it needs that distance too.
+  const planGradeBins = useMemo(
+    () => buildGradeHistogram(chartPoints, chartPoints.length > 0 ? chartPoints[chartPoints.length - 1].distanceKm : 0),
+    [chartPoints],
+  );
 
   // Same "Settings is a full-screen overlay, nothing to show a fresh
   // rebuild to" freeze as solverInputs above.
@@ -470,6 +483,14 @@ function App() {
   }, [courseResult, analysisResult, formInputs.walkMaxMs, hrEstimateInputs]);
 
   const analysisSummaryStats = useMemo(() => summarizeChartPoints(analysisChartPoints), [analysisChartPoints]);
+  const analysisGradeBins = useMemo(
+    () =>
+      buildGradeHistogram(
+        analysisChartPoints,
+        analysisChartPoints.length > 0 ? analysisChartPoints[analysisChartPoints.length - 1].distanceKm : 0,
+      ),
+    [analysisChartPoints],
+  );
 
   const substratePoints = useMemo(
     () =>
@@ -650,6 +671,7 @@ function App() {
                           savedPointsKm={savedPointsKm}
                           onPointClick={setHighlightedDistanceKm}
                         />
+                        <GradeHistogram bins={planGradeBins} />
                         <FuelChart points={chartPoints} />
                         <SplitTable
                           points={chartPoints}
@@ -698,6 +720,7 @@ function App() {
                           savedPointsKm={savedPointsKm}
                           onPointClick={setHighlightedDistanceKm}
                         />
+                        <GradeHistogram bins={analysisGradeBins} />
                         {solverResult && (
                           <PaceEffortChart
                             actual={paceEffortActualPoints}
