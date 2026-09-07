@@ -117,7 +117,16 @@ export interface CourseSummaryStats {
    * values directly -- pace is a rate, so a plain arithmetic mean across
    * unequal segments would be subtly wrong (a harmonic-style, time-based
    * aggregation is what "how fast would the WHOLE course have felt on
-   * flat ground" actually asks for). */
+   * flat ground" actually asks for).
+   *
+   * Note this summing IS the distance-weighted answer, not a time-weighted
+   * one: summing each segment's flat-equivalent time and dividing by total
+   * distance is algebraically identical to a distance-weighted mean of the
+   * per-segment GAP paces, and it preserves the invariant that
+   * avgGapMinPerKm * totalKm == the flat-equivalent total time, exactly as
+   * avgPaceMinPerKm * totalKm == the real total time. Stopped segments
+   * contribute their wall-clock time unchanged so both figures measure the
+   * same clock. */
   avgGapMinPerKm: number | null;
   /** Time-weighted mean heart rate, preferring each point's own recorded
    * value (a real completed run, analysis mode) over its calibration
@@ -310,9 +319,18 @@ export function summarizeChartPoints(points: ChartPoint[]): CourseSummaryStats {
     const cur = points[i];
     const segDistanceM = (cur.distanceKm - prev.distanceKm) * 1000;
     const segTimeS = cur.cumulativeTimeS - prev.cumulativeTimeS;
-    if (segDistanceM > 0 && cur.speedMs > 0) {
-      const gapSpeedMs = gradeAdjustedSpeedMs(cur.speedMs, cur.gradient, cur.mode);
-      totalGapTimeS += gapSpeedMs > 0 ? segDistanceM / gapSpeedMs : 0;
+    const gapSpeedMs =
+      segDistanceM > 0 && cur.speedMs > 0 ? gradeAdjustedSpeedMs(cur.speedMs, cur.gradient, cur.mode) : 0;
+    if (gapSpeedMs > 0) {
+      totalGapTimeS += segDistanceM / gapSpeedMs;
+    } else if (segTimeS > 0) {
+      // Standing still (an aid station, a stopped clock) is neither faster
+      // nor slower on flat ground -- it costs exactly the same wall-clock
+      // time. Skipping these outright made GAP silently exclude time that
+      // avgPace above DOES include, so the two were measured against
+      // different clocks: on a 168km race with 114 minutes of stops that
+      // was 0.7 min/km of the apparent GAP-vs-pace gap, none of it terrain.
+      totalGapTimeS += segTimeS;
     }
     if (segTimeS > 0) {
       if (cur.mode === "walk") walkTimeS += segTimeS;

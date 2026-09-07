@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { summarizeChartPoints, type ChartPoint,
   buildGradeHistogram,
 } from "./chartData";
-import { maxDescentSpeedMs } from "../model/minetti";
+import { gradeAdjustedSpeedMs, maxDescentSpeedMs } from "../model/minetti";
 
 function point(overrides: Partial<ChartPoint> = {}): ChartPoint {
   return {
@@ -247,5 +247,67 @@ describe("buildGradeHistogram", () => {
       10,
     );
     expect(bins.map((b) => b.fromGradient)).toEqual([...bins.map((b) => b.fromGradient)].sort((a, b) => a - b));
+  });
+});
+
+describe("GAP aggregation", () => {
+  const pt = (over: Partial<ChartPoint>): ChartPoint => ({
+    distanceKm: 0,
+    elevationM: 0,
+    gradient: 0,
+    speedMs: 3,
+    mode: "run",
+    glycogenG: 400,
+    cumulativeTimeS: 0,
+    estimatedHeartRateBpm: null,
+    ...over,
+  });
+
+  it("keeps GAP x total km equal to the flat-equivalent total time", () => {
+    // The invariant that makes GAP comparable to pace at all: both are a
+    // total time divided by the same total distance.
+    const points = [
+      pt({ distanceKm: 0, cumulativeTimeS: 0 }),
+      pt({ distanceKm: 1, cumulativeTimeS: 400, gradient: 0.08, speedMs: 2.5 }),
+      pt({ distanceKm: 2, cumulativeTimeS: 700, gradient: -0.08, speedMs: 3.3 }),
+    ];
+    const stats = summarizeChartPoints(points);
+    const flatEquivalentTimeS =
+      1000 / gradeAdjustedSpeedMs(2.5, 0.08, "run") + 1000 / gradeAdjustedSpeedMs(3.3, -0.08, "run");
+    expect(stats.avgGapMinPerKm! * 2).toBeCloseTo(flatEquivalentTimeS / 60, 6);
+    expect(stats.avgPaceMinPerKm! * 2).toBeCloseTo(700 / 60, 6);
+  });
+
+  it("is a distance-weighted, not time-weighted, average of the segment GAP paces", () => {
+    // A short slow segment and a long fast one: time-weighting would let
+    // the short segment dominate purely because it takes longer.
+    const points = [
+      pt({ distanceKm: 0, cumulativeTimeS: 0 }),
+      pt({ distanceKm: 0.5, cumulativeTimeS: 500, speedMs: 1 }),
+      pt({ distanceKm: 5.5, cumulativeTimeS: 1500, speedMs: 5 }),
+    ];
+    const stats = summarizeChartPoints(points);
+    const distanceWeighted = (500 / 60 + 1000 / 60) / 5.5; // flat: GAP == actual
+    expect(stats.avgGapMinPerKm!).toBeCloseTo(distanceWeighted, 6);
+    const timeWeighted = ((1000 / 1 / 60) * 500 + (1000 / 5 / 60) * 1000) / 1500;
+    expect(stats.avgGapMinPerKm!).not.toBeCloseTo(timeWeighted, 3);
+  });
+
+  it("counts stopped time in GAP, so it is on the same clock as pace", () => {
+    // 60s standing still mid-run. Standing still is neither easier nor
+    // harder on flat ground -- it costs the same wall-clock time. Excluding
+    // it made GAP measure a different clock than pace.
+    // speedMs must agree with the timestamps or the fixture is describing
+    // an impossible run: 1000 m in 300 s is 10/3 m/s.
+    const points = [
+      pt({ distanceKm: 0, cumulativeTimeS: 0 }),
+      pt({ distanceKm: 1, cumulativeTimeS: 300, speedMs: 1000 / 300 }),
+      pt({ distanceKm: 1, cumulativeTimeS: 360, speedMs: 0 }), // paused
+      pt({ distanceKm: 2, cumulativeTimeS: 660, speedMs: 1000 / 300 }),
+    ];
+    const stats = summarizeChartPoints(points);
+    // Flat course, so flat-equivalent time == real time, pause included.
+    expect(stats.avgGapMinPerKm).toBeCloseTo(stats.avgPaceMinPerKm!, 6);
+    expect(stats.avgGapMinPerKm! * 2).toBeCloseTo(660 / 60, 6);
   });
 });
