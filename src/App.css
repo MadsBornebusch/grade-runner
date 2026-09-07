@@ -956,3 +956,49 @@
 .grade-histogram__swatch--walk { background: #b45309; }
 .grade-histogram__swatch--brake { background: #2d6a4f; }
 .grade-histogram__swatch--plain { background: var(--accent-border); }
+
+/* Selected course. Deliberately several redundant cues -- a tinted
+   background, an accent bar down the left edge, bolder text and a tick --
+   because a single subtle background tint was reported as barely visible,
+   and it has to survive both light and dark themes. */
+.course-library__row--selected {
+  background: var(--accent-bg);
+  border-left: 3px solid var(--accent-border);
+  border-radius: 6px;
+  margin-left: -3px;
+}
+
+.course-library__row--selected .course-library__select {
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.course-library__row--selected .course-library__select:hover {
+  background: none;
+}
+
+.course-library__selected-tick {
+  color: var(--accent-border);
+  font-weight: 700;
+  margin-right: 6px;
+}
+
+/* The Plan/Analyze stat strip. Without wrapping, the added climb/descent
+   and run-vs-walk figures run off the side of a phone screen. */
+.results-summary__averages {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+@media (max-width: 560px) {
+  .results-summary__averages {
+    /* Two readable columns rather than one long ragged wrap. */
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px 12px;
+    font-size: 12px;
+  }
+  .results-summary__averages > span {
+    overflow-wrap: anywhere;
+  }
+}

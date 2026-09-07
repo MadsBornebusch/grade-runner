@@ -158,7 +158,7 @@ export function ResultsSummary({
       {(summaryStats.avgPaceMinPerKm !== null || summaryStats.avgHrBpm !== null) && (
         <div className="results-summary__averages">
           <span>Avg pace {formatMinPerKm(summaryStats.avgPaceMinPerKm)}</span>
-          <span title="Grade-adjusted pace -- the flat pace that would cost the same energy per unit time. On a course with a lot of braked descending it can read SLOWER than actual pace: braking downhill genuinely costs little aerobic energy, so its flat-equivalent is slow, even though it's hard on the legs.">
+          <span title="Grade-adjusted pace -- the flat pace at which this course would be equally hard. Climbing is priced by its metabolic cost; descending is credited far less than its oxygen cost alone suggests, because braking, not breathing, is what limits you downhill.">
             GAP {formatMinPerKm(summaryStats.avgGapMinPerKm)}
           </span>
           {summaryStats.avgHrBpm !== null && (

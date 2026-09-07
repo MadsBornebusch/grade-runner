@@ -64,19 +64,61 @@ export function costOfWalking(i: number): number {
 }
 
 /**
- * Grade-adjusted pace (GAP): the flat-ground speed that would cost the same
- * energy per unit time as `speedMs` does at this segment's actual gradient
- * -- the standard "how fast does this effort feel on the flat" reading, in
- * the SAME gait the segment was actually covered in (a walked segment's GAP
- * uses costOfWalking throughout, not costOfRunning, so a walk break doesn't
- * read as an equivalent run pace it never was). Exactly `speedMs` on flat
- * ground by construction (cost(0)/cost(0) = 1).
+ * Most a descent may count as "easier than flat" for GAP, as a fraction of
+ * the flat cost -- i.e. at best, descending is worth about 11% more speed
+ * (1/0.9) at the same effort.
+ *
+ * WHY A FLOOR AT ALL. Minetti's Cr is a METABOLIC cost curve -- oxygen per
+ * kilogram per metre -- and it is right about that: running down a -15%
+ * grade really does cost roughly half the oxygen per metre that flat
+ * running does. But it omits the eccentric braking load entirely, and that
+ * is what actually limits descending. Used raw as a pace-equivalence, it
+ * claims a descent is worth up to ~2x the speed at equal effort, which no
+ * runner achieves -- the same over-crediting of descents that
+ * maxDescentSpeedMs above exists to correct on the pacing side.
+ *
+ * Left uncorrected it produced a genuinely nonsensical result, which is
+ * what prompted this: on a hilly 79km course the reported GAP came out
+ * SLOWER than the actual pace (7:26 vs 6:53 per km), which reads as "you'd
+ * have been slower on flat ground" -- i.e. that hills make you faster.
+ * Braked descents were being counted as rest because they are cheap in
+ * oxygen, even though they are the hardest thing in the race on the quads.
+ *
+ * WHY 0.9. Grade-adjustment curves used in practice (Strava's GAP,
+ * TrainingPeaks' NGP and similar) are fit to what runners actually RUN at
+ * matched effort rather than to oxygen cost, and they credit descending far
+ * less than the metabolic curve does: the benefit peaks in the low tens of
+ * percent somewhere around -3% to -10%, then falls away again as the grade
+ * steepens and braking takes over. A floor near 0.9 reproduces that
+ * ceiling-on-the-benefit. Treat it as a bounded, deliberately conservative
+ * default in the spirit of DESCENT_LIMIT_SPEED_AT_ONSET_MS above -- the
+ * right order of magnitude and the right shape, not a calibrated constant.
+ *
+ * Note this floor stops binding on genuinely steep descents on its own:
+ * Minetti's own cost curve turns back upward below about -15% and passes
+ * flat cost again near -40%, so a very steep descent is correctly scored as
+ * HARDER than flat without any special casing.
+ */
+const MAX_DESCENT_GAP_CREDIT = 0.9;
+
+/**
+ * Grade-adjusted pace (GAP): the flat-ground speed at which this segment
+ * would be equally hard -- the standard "how fast does this effort feel on
+ * the flat" reading, in the SAME gait the segment was actually covered in
+ * (a walked segment's GAP uses costOfWalking throughout, not costOfRunning,
+ * so a walk break doesn't read as an equivalent run pace it never was).
+ * Exactly `speedMs` on flat ground by construction (cost(0)/cost(0) = 1).
+ *
+ * Uphill is Minetti's cost ratio directly, where the metabolic curve is
+ * both well validated and genuinely the limiter. Downhill is the same ratio
+ * bounded below by MAX_DESCENT_GAP_CREDIT -- see that constant for why an
+ * unbounded metabolic ratio makes GAP report hills as easier than flat.
  */
 export function gradeAdjustedSpeedMs(speedMs: number, gradient: number, mode: "run" | "walk"): number {
   const cost = mode === "walk" ? costOfWalking : costOfRunning;
   const flatCost = cost(0);
   if (!(flatCost > 0)) return speedMs;
-  return speedMs * (cost(gradient) / flatCost);
+  return speedMs * Math.max(MAX_DESCENT_GAP_CREDIT, cost(gradient) / flatCost);
 }
 
 /**

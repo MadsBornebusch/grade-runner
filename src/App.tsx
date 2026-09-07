@@ -587,6 +587,7 @@ function App() {
             content: (
               <>
                 <CourseLibraryPanel
+                  selectedCourseId={currentCourseId}
                   refreshKey={courseLibraryVersion}
                   onSelect={(course) => loadCourse(course.points, course.name, course.id, course.savedPointsKm, course.targetTimeS)}
                 />

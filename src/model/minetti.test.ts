@@ -177,6 +177,30 @@ describe("descentPacingMultiplier", () => {
 });
 
 describe("gradeAdjustedSpeedMs", () => {
+  it("never reports a hilly effort as easier than the same speed on flat", () => {
+    // The reported bug: on a hilly 79km course GAP came out SLOWER than
+    // actual pace, which says flat ground would have been slower -- i.e.
+    // that hills make you faster. No single gradient may credit a descent
+    // with more than MAX_DESCENT_GAP_CREDIT.
+    for (let g = -0.45; g <= 0.45; g += 0.01) {
+      expect(gradeAdjustedSpeedMs(3, g, "run")).toBeGreaterThanOrEqual(3 * 0.9 - 1e-9);
+    }
+  });
+
+  it("bounds the downhill credit well below what the raw metabolic curve implies", () => {
+    // Minetti says -15% costs about half the oxygen per metre, which taken
+    // literally as pace-equivalence claims a descent is worth ~2x the speed.
+    const raw = costOfRunning(-0.15) / costOfRunning(0);
+    expect(raw).toBeLessThan(0.6); // the metabolic curve really does say this
+    expect(gradeAdjustedSpeedMs(3, -0.15, "run")).toBeCloseTo(3 * 0.9, 6);
+  });
+
+  it("still scores a very steep descent as harder than flat, with no special casing", () => {
+    // Minetti's own curve turns back up past about -15% and crosses flat
+    // cost again near -40%, so the floor stops binding by itself.
+    expect(gradeAdjustedSpeedMs(2, -0.45, "run")).toBeGreaterThan(2);
+  });
+
   it("equals the actual speed on flat ground, for either gait", () => {
     expect(gradeAdjustedSpeedMs(3, 0, "run")).toBeCloseTo(3, 6);
     expect(gradeAdjustedSpeedMs(1.5, 0, "walk")).toBeCloseTo(1.5, 6);
