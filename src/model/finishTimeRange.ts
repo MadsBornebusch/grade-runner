@@ -26,7 +26,7 @@ import {
   type EffortTrendPoint,
   percentile,
 } from "./pacingFit";
-import { findSustainableTheta, type SolverInputs } from "./solver";
+import { findFlatPacedFinishTime, findSustainableTheta, type SolverInputs } from "./solver";
 
 export interface FinishTimeRangeResult {
   /** Which tier the POINT ESTIMATE (not each resample) used -- "defaults"
@@ -73,14 +73,40 @@ export async function predictFinishTimeRange(
       ceilingParams: { ...tauBootstrap.pointEstimateCeilingParams, tauMin },
     }).result.finishTimeS;
 
-  const pointEstimateFinishTimeS = solve(tauBootstrap.pointEstimateTauMin);
+  const decliningPointEstimateS = solve(tauBootstrap.pointEstimateTauMin);
+
+  /**
+   * The displayed plan is now EVEN-paced (findFlatPacedFinishTime), which
+   * returns a different -- generally slower -- total than the decaying-target
+   * findSustainableTheta this bootstrap runs on. Centring the band on the
+   * latter would put the range somewhere the headline number isn't.
+   *
+   * Running the flat-paced solver per resample is not an option: it's a
+   * fixed-point search costing ~300ms against a real course, times ~100
+   * resamples. So the band's WIDTH still comes from the cheap solver (it's a
+   * relative spread in tau, which both models respond to the same way) and
+   * only its CENTRE is re-anchored, by scaling every sample by the ratio
+   * between the two point estimates. One extra flat-paced solve, not a
+   * hundred.
+   */
+  const flatPaced = findFlatPacedFinishTime({
+    ...solverBaseInputs,
+    segments: targetSegments,
+    ceilingParams: tauBootstrap.pointEstimateCeilingParams,
+  });
+  const evenPacedScale =
+    flatPaced.result.feasible && decliningPointEstimateS > 0
+      ? flatPaced.result.finishTimeS / decliningPointEstimateS
+      : 1;
+
+  const pointEstimateFinishTimeS = decliningPointEstimateS * evenPacedScale;
 
   const bootstrapFinishTimes: number[] = [];
   for (let i = 0; i < tauBootstrap.tauSamples.length; i++) {
     if (i > 0 && i % BOOTSTRAP_YIELD_EVERY === 0) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    bootstrapFinishTimes.push(solve(tauBootstrap.tauSamples[i]));
+    bootstrapFinishTimes.push(solve(tauBootstrap.tauSamples[i]) * evenPacedScale);
   }
   bootstrapFinishTimes.sort((a, b) => a - b);
 

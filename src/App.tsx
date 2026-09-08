@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { GpxPoint } from "./gpx/pipeline";
 import { rawCourseStats, runPipeline } from "./gpx/pipeline";
-import { findFlatPacedFinishTime, findSustainableTheta, findThetaForTargetTime, type SolverInputs } from "./model/solver";
+import { findFlatPacedFinishTime, findThetaForTargetTime, type SolverInputs } from "./model/solver";
 import { predictBestDemonstratedTheta, predictMarginTheta } from "./model/pacingMarginFit";
 import { analyzeRun, type AnalysisInputs } from "./model/analysis";
 import { predictPowerFromHr } from "./model/hrCalibration";
@@ -303,9 +303,25 @@ function App() {
     formInputs.descentPacingCurve,
   ]);
 
+  // Even-paced, NOT findSustainableTheta. That one holds a constant fraction
+  // of a ceiling evaluated at each segment's own elapsed time, so the target
+  // power decays monotonically through the race and the plan is front-loaded
+  // by construction -- on a dead-flat marathon it opened at the athlete's
+  // few-minute power and faded to their three-hour power with no terrain
+  // involved. It also never charges for going out too hard, which is why it
+  // returned a FASTER total than even pacing; real pacing science has even
+  // pacing optimal beyond a couple of minutes. And the fitted power-law
+  // ceiling is a between-race curve (total duration -> fraction sustained),
+  // so applying it as a within-race decay was a category error.
+  // "Chosen pacing" and "Best demonstrated" below already used this solver;
+  // this puts the zero-margin ceiling on the same footing.
   const solverResult = useMemo(() => {
     if (!solverInputs) return null;
-    return findSustainableTheta(solverInputs);
+    const flat = findFlatPacedFinishTime(solverInputs);
+    // theta 1 by construction: findFlatPacedFinishTime with no margin curve
+    // simulates at theta=1 against the flat-duration ceiling, so this is the
+    // zero-margin ceiling in the same sense as before.
+    return { theta: 1, result: flat.result };
   }, [solverInputs]);
 
   // "Chosen pacing" and "best demonstrated" -- the two grounded numbers

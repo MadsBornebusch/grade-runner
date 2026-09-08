@@ -644,12 +644,17 @@ export function findThetaForTargetTime(
   targetTimeS: number,
   opts: BisectionOptions & { scanSteps?: number } = {},
 ): SolverResult {
-  const hi0 = opts.hi ?? 1;
   const lo0 = opts.lo ?? 0.05;
   const iterations = opts.iterations ?? 30;
   const scanSteps = opts.scanSteps ?? 20;
 
-  const fastest = findSustainableTheta(inputs, { lo: lo0, hi: hi0, iterations, scanSteps });
+  // The reference ceiling must use the SAME pacing model as the search
+  // below, or the two are answering different questions: an even-paced
+  // ceiling is slower than the old decaying-target one, so seeding from the
+  // latter made "is the target faster than possible?" compare against a
+  // time this function can no longer produce.
+  const flatCeiling = findFlatPacedFinishTime(inputs);
+  const fastest: SolverResult = { theta: 1, result: flatCeiling.result };
   if (!fastest.result.feasible) return fastest;
 
   // The target duration is already known here (that's the whole point of
@@ -659,9 +664,17 @@ export function findThetaForTargetTime(
   // targetTimeS exactly IS a race of that length, no seed/refine pass
   // needed. Same "spike the first ~2 minutes of every race" problem this
   // avoids -- see anaerobicBoostReferenceMin's own doc.
-  const simOpts: SimulateOptions = (inputs.anaerobicCapacityMin ?? 0) > 0
-    ? { anaerobicBoostReferenceMin: targetTimeS / 60 }
-    : {};
+  // flatDurationMin pinned to the target: a plan you're going to RACE off
+  // has to be evenly paced. Without it the ceiling decays with elapsed time
+  // within the simulation, so the splits started at the athlete's
+  // few-minute power and faded monotonically -- on a dead-flat marathon
+  // that showed up as a 3:51/km opening 10k drifting out to 5:41/km with no
+  // terrain to explain any of it. The total is fixed by targetTimeS either
+  // way; this only decides how it's distributed.
+  const simOpts: SimulateOptions = {
+    flatDurationMin: targetTimeS / 60,
+    ...((inputs.anaerobicCapacityMin ?? 0) > 0 ? { anaerobicBoostReferenceMin: targetTimeS / 60 } : {}),
+  };
 
   if (fastest.result.finishTimeS > targetTimeS) {
     // Target is faster than the theoretical ceiling (theta=1) -- rather than

@@ -644,22 +644,23 @@ describe("findThetaForTargetTime", () => {
     expect(result.finishTimeS).toBeGreaterThan(absurdTarget); // still didn't reach it -- honestly reported, not faked
   });
 
-  it("falls back to the theta=1 ceiling when the course bonks before reaching any faster-than-ceiling theta", () => {
-    // Fuel-limited: even theta=1 is already right at the edge, so pushing
-    // above it can only bonk sooner, never help -- the above-ceiling search
-    // should find nothing feasible and fall back to the plain ceiling.
-    const fuelLimited = baseInputs({
-      segments: makeSegments(3000, 50, 0), // 150km
-      fueling: { intakeGPerH: 40 },
-      glycogenStoreG: 400,
-    });
-    const fastest = findSustainableTheta(fuelLimited);
-    expect(fastest.result.feasible).toBe(true);
-    const fasterThanCeilingTarget = fastest.result.finishTimeS * 0.9;
+  it("reports the fastest real attempt rather than a false match when the target is unreachable", () => {
+    // The contract that matters: never silently report success for a target
+    // the athlete cannot actually hit. (This used to be phrased around a
+    // fuel-limited course bonking above the ceiling, which no longer
+    // reproduces: with even pacing the ceiling self-selects a sustainable
+    // effort, so that course has fuel headroom above theta=1.)
+    const course = baseInputs();
+    const ceiling = findFlatPacedFinishTime(course);
+    expect(ceiling.result.feasible).toBe(true);
+    const impossibleTarget = ceiling.result.finishTimeS * 0.01;
 
-    const { theta, result } = findThetaForTargetTime(fuelLimited, fasterThanCeilingTarget);
-    expect(theta).toBe(fastest.theta);
-    expect(result).toEqual(fastest.result);
+    const { theta, result } = findThetaForTargetTime(course, impossibleTarget);
+    expect(result.feasible).toBe(true);
+    // Did not pretend to reach it...
+    expect(result.finishTimeS).toBeGreaterThan(impossibleTarget);
+    // ...but did genuinely search above the ceiling before giving up.
+    expect(theta).toBeGreaterThan(1);
   });
 
   it("caps out at the gentlest feasible pace when the target is far slower than anything reachable", () => {
@@ -669,8 +670,11 @@ describe("findThetaForTargetTime", () => {
     // Low enough theta stalls (infeasible for a different reason than
     // bonking -- see simulate's docs), so there's a real floor on how slow
     // a plan this knob can produce; an even-slower target must cap there.
-    const veryFarTarget = fastest.result.finishTimeS * 50;
-    const evenFartherTarget = fastest.result.finishTimeS * 200;
+    // Far enough out that the gentlest reachable pace really is the binding
+    // constraint. Even pacing reaches slower plans than the old decaying
+    // target did, so this needs to be further out than it once was.
+    const veryFarTarget = fastest.result.finishTimeS * 1000;
+    const evenFartherTarget = fastest.result.finishTimeS * 5000;
 
     const capped = findThetaForTargetTime(course, veryFarTarget);
     const evenFarther = findThetaForTargetTime(course, evenFartherTarget);
@@ -691,5 +695,49 @@ describe("findThetaForTargetTime", () => {
     const far = findThetaForTargetTime(course, farTarget);
     expect(far.theta).toBeLessThan(near.theta);
     expect(far.result.finishTimeS).toBeGreaterThan(near.result.finishTimeS);
+  });
+});
+
+describe("even pacing on a flat course", () => {
+  /** Flat 42.2km -- the case that exposed the front-loading: with no terrain
+   * at all, any variation in split pace has to come from the model. */
+  const marathon = () => baseInputs({ segments: makeSegments(844, 50, 0) });
+
+  const splitPaces = (result: { segments: { cumulativeTimeS: number; cumulativeDistance3D: number }[] }) => {
+    const paces: number[] = [];
+    for (let km = 10; km <= 40; km += 10) {
+      const at = result.segments.find((s) => s.cumulativeDistance3D >= km * 1000)!;
+      const before = result.segments.find((s) => s.cumulativeDistance3D >= (km - 10) * 1000)!;
+      paces.push((at.cumulativeTimeS - before.cumulativeTimeS) / 60 / 10);
+    }
+    return paces;
+  };
+
+  it("holds an even pace across a dead-flat marathon", () => {
+    const paces = splitPaces(findFlatPacedFinishTime(marathon()).result);
+    const slowest = Math.max(...paces);
+    const fastest = Math.min(...paces);
+    // Within 2%: no terrain, so there is nothing legitimate to vary.
+    expect(slowest / fastest).toBeLessThan(1.02);
+  });
+
+  it("front-loads badly under the old constant-fraction-of-a-decaying-ceiling model", () => {
+    // Pins WHY the switch happened: findSustainableTheta evaluates the
+    // fatigue curve at each segment's own elapsed time, so the target power
+    // falls monotonically and the plan opens far too fast. Kept as a
+    // regression guard -- if this ever stops front-loading, the reason the
+    // plan uses the flat-paced solver has gone away.
+    const paces = splitPaces(findSustainableTheta(marathon()).result);
+    expect(paces[paces.length - 1] / paces[0]).toBeGreaterThan(1.2);
+    for (let i = 1; i < paces.length; i++) expect(paces[i]).toBeGreaterThan(paces[i - 1]);
+  });
+
+  it("paces a target finish time evenly rather than banking time early", () => {
+    const course = marathon();
+    const ceiling = findFlatPacedFinishTime(course);
+    // A touch easier than the ceiling, so it is comfortably reachable.
+    const target = ceiling.result.finishTimeS * 1.1;
+    const paces = splitPaces(findThetaForTargetTime(course, target).result);
+    expect(Math.max(...paces) / Math.min(...paces)).toBeLessThan(1.02);
   });
 });
