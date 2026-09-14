@@ -220,3 +220,66 @@ export function suggestRunsForFit(runs: StoredRun[], candidateCount = DEFAULT_CA
 
   return { vo2max, durability, durationSpread, namedRace };
 }
+
+/** Round-robin across several lists (one pick from each in turn) instead of
+ * concatenating them, so a bucket with a big pool (e.g. vo2max candidates)
+ * can't crowd out every pick from a smaller one (e.g. duration-spread) just
+ * by coming first in a plain concat-then-slice. */
+function interleave<T>(lists: T[][]): T[] {
+  const result: T[] = [];
+  const maxLen = Math.max(0, ...lists.map((l) => l.length));
+  for (let i = 0; i < maxLen; i++) {
+    for (const list of lists) {
+      if (i < list.length) result.push(list[i]);
+    }
+  }
+  return result;
+}
+
+/**
+ * Which runs to newly mark for auto-fetch, given everything already in the
+ * library. `totalCap` bounds the LIFETIME marked set, not one pass: runs
+ * already marked (fetched or not) are counted against it first, and only
+ * the remaining budget is spent.
+ *
+ * That distinction is the whole point of this function. Bounding a single
+ * pass instead let the marked set ratchet without limit: every run that
+ * downloaded successfully dropped out of suggestRunsForFit's `unfetched`
+ * pool, freeing its slot for the next-ranked run, which the next pass then
+ * marked. The set grew by roughly one run per success and "needs to
+ * download N" refilled itself forever.
+ *
+ * suggestions.namedRace deliberately gets no budget here. It used to get
+ * one, additive to `totalCap`, on the reasoning that real races are a
+ * small and categorically more valuable population. But namedRace is the
+ * bare title heuristic (anything not called "Morning Run"), so for an
+ * athlete who names their workouts it matches nearly the whole library and
+ * saturates its own cap -- 60 additive to 60 is how a library reached 122
+ * marked runs. raceCandidates.ts's own doc already says that heuristic is
+ * a SUGGESTION and never a gate, and confirming a race in the UI fetches
+ * that run immediately, ahead of this speculative batch entirely.
+ */
+export function selectFetchCandidateIds(
+  runs: StoredRun[],
+  totalCap: number,
+  candidateCount?: number,
+): string[] {
+  const budget = totalCap - runs.filter((r) => r.wantsFullData).length;
+  if (budget <= 0) return [];
+
+  const suggestions = suggestRunsForFit(runs, candidateCount);
+  const interleaved = interleave([suggestions.vo2max, suggestions.durability, suggestions.durationSpread]);
+
+  // Deduped before the budget is spent: the buckets overlap (a long run can
+  // be both a durability and a duration-spread pick), and counting one run
+  // twice would silently under-fill the batch.
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const r of interleaved) {
+    if (ids.length >= budget) break;
+    if (r.wantsFullData || seen.has(r.id)) continue;
+    seen.add(r.id);
+    ids.push(r.id);
+  }
+  return ids;
+}

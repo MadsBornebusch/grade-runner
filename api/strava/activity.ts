@@ -32,6 +32,22 @@ export default handleErrors(async (req: IncomingMessage, res: ServerResponse) =>
       sendJson(res, 429, { error: "Strava rate limit reached" });
       return;
     }
+    // Forward the upstream status rather than collapsing everything to a
+    // generic 502. The client needs to tell "this will never work" (404 --
+    // deleted upstream, or not visible to this athlete) from "try again"
+    // (a real upstream fault), and "your session expired" (401) from both;
+    // as one 502 they were indistinguishable, so a permanently-dead
+    // activity consumed the full three-attempt retry backoff and an
+    // expired token looked like a flaky network.
+    const upstream = !detailRes.ok ? detailRes.status : streamsRes.status;
+    if (upstream === 401 || upstream === 403) {
+      sendJson(res, 401, { error: "Your Strava session expired. Reconnect Strava and try again." });
+      return;
+    }
+    if (upstream === 404) {
+      sendJson(res, 404, { error: "This activity is no longer available on Strava." });
+      return;
+    }
     sendJson(res, 502, { error: "Failed to fetch activity from Strava" });
     return;
   }

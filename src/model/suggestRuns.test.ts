@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StoredRun } from "../storage/runLibrary";
-import { suggestRunsForFit } from "./suggestRuns";
+import { selectFetchCandidateIds, suggestRunsForFit } from "./suggestRuns";
 
 function makeRun(overrides: Partial<StoredRun> = {}): StoredRun {
   return {
@@ -167,5 +167,84 @@ describe("suggestRunsForFit", () => {
       const races = Array.from({ length: 5 }, (_, i) => makeRun({ id: `race-${i}`, name: `Race ${i}` }));
       expect(suggestRunsForFit(races, 2).namedRace).toHaveLength(2);
     });
+  });
+});
+
+describe("selectFetchCandidateIds", () => {
+  // A library that looks like the one that produced the bug: plenty of
+  // runs, all renamed by the athlete, so the namedRace title heuristic
+  // matches every single one.
+  function namedLibrary(count: number, overrides: (i: number) => Partial<StoredRun> = () => ({})) {
+    return Array.from({ length: count }, (_, i) =>
+      makeRun({
+        id: `run-${i}`,
+        name: `Tempo w/ the club ${i}`,
+        durationS: 1800 + i * 300,
+        distanceKm: 8 + i,
+        avgHeartRate: 150 + (i % 20),
+        ...overrides(i),
+      }),
+    );
+  }
+
+  it("never marks more than the cap, even when every run has a real-looking name", () => {
+    // The reported bug: namedRace had its own budget on top of the cap, and
+    // the title heuristic matches any renamed run, so a 200-run library of
+    // named workouts marked ~2x the cap (122 against a cap of 60).
+    const ids = selectFetchCandidateIds(namedLibrary(200), 60, 60);
+    expect(ids.length).toBeLessThanOrEqual(60);
+  });
+
+  it("counts runs already marked against the cap, so the marked set converges", () => {
+    const runs = namedLibrary(200).map((r, i) => (i < 55 ? { ...r, wantsFullData: true } : r));
+    expect(selectFetchCandidateIds(runs, 60, 60)).toHaveLength(5);
+  });
+
+  it("marks nothing once the cap is already spent", () => {
+    const runs = namedLibrary(200).map((r, i) => (i < 60 ? { ...r, wantsFullData: true } : r));
+    expect(selectFetchCandidateIds(runs, 60, 60)).toEqual([]);
+  });
+
+  it("marks nothing when the library is already over the cap", () => {
+    // What this athlete's library is in right now: 122 already marked
+    // against a cap of 60. The fix has to stop the set growing, not go
+    // negative or throw.
+    const runs = namedLibrary(200).map((r, i) => (i < 122 ? { ...r, wantsFullData: true } : r));
+    expect(selectFetchCandidateIds(runs, 60, 60)).toEqual([]);
+  });
+
+  it("does not ratchet: downloading marked runs must not free slots for new ones", () => {
+    // The loop the athlete actually saw. Every successful download drops a
+    // run out of suggestRunsForFit's `unfetched` pool; if the cap only
+    // bounded a single pass, the freed slot went to the next-ranked run on
+    // the next Settings open, and "needs to download N" refilled forever.
+    let runs: StoredRun[] = namedLibrary(200);
+    const marked = new Set(selectFetchCandidateIds(runs, 60, 60));
+    expect(marked.size).toBe(60);
+    runs = runs.map((r) => (marked.has(r.id) ? { ...r, wantsFullData: true } : r));
+
+    // Half of them finish downloading, then Settings is reopened (which
+    // re-runs the marking).
+    let downloaded = 0;
+    runs = runs.map((r) => (r.wantsFullData && downloaded++ < 30 ? { ...r, points: [] } : r));
+    expect(selectFetchCandidateIds(runs, 60, 60)).toEqual([]);
+  });
+
+  it("never re-marks a run that is already marked", () => {
+    const runs = namedLibrary(100).map((r, i) => (i % 2 === 0 ? { ...r, wantsFullData: true } : r));
+    const already = new Set(runs.filter((r) => r.wantsFullData).map((r) => r.id));
+    expect(selectFetchCandidateIds(runs, 100, 60).some((id) => already.has(id))).toBe(false);
+  });
+
+  it("does not spend two budget slots on one run picked by two buckets", () => {
+    // A single long run is both the durability pick and the duration-spread
+    // anchor; counting it twice would silently under-fill the batch.
+    const runs = [
+      makeRun({ id: "ultra", name: "Soria Moria 168", durationS: 24 * 3600, distanceKm: 168 }),
+      ...namedLibrary(20, () => ({})),
+    ];
+    const ids = selectFetchCandidateIds(runs, 10, 60);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toHaveLength(10);
   });
 });

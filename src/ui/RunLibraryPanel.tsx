@@ -9,7 +9,7 @@ import {
   type EffortTrendPoint,
   type TauConfidenceInterval,
 } from "../model/pacingFit";
-import { DURABILITY_MIN_DURATION_S, suggestRunsForFit } from "../model/suggestRuns";
+import { DURABILITY_MIN_DURATION_S, selectFetchCandidateIds } from "../model/suggestRuns";
 import { dedupeStoredRuns } from "../model/dedupeRuns";
 import { splitAtTransitGaps } from "../gpx/transitGap";
 import { fitHrToPowerCalibrationFromThresholds, predictHeartRateFromPower } from "../model/hrCalibration";
@@ -85,14 +85,22 @@ interface RunLibraryPanelProps {
  * has enough of its own pool to pick a good, diverse set from before that
  * final cap trims the combined list down. */
 const AUTO_FETCH_CANDIDATE_COUNT = 60;
-/** The REAL ceiling on how many runs get auto-fetched in one pass, across
- * all three suggestion buckets combined -- suggestRunsForFit's own
- * candidateCount only bounds each bucket independently, so passing it
+/** The REAL ceiling on how many runs get auto-fetched, across all
+ * suggestion buckets combined -- suggestRunsForFit's own candidateCount
+ * only bounds each bucket independently, so passing it
  * AUTO_FETCH_CANDIDATE_COUNT alone still let the deduped union balloon to
  * up to 3x that (a real 280-summary backfill produced 138 candidates, not
  * 60). This total is enforced by interleaving picks round-robin across the
- * three buckets before truncating, so a big vo2max pool can't crowd out
- * the durability/duration-spread picks the tau fit actually needs. */
+ * buckets before truncating, so a big vo2max pool can't crowd out
+ * the durability/duration-spread picks the tau fit actually needs.
+ *
+ * This is a cap on the LIFETIME marked set, not on one pass. Counting only
+ * the current pass was the bug behind a library that grew to 122 marked
+ * runs: every run that downloaded successfully dropped out of
+ * suggestRunsForFit's `unfetched` pool, freeing its slot for the next-
+ * ranked run, which the next Settings open then marked. The marked set
+ * ratcheted up by roughly one new run per success and never converged, so
+ * "needs to download N" refilled itself forever. */
 const AUTO_FETCH_TOTAL_CAP = 60;
 
 const DEFAULT_HALF_LIFE_DAYS = 75;
@@ -146,22 +154,6 @@ function saveLastBackfillDate(dateInput: string): void {
  * records which tier won, purely to drive the "applied automatically" copy
  * below; the two fit objects themselves are still shown in full for
  * diagnostics regardless of which one was actually applied. */
-
-/** Round-robin across several lists (one pick from each in turn) instead of
- * concatenating them -- used to combine the three suggestion buckets before
- * truncating to AUTO_FETCH_TOTAL_CAP, so a bucket with a big pool (e.g.
- * vo2max candidates) can't crowd out every pick from a smaller one (e.g.
- * duration-spread) just by coming first in a plain concat-then-slice. */
-function interleave<T>(lists: T[][]): T[] {
-  const result: T[] = [];
-  const maxLen = Math.max(0, ...lists.map((l) => l.length));
-  for (let i = 0; i < maxLen; i++) {
-    for (const list of lists) {
-      if (i < list.length) result.push(list[i]);
-    }
-  }
-  return result;
-}
 
 /** "just now" / "3 hours ago" / "2 days ago" -- so a stale fit is obvious
  * at a glance rather than needing the timestamp read carefully. */
@@ -246,21 +238,7 @@ export function RunLibraryPanel({
   const markNewFetchCandidates = useCallback(async () => {
     const freshRuns = await listStoredRuns();
     const { kept } = dedupeStoredRuns(freshRuns);
-    const suggestions = suggestRunsForFit(kept, AUTO_FETCH_CANDIDATE_COUNT);
-    // namedRace gets its OWN budget, additive to AUTO_FETCH_TOTAL_CAP below
-    // rather than competing for a slot inside it -- real races are a small
-    // (typically well under a dozen), categorically more valuable
-    // population than another vo2max/durability/spread pick, so adding
-    // this bucket must never shrink how many of THOSE get fetched.
-    const interleaved = interleave([suggestions.vo2max, suggestions.durability, suggestions.durationSpread]);
-    const byId = new Map<string, StoredRun>();
-    for (const r of suggestions.namedRace) byId.set(r.id, r);
-    for (const r of interleaved.slice(0, AUTO_FETCH_TOTAL_CAP)) {
-      if (!byId.has(r.id)) byId.set(r.id, r);
-    }
-    const candidateIds = [...byId.values()]
-      .filter((r) => !r.wantsFullData)
-      .map((r) => r.id);
+    const candidateIds = selectFetchCandidateIds(kept, AUTO_FETCH_TOTAL_CAP, AUTO_FETCH_CANDIDATE_COUNT);
     if (candidateIds.length > 0) await markRunsWantedForFetch(candidateIds);
   }, []);
 

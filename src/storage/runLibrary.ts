@@ -314,7 +314,14 @@ export async function clearStoredRuns(): Promise<void> {
 
 /** Records a failed points fetch so autoFetchRuns.ts can back off instead
  * of retrying the same doomed run on every launch. */
-export async function recordRunFetchFailure(id: string): Promise<void> {
+/** What `recordRunFetchFailure(id, true)` writes: at or above
+ * autoFetchRuns.ts's MAX_FETCH_FAILURES, so isDueForFetch drops the run
+ * from every future auto batch. Kept here (not imported from the UI layer)
+ * so storage doesn't depend on a UI module; autoFetchRuns.test.ts asserts
+ * the two stay consistent. */
+export const PERMANENT_FETCH_FAILURE_COUNT = 3;
+
+export async function recordRunFetchFailure(id: string, permanent = false): Promise<void> {
   const db = await openDb();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
@@ -325,7 +332,15 @@ export async function recordRunFetchFailure(id: string): Promise<void> {
       if (existing) {
         store.put({
           ...existing,
-          fetchFailureCount: (existing.fetchFailureCount ?? 0) + 1,
+          // A permanent failure (no GPS stream, deleted upstream, no
+          // stravaId) spends the whole retry allowance at once instead of
+          // one attempt at a time. Retrying those on the 1h/1d/1w backoff
+          // just re-asks a question whose answer cannot change, and each
+          // round put them back in the batch where they showed up as "N
+          // failed" all over again.
+          fetchFailureCount: permanent
+            ? PERMANENT_FETCH_FAILURE_COUNT
+            : (existing.fetchFailureCount ?? 0) + 1,
           lastFetchFailureAt: Date.now(),
         });
       }

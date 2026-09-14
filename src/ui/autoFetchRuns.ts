@@ -65,7 +65,7 @@ export async function ensurePointsForRun(run: StoredRun): Promise<GpxPoint[]> {
   if (run.stravaId === undefined) {
     // Nothing to fetch from, ever -- record it so this run stops being
     // re-queued on every launch (it used to be, silently and forever).
-    await recordRunFetchFailure(run.id);
+    await recordRunFetchFailure(run.id, true);
     return [];
   }
   try {
@@ -73,9 +73,26 @@ export async function ensurePointsForRun(run: StoredRun): Promise<GpxPoint[]> {
     await setStoredRunPoints(run.id, points);
     return points;
   } catch (err) {
-    await recordRunFetchFailure(run.id);
+    await recordRunFetchFailure(run.id, isPermanentFetchFailure(err));
     throw err;
   }
+}
+
+/**
+ * True when re-asking Strava for this activity can never succeed, so the
+ * run should be dropped from the auto batch now rather than after three
+ * attempts spread over a week.
+ *
+ * 422 is this app's own response for an activity with no GPS stream --
+ * a treadmill run, an indoor session, a strength workout. Those were the
+ * bulk of the "M failed" count: the auto-fetch candidate list was drawn
+ * partly from a title heuristic that matches any renamed activity, so it
+ * queued plenty of runs that never had GPS to give.
+ * 404 means deleted upstream or no longer visible to this athlete.
+ */
+export function isPermanentFetchFailure(err: unknown): boolean {
+  if (!(err instanceof StravaFetchError)) return false;
+  return err.status === 422 || err.status === 404;
 }
 
 /**
@@ -124,7 +141,9 @@ export async function runAutoFetchBatch(pending: StoredRun[], onDone: () => void
 
   const total = pending.length;
   let failures = 0;
+  let skippedNoGps = 0;
   let rateLimited = false;
+  let sessionExpired = false;
   setStatus({ running: true, progress: { done: 0, total }, error: null });
 
   for (let i = 0; i < total; i++) {
@@ -139,20 +158,41 @@ export async function runAutoFetchBatch(pending: StoredRun[], onDone: () => void
         rateLimited = true;
         break;
       }
+      if (err instanceof StravaFetchError && err.status === 401) {
+        // Same reasoning as the 429 break: with the token gone, every
+        // remaining request in the batch fails identically, and each one
+        // bumps a run's failure count for a reason that has nothing to do
+        // with that run. Stopping keeps the backoff meaningful.
+        sessionExpired = true;
+        break;
+      }
+      // Counted separately so the message can say what actually happened:
+      // these aren't failures the athlete can do anything about, and
+      // they're now marked permanently so they won't come back.
+      if (err instanceof StravaFetchError && err.status === 422) skippedNoGps++;
     }
     if (i < total - 1) await new Promise((r) => setTimeout(r, AUTO_FETCH_DELAY_MS));
   }
 
   if (rateLimited) rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
 
-  setStatus({
-    running: false,
-    progress: null,
-    error: rateLimited
-      ? `Fetched ${total - failures} of ${total} recommended runs -- Strava's rate limit kicked in. Paused; retries automatically in about 15 minutes.`
-      : failures > 0
-        ? `Fetched ${total - failures} of ${total} recommended runs -- ${failures} failed. Try again shortly.`
-        : null,
-  });
+  const fetched = total - failures;
+  const realFailures = failures - skippedNoGps;
+  let error: string | null = null;
+  if (rateLimited) {
+    error = `Fetched ${fetched} of ${total} recommended runs -- Strava's rate limit kicked in. Paused; retries automatically in about 15 minutes.`;
+  } else if (sessionExpired) {
+    error = "Your Strava session expired. Reconnect Strava in Settings, then this will pick up where it left off.";
+  } else if (realFailures > 0) {
+    const noGpsNote = skippedNoGps > 0 ? `, and skipped ${skippedNoGps} with no GPS data` : "";
+    error = `Fetched ${fetched} of ${total} recommended runs -- ${realFailures} failed${noGpsNote}. Try again shortly.`;
+  } else if (skippedNoGps > 0) {
+    // Not an error at all: indoor runs and strength sessions have nothing
+    // to download. Saying so beats the old "N failed. Try again shortly",
+    // which invited a retry that could never do anything.
+    error = `Fetched ${fetched} of ${total} recommended runs -- skipped ${skippedNoGps} with no GPS data (indoor or strength sessions). Nothing to retry.`;
+  }
+
+  setStatus({ running: false, progress: null, error });
   onDone();
 }
