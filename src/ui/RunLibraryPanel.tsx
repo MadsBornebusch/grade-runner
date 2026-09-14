@@ -764,11 +764,22 @@ export function RunLibraryPanel({
                 {formInputs.tauMin.toFixed(0)} min
               </li>
             )}
+            {/* Once the duration-ceiling envelope is live it owns descent
+                pacing outright (SolverInputs.descentPacingInCeiling): the
+                solver stops passing total distance to maxDescentSpeedMs,
+                which is what makes the curve argument reachable at all, so
+                a fitted curve stops affecting any prediction. Saying
+                "applied" here would be the same lie this panel just stopped
+                telling about f0/f_inf/tau. The fit still runs and still
+                applies for an athlete without enough confirmed races for
+                the envelope, which is why it isn't simply removed. */}
             <li>
               Descent pacing:{" "}
-              {formInputs.descentPacingCurve
-                ? `f0 ${formInputs.descentPacingCurve.f0.toFixed(2)}, f_inf ${formInputs.descentPacingCurve.fInf.toFixed(2)}, tau ${formInputs.descentPacingCurve.tauKm.toFixed(0)} km`
-                : "not fit yet -- using the built-in curve"}
+              {formInputs.durationCurve === "powerLaw"
+                ? "not in use -- your aerobic ceiling is fit from your own races, so it already accounts for how you descend"
+                : formInputs.descentPacingCurve
+                  ? `f0 ${formInputs.descentPacingCurve.f0.toFixed(2)}, f_inf ${formInputs.descentPacingCurve.fInf.toFixed(2)}, tau ${formInputs.descentPacingCurve.tauKm.toFixed(0)} km`
+                  : "not fit yet -- using the built-in curve"}
             </li>
             <li>
               Terrain cost:{" "}
