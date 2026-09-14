@@ -747,9 +747,28 @@ export function RunLibraryPanel({
         <div className="run-library__applied-summary">
           <p className="field-group-note">Currently applied</p>
           <ul>
+            {/* Which curve is live decides which numbers mean anything.
+                In powerLaw mode sustainableFraction never reads f0/fInf/
+                tau at all, so listing them unconditionally (as this used
+                to) showed an athlete three fitted-looking values the model
+                was ignoring -- and gave no way to tell which ceiling they
+                were actually predicting with. */}
+            {formInputs.durationCurve === "powerLaw" ? (
+              <li>
+                Aerobic ceiling (power law): {(formInputs.powerLawFraction60Min * 100).toFixed(1)}% for an hour,
+                exponent {formInputs.powerLawExponent.toFixed(3)}
+              </li>
+            ) : (
+              <li>
+                Aerobic ceiling (exponential): f0 {formInputs.f0.toFixed(2)}, f_inf {formInputs.fInf.toFixed(2)}, tau{" "}
+                {formInputs.tauMin.toFixed(0)} min
+              </li>
+            )}
             <li>
-              Pacing fade: f0 {formInputs.f0.toFixed(2)}, f_inf {formInputs.fInf.toFixed(2)}, tau{" "}
-              {formInputs.tauMin.toFixed(0)} min
+              Descent pacing:{" "}
+              {formInputs.descentPacingCurve
+                ? `f0 ${formInputs.descentPacingCurve.f0.toFixed(2)}, f_inf ${formInputs.descentPacingCurve.fInf.toFixed(2)}, tau ${formInputs.descentPacingCurve.tauKm.toFixed(0)} km`
+                : "not fit yet -- using the built-in curve"}
             </li>
             <li>
               Terrain cost:{" "}
