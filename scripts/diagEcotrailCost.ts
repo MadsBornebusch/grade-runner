@@ -129,11 +129,13 @@ function realizedFraction(inputs: FormInputs) {
 }
 {
   const a = realizedFraction(applied);
+  const i = realizedFraction({ ...applied, descentPacingCurve: IDENTITY });
   const u = realizedFraction({ ...applied, descentPacingCurve: UNCAPPED });
   const allowed = 0.799 * Math.pow(a.t / 60 / 60, -0.16);
   console.log(`\nceiling ALLOWS at the predicted ${hms(a.t)}: ${(allowed * 100).toFixed(1)}% of max aerobic power`);
   console.log(`solver actually SPENDS (as applied):        ${(a.frac * 100).toFixed(1)}%`);
-  console.log(`solver actually SPENDS (descent uncapped):  ${(u.frac * 100).toFixed(1)}%`);
+  console.log(`solver actually SPENDS (multiplier 1.0x):   ${(i.frac * 100).toFixed(1)}%  -> ${hms(i.t)}`);
+  console.log(`solver actually SPENDS (descent uncapped):  ${(u.frac * 100).toFixed(1)}%  -> ${hms(u.t)}`);
   console.log(`athlete's MEASURED fraction on this race:   57.8%`);
 }
 

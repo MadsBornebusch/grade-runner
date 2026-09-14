@@ -263,6 +263,12 @@ function App() {
       surfaceCostMultipliers: formInputs.surfaceCostMultipliers ?? undefined,
       anaerobicCapacityMin: formInputs.anaerobicCapacityMin,
       descentPacingCurve: formInputs.descentPacingCurve ?? undefined,
+      // durationCurve only ever becomes "powerLaw" via onApplyDurationCeiling
+      // below -- there is no manual control for it -- so it is exactly the
+      // signal that this athlete's ceiling came from the envelope fit, and
+      // therefore already prices in how they descend (see
+      // SolverInputs.descentPacingInCeiling).
+      descentPacingInCeiling: formInputs.durationCurve === "powerLaw",
     };
     lastSolverInputsRef.current = built;
     return built;
@@ -301,6 +307,7 @@ function App() {
     formInputs.unpavedCostMultiplier,
     formInputs.surfaceCostMultipliers,
     formInputs.descentPacingCurve,
+    formInputs.durationCurve,
   ]);
 
   // Even-paced, NOT findSustainableTheta. That one holds a constant fraction

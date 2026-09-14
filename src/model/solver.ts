@@ -41,6 +41,32 @@ export interface SolverInputs {
    */
   descentExposureBasis?: DescentExposureBasis;
   /**
+   * True when `ceilingParams` came from the duration-ceiling envelope fit
+   * (pacingFit.ts's fitDurationCeilingAcrossRaces) rather than from
+   * defaults, in which case the distance-scaled descent PACING multiplier
+   * must not be applied on top of it.
+   *
+   * The two would otherwise subtract the same behaviour twice. That fit's
+   * observations (runFitBatch.ts) are a time-weighted mean of
+   * grossPowerWPerKg over the athlete's ACTUAL GPS trace, descents included
+   * and costed at the speed they were really run -- so how conservatively
+   * this athlete descends a long race is already inside the fitted
+   * fraction. Applying descentPacingMultiplier as well held ~9km of
+   * Ecotrail 80's descent below the power target, so the solver realized
+   * only 49.4% of max aerobic power against the 55.1% its own ceiling had
+   * licensed, and the finish time stretched to compensate: a race the
+   * envelope is fitted to REST ON came back ~17% slow. See
+   * scripts/diagEcotrailCost.ts.
+   *
+   * Only the distance-scaled pacing term is dropped. The grade-only cap
+   * still applies: that one is a biomechanical limit on how fast anyone can
+   * control a given gradient (without it a large power budget divided by
+   * Minetti cost near its minimum implies absurd speeds -- maxDescentSpeedMs's
+   * own tests pin this), not a pacing choice the ceiling could have
+   * absorbed.
+   */
+  descentPacingInCeiling?: boolean;
+  /**
    * Flat cost multiplier applied to costOfRunning/costOfWalking on segments
    * classified unpaved (see gpx/pipeline.ts's CourseSegment.surfaceUnpaved
    * and surfaceExposure.ts's attachSurfaceData). 1 = off (default) --
@@ -265,7 +291,14 @@ export function simulate(theta: number, inputs: SolverInputs, opts: SimulateOpti
     const terrainMultiplier = perCategoryMultiplier ?? (seg.surfaceUnpaved ? unpavedCostMultiplier : 1);
     const costRun = costOfRunning(seg.gradient) * terrainMultiplier;
     const costWalk = costOfWalking(seg.gradient) * terrainMultiplier;
-    const vRun = Math.min(targetNet / costRun, maxDescentSpeedMs(seg.gradient, totalDistanceKm, inputs.descentPacingCurve));
+    // Passing totalDistanceKm undefined is what selects the grade-only cap
+    // (maxDescentSpeedMs's own doc) -- note that passing a null/undefined
+    // CURVE does not, since that argument defaults.
+    const descentPacingDistanceKm = inputs.descentPacingInCeiling ? undefined : totalDistanceKm;
+    const vRun = Math.min(
+      targetNet / costRun,
+      maxDescentSpeedMs(seg.gradient, descentPacingDistanceKm, inputs.descentPacingCurve),
+    );
     const vWalk = Math.min(walkMaxMs, targetNet / costWalk);
 
     const forceWalk =
