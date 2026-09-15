@@ -27,9 +27,12 @@ import { O2_ENERGY_EQUIVALENT_CARB_KJ_PER_L, vo2ToPower } from "./energetics";
 import { descentStepForSegment } from "./descentImpact";
 import { fitIntensityConditionedSlowdownModel } from "./intensityConditionedSlowdownFit";
 import {
+  DEFAULT_DESCENT_CAP_CURVE,
   DEFAULT_DESCENT_PACING_CURVE,
+  type DescentCapCurve,
   type DescentPacingCurve,
   descentPacingMultiplier,
+  GRADE_CLAMP,
   gradeOnlyMaxDescentSpeedMs,
 } from "./minetti";
 import type { TaggedMonotonicSegment } from "./segmentLibrary";
@@ -2121,4 +2124,198 @@ export function fitAnaerobicCapacityMin(
     return { anaerobicCapacityMin: fallbackAnaerobicCapacityMin, identifiable: false, shortestRaceMin };
   }
   return { anaerobicCapacityMin: required, identifiable: true, shortestRaceMin };
+}
+
+/**
+ * One grade band's demonstrated descending speed, pooled across every run
+ * that contributed distance to it.
+ */
+export interface DescentCapObservation {
+  /** Band midpoint gradient (negative). */
+  gradient: number;
+  /** Distance-weighted high percentile of recorded speed in this band. */
+  speedMs: number;
+  /** Total distance behind this band, in metres -- its weight and support. */
+  distanceM: number;
+}
+
+/** Band width for pooling descent segments by gradient. */
+export const DESCENT_CAP_BAND_WIDTH = 0.02;
+/**
+ * A band below this much distance is dropped. At the pipeline's 25m
+ * segments this is ~80 samples, so DESCENT_CAP_PERCENTILE sits a few
+ * samples in from the top rather than ON the single fastest one.
+ *
+ * Set from a real failure: at 300m a band held ~12 segments, its p95 was
+ * simply its maximum, and the handful of near-vertical bands an elevation
+ * trace produces (0.3-0.5km each, with "demonstrated" speeds like 4:02/km
+ * at -45%) dragged the envelope's steep anchor up until the fitted cap was
+ * FLAT -- claiming a -45% slope is as fast as a -10% one.
+ */
+export const MIN_DESCENT_CAP_BAND_DISTANCE_M = 2000;
+/**
+ * Percentile taken within each band, not the maximum. The quantity wanted
+ * is "the fastest this athlete demonstrably controls at this gradient", and
+ * the maximum of a few thousand 25m segments is a GPS spike every time.
+ * High enough to sit in the genuinely-descending-hard tail (most descent
+ * segments in any race are paced, not maximal, so a median would measure
+ * pacing rather than capability), low enough to shed outliers.
+ */
+export const DESCENT_CAP_PERCENTILE = 0.95;
+/** Anything faster than this on a descent is a GPS artifact, not a run --
+ * 8 m/s is 2:05/km, quicker than a world-record marathon on the flat. */
+const DESCENT_CAP_IMPLAUSIBLE_SPEED_MS = 8;
+/** Total descent distance (below the ramp-start grade) before any tier is
+ * trusted at all. */
+export const MIN_DESCENT_CAP_DISTANCE_M = 3000;
+/** Distance at or below STEEP_PIVOT before the clamp anchor is considered
+ * identifiable -- without it the steep end of the line is extrapolation
+ * off the shallow end, which is exactly how the default got its shape. */
+export const MIN_STEEP_DESCENT_DISTANCE_M = 800;
+const STEEP_PIVOT_GRADE = -0.2;
+const RAMP_START_GRADE = -0.04;
+
+/** Distance-weighted percentile of a set of (speed, weight) samples. */
+function weightedPercentile(samples: { speedMs: number; weightM: number }[], p: number): number {
+  const sorted = [...samples].sort((a, b) => a.speedMs - b.speedMs);
+  const total = sorted.reduce((acc, s) => acc + s.weightM, 0);
+  if (total <= 0) return 0;
+  let seen = 0;
+  for (const s of sorted) {
+    seen += s.weightM;
+    if (seen >= p * total) return s.speedMs;
+  }
+  return sorted[sorted.length - 1].speedMs;
+}
+
+/**
+ * Pools every run's descent segments into grade bands and reports the
+ * demonstrated speed in each.
+ *
+ * Deliberately fed the WIDE run pool, not just confirmed races -- unlike
+ * fitDescentPacingCurveAcrossRaces, which measures a race-day pacing
+ * CHOICE and would be diluted by training runs. This measures a physical
+ * capability, so a hard training descent is evidence of it just as much as
+ * a race one, and taking a high percentile means the extra easy-jogging
+ * distance costs nothing while the extra fast tail helps.
+ */
+export function buildDescentCapObservations(runs: CourseSegment[][]): DescentCapObservation[] {
+  const bands = new Map<number, { speedMs: number; weightM: number }[]>();
+  for (const segments of runs) {
+    for (const seg of segments) {
+      // Below the clamp the cost/cap model holds everything constant, so
+      // such a band cannot inform the curve -- and at those gradients the
+      // smoothed elevation trace is mostly noise anyway (a sustained -60%
+      // is a cliff, not a trail).
+      if (seg.paused || seg.gradient >= RAMP_START_GRADE || seg.gradient < -GRADE_CLAMP) continue;
+      if (seg.dtS === null || seg.dtS <= 0 || seg.distance3D <= 0) continue;
+      const speedMs = seg.distance3D / seg.dtS;
+      if (!(speedMs > 0) || speedMs > DESCENT_CAP_IMPLAUSIBLE_SPEED_MS) continue;
+      const band = Math.floor(seg.gradient / DESCENT_CAP_BAND_WIDTH) * DESCENT_CAP_BAND_WIDTH;
+      const list = bands.get(band);
+      if (list) list.push({ speedMs, weightM: seg.distance3D });
+      else bands.set(band, [{ speedMs, weightM: seg.distance3D }]);
+    }
+  }
+  const out: DescentCapObservation[] = [];
+  for (const [band, samples] of bands) {
+    const distanceM = samples.reduce((a, s) => a + s.weightM, 0);
+    if (distanceM < MIN_DESCENT_CAP_BAND_DISTANCE_M) continue;
+    out.push({
+      gradient: band + DESCENT_CAP_BAND_WIDTH / 2,
+      speedMs: weightedPercentile(samples, DESCENT_CAP_PERCENTILE),
+      distanceM,
+    });
+  }
+  return out.sort((a, b) => b.gradient - a.gradient);
+}
+
+export interface DescentCapFitResult {
+  curve: DescentCapCurve;
+  /** "full" = both anchors fit. "onsetOnly" = not enough steep descent to
+   * place the clamp anchor, so it is carried at the fallback's own
+   * clamp/onset ratio rather than invented. "defaults" = untouched. */
+  tier: "full" | "onsetOnly" | "defaults";
+  /** Bands that actually constrained the result (the curve touches them). */
+  bindingGradients: number[];
+  totalDescentM: number;
+  steepDescentM: number;
+  bandCount: number;
+}
+
+const ONSET_BOUNDS: [number, number] = [1.2, 7];
+const CLAMP_BOUNDS: [number, number] = [0.3, 5];
+/** Slack when testing whether the curve clears a band, in m/s. Bands are
+ * percentiles of noisy GPS, so demanding exact domination would let one
+ * band's noise set the whole curve. */
+const DESCENT_CAP_TOLERANCE_MS = 0.05;
+
+/**
+ * Fits the per-athlete descent cap as the TIGHTEST curve that still allows
+ * every grade band's demonstrated speed.
+ *
+ * An envelope rather than a least-squares fit, for the same reason
+ * fitDurationCeilingAcrossRaces is one: this is a ceiling, and a ceiling
+ * that sits below something the athlete has already done is wrong by
+ * definition, however small its residual. Least squares would happily
+ * split the difference and keep forbidding the fast bands.
+ */
+export function fitDescentCapCurve(
+  observations: DescentCapObservation[],
+  fallback: DescentCapCurve = DEFAULT_DESCENT_CAP_CURVE,
+): DescentCapFitResult {
+  const totalDescentM = observations.reduce((a, o) => a + o.distanceM, 0);
+  const steepDescentM = observations
+    .filter((o) => o.gradient <= STEEP_PIVOT_GRADE)
+    .reduce((a, o) => a + o.distanceM, 0);
+  const base = { bindingGradients: [] as number[], totalDescentM, steepDescentM, bandCount: observations.length };
+
+  if (observations.length < 2 || totalDescentM < MIN_DESCENT_CAP_DISTANCE_M) {
+    return { curve: fallback, tier: "defaults", ...base };
+  }
+  const steepIdentifiable = steepDescentM >= MIN_STEEP_DESCENT_DISTANCE_M;
+  // With no steep support the clamp anchor cannot be measured, so hold the
+  // fallback's SHAPE (its clamp/onset ratio) and let the fit move only the
+  // level. Inventing a clamp off shallow data is how the default got a
+  // steep end nobody had measured.
+  const ratio = fallback.onsetSpeedMs > 0 ? fallback.clampSpeedMs / fallback.onsetSpeedMs : 0.36;
+
+  let best: { curve: DescentCapCurve; excess: number } | null = null;
+  const STEPS = 120;
+  for (let a = 0; a <= STEPS; a++) {
+    const onsetSpeedMs = ONSET_BOUNDS[0] + ((ONSET_BOUNDS[1] - ONSET_BOUNDS[0]) * a) / STEPS;
+    const clampCandidates = steepIdentifiable
+      ? Array.from({ length: STEPS + 1 }, (_, b) => CLAMP_BOUNDS[0] + ((CLAMP_BOUNDS[1] - CLAMP_BOUNDS[0]) * b) / STEPS)
+      : [onsetSpeedMs * ratio];
+    for (const clampSpeedMs of clampCandidates) {
+      // A cap that rises as the slope steepens is not a cap.
+      if (clampSpeedMs > onsetSpeedMs) continue;
+      const curve = { onsetSpeedMs, clampSpeedMs };
+      let excess = 0;
+      let ok = true;
+      for (const o of observations) {
+        const allowed = gradeOnlyMaxDescentSpeedMs(o.gradient, curve);
+        if (!Number.isFinite(allowed)) continue;
+        if (allowed < o.speedMs - DESCENT_CAP_TOLERANCE_MS) { ok = false; break; }
+        excess += (allowed - o.speedMs) * o.distanceM;
+      }
+      if (!ok) continue;
+      if (best === null || excess < best.excess) best = { curve, excess };
+    }
+  }
+  if (best === null) return { curve: fallback, tier: "defaults", ...base };
+
+  const bindingGradients = observations
+    .filter((o) => {
+      const allowed = gradeOnlyMaxDescentSpeedMs(o.gradient, best!.curve);
+      return Number.isFinite(allowed) && allowed - o.speedMs < 3 * DESCENT_CAP_TOLERANCE_MS;
+    })
+    .map((o) => o.gradient);
+
+  return {
+    curve: best.curve,
+    tier: steepIdentifiable ? "full" : "onsetOnly",
+    ...base,
+    bindingGradients,
+  };
 }

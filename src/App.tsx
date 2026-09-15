@@ -263,6 +263,7 @@ function App() {
       surfaceCostMultipliers: formInputs.surfaceCostMultipliers ?? undefined,
       anaerobicCapacityMin: formInputs.anaerobicCapacityMin,
       descentPacingCurve: formInputs.descentPacingCurve ?? undefined,
+      descentCapCurve: formInputs.descentCapCurve ?? undefined,
       // durationCurve only ever becomes "powerLaw" via onApplyDurationCeiling
       // below -- there is no manual control for it -- so it is exactly the
       // signal that this athlete's ceiling came from the envelope fit, and
@@ -307,6 +308,7 @@ function App() {
     formInputs.unpavedCostMultiplier,
     formInputs.surfaceCostMultipliers,
     formInputs.descentPacingCurve,
+    formInputs.descentCapCurve,
     formInputs.durationCurve,
   ]);
 
@@ -804,6 +806,7 @@ function App() {
         onApplyFInf={(fInf) => setFormInputs((prev) => ({ ...prev, fInf }))}
         onApplySurfaceCostMultipliers={(surfaceCostMultipliers) => setFormInputs((prev) => ({ ...prev, surfaceCostMultipliers }))}
         onApplyDescentPacingCurve={(descentPacingCurve) => setFormInputs((prev) => ({ ...prev, descentPacingCurve }))}
+        onApplyDescentCapCurve={(descentCapCurve) => setFormInputs((prev) => ({ ...prev, descentCapCurve }))}
         onApplyDurationCeiling={(powerLawFraction60Min, powerLawExponent) =>
           // Switching to powerLaw here is the point: the fit only runs on
           // confirmed races and only applies above its support gates, so a

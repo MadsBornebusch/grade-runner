@@ -33,6 +33,9 @@ import {
   fitAnaerobicCapacityMin,
   type AnaerobicCapacityFitResult,
   fitDescentPacingCurveAcrossRaces,
+  buildDescentCapObservations,
+  fitDescentCapCurve,
+  type DescentCapFitResult,
   fitDurationCeilingAcrossRaces,
   type DurationCeilingFitResult,
   type DurationCeilingObservation,
@@ -45,7 +48,7 @@ import {
   type TauConfidenceInterval,
 } from "../model/pacingFit";
 import { fitPacingMarginAcrossRaces, type PacingMarginFitResult } from "../model/pacingMarginFit";
-import type { DescentPacingCurve } from "../model/minetti";
+import type { DescentCapCurve, DescentPacingCurve } from "../model/minetti";
 import { buildSegmentLibrary } from "../model/segmentLibrary";
 import { DURABILITY_MIN_DURATION_S } from "../model/suggestRuns";
 import { attachSurfaceData } from "../model/surfaceExposure";
@@ -172,6 +175,7 @@ export interface RunFitResult {
   hrCalibrationFit: HrPowerCalibration | null;
   marginFit: PacingMarginFitResult | null;
   descentPacingFit: DescentPacingFitResult | null;
+  descentCapFit: DescentCapFitResult | null;
   durationCeilingFit: DurationCeilingFitResult | null;
   anaerobicFit: AnaerobicCapacityFitResult | null;
   transitGapCount: number;
@@ -233,6 +237,7 @@ export interface RunFitCallbacks {
   onApplyHrCalibration: (slope: number, intercept: number) => void;
   onApplyPacingMargin: (fit: PacingMarginFitResult) => void;
   onApplyDescentPacingCurve: (curve: DescentPacingCurve) => void;
+  onApplyDescentCapCurve: (curve: DescentCapCurve) => void;
   onApplyDurationCeiling: (fraction60Min: number, exponent: number) => void;
   onApplyAnaerobicCapacityMin: (anaerobicCapacityMin: number) => void;
   onRacesFitted?: (races: EffortTrendPoint[][], raceDates: (Date | null)[]) => void;
@@ -491,6 +496,19 @@ export async function runFitBatch(
       callbacks.onApplyDescentPacingCurve(descentPacingFit.curve);
     }
 
+    // Descent-speed cap: how fast this athlete actually controls a given
+    // gradient. Built from the WIDE run pool rather than confirmed races
+    // (see buildDescentCapObservations) -- this is a capability, so a hard
+    // training descent is evidence of it too, and pooling more distance is
+    // what lets the steep bands clear their support minimum at all.
+    const descentCapFit = fitDescentCapCurve(
+      buildDescentCapObservations(libraryInputs.map((l) => l.segments)),
+      formInputs.descentCapCurve ?? undefined,
+    );
+    if (descentCapFit.tier !== "defaults") {
+      callbacks.onApplyDescentCapCurve(descentCapFit.curve);
+    }
+
     // Duration ceiling (power-law envelope) + the W'/CP capacity term that
     // sits on top of it. Fit together and in this order: W'/CP is only
     // identifiable relative to a known aerobic curve, so it chains off
@@ -545,6 +563,7 @@ export async function runFitBatch(
         hrCalibrationFit,
         marginFit,
         descentPacingFit,
+        descentCapFit,
         durationCeilingFit,
         anaerobicFit,
         transitGapCount: detectedTransitGaps,

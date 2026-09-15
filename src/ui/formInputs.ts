@@ -4,7 +4,7 @@
 import type { SurfaceCategory } from "../gpx/pipeline";
 import type { CeilingParams } from "../model/ceiling";
 import { maxAerobicPower } from "../model/ceiling";
-import type { DescentPacingCurve } from "../model/minetti";
+import type { DescentCapCurve, DescentPacingCurve } from "../model/minetti";
 import { fatOxPacePointToPowerFraction, fitCarbFractionAnchors, paceToGrossPowerWPerKg } from "../model/substrate";
 
 export interface FatOxPoint {
@@ -113,6 +113,9 @@ export interface FormInputs {
    * refuses to return a trustworthy tier until the race library spans a wide
    * enough range of distances to identify the curve at all. */
   descentPacingCurve: DescentPacingCurve | null;
+  /** Fitted max controllable descent speed by gradient (minetti.ts's
+   * DescentCapCurve); null = use the built-in default. */
+  descentCapCurve: DescentCapCurve | null;
   /** Fitted HR-to-power linear mapping (PLAN.md §11 stage 3, reworked
    * 2026-08-21 to fit raw power instead of effortFraction -- see
    * hrCalibration.ts's header doc) -- both null together means not yet
@@ -184,6 +187,7 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   unpavedCostMultiplier: 1,
   surfaceCostMultipliers: null,
   descentPacingCurve: null,
+  descentCapCurve: null,
   hrPowerCalibrationSlope: null,
   hrPowerCalibrationIntercept: null,
   pacingMargin: null,

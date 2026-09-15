@@ -4,7 +4,13 @@
 // constraints) and §6 (walk/run transition).
 
 import type { CourseSegment, SurfaceCategory } from "../gpx/pipeline";
-import { costOfRunning, costOfWalking, type DescentPacingCurve, maxDescentSpeedMs } from "./minetti";
+import {
+  costOfRunning,
+  costOfWalking,
+  type DescentCapCurve,
+  type DescentPacingCurve,
+  maxDescentSpeedMs,
+} from "./minetti";
 import { grossToNet, netToGross } from "./energetics";
 import { anaerobicCapacityMultiplier, type CeilingParams, ceilingPower, maxAerobicPower, sustainableFraction } from "./ceiling";
 import type { DescentExposureBasis } from "./pacingFit";
@@ -66,6 +72,15 @@ export interface SolverInputs {
    * absorbed.
    */
   descentPacingInCeiling?: boolean;
+  /**
+   * This athlete's own grade-to-max-controllable-descent-speed curve
+   * (pacingFit.ts's fitDescentCapCurve). Omitted = minetti.ts's default,
+   * which is one other athlete's single 55km ultra and is provably too
+   * tight for a fast descender: on this repo's own athlete it forbade
+   * speeds they sustained in the two races their aerobic ceiling rests on,
+   * costing ~9% on both predictions.
+   */
+  descentCapCurve?: DescentCapCurve;
   /**
    * Flat cost multiplier applied to costOfRunning/costOfWalking on segments
    * classified unpaved (see gpx/pipeline.ts's CourseSegment.surfaceUnpaved
@@ -297,7 +312,7 @@ export function simulate(theta: number, inputs: SolverInputs, opts: SimulateOpti
     const descentPacingDistanceKm = inputs.descentPacingInCeiling ? undefined : totalDistanceKm;
     const vRun = Math.min(
       targetNet / costRun,
-      maxDescentSpeedMs(seg.gradient, descentPacingDistanceKm, inputs.descentPacingCurve),
+      maxDescentSpeedMs(seg.gradient, descentPacingDistanceKm, inputs.descentPacingCurve, inputs.descentCapCurve),
     );
     const vWalk = Math.min(walkMaxMs, targetNet / costWalk);
 

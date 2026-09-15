@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import type { SurfaceCategory } from "../gpx/pipeline";
 import type { EffortTrendPoint } from "../model/pacingFit";
 import type { PacingMarginFitResult } from "../model/pacingMarginFit";
-import type { DescentPacingCurve } from "../model/minetti";
+import type { DescentCapCurve, DescentPacingCurve } from "../model/minetti";
 import { AthleteFields } from "./InputsPanel";
 import { RunLibraryPanel } from "./RunLibraryPanel";
 import { StravaConnectionStatus } from "./StravaConnectionStatus";
@@ -19,6 +19,7 @@ interface SettingsModalProps {
   onApplyHrCalibration: (slope: number, intercept: number) => void;
   onApplyPacingMargin: (fit: PacingMarginFitResult) => void;
   onApplyDescentPacingCurve: (curve: DescentPacingCurve) => void;
+  onApplyDescentCapCurve: (curve: DescentCapCurve) => void;
   onApplyDurationCeiling: (fraction60Min: number, exponent: number) => void;
   onApplyAnaerobicCapacityMin: (anaerobicCapacityMin: number) => void;
   onAddVo2MaxEntry: (entry: Vo2MaxEntry) => void;
@@ -45,6 +46,7 @@ export function SettingsModal({
   onApplyHrCalibration,
   onApplyPacingMargin,
   onApplyDescentPacingCurve,
+  onApplyDescentCapCurve,
   onApplyDurationCeiling,
   onApplyAnaerobicCapacityMin,
   onAddVo2MaxEntry,
@@ -98,6 +100,7 @@ export function SettingsModal({
             onApplyHrCalibration={onApplyHrCalibration}
             onApplyPacingMargin={onApplyPacingMargin}
             onApplyDescentPacingCurve={onApplyDescentPacingCurve}
+            onApplyDescentCapCurve={onApplyDescentCapCurve}
             onApplyDurationCeiling={onApplyDurationCeiling}
             onApplyAnaerobicCapacityMin={onApplyAnaerobicCapacityMin}
             onAddVo2MaxEntry={onAddVo2MaxEntry}

@@ -175,6 +175,39 @@ const DESCENT_LIMIT_SPEED_AT_ONSET_MS = 2.8;
 const DESCENT_LIMIT_SPEED_AT_CLAMP_MS = 1.0;
 
 /**
+ * The two genuinely calibrated points of gradeOnlyMaxDescentSpeedMs, as a
+ * per-athlete parameter. (The ramp-start speed above is deliberately NOT
+ * here -- it is a continuity device, not a calibration point, and is
+ * non-binding by construction.)
+ *
+ * How fast someone can control a steep descent is exactly the kind of thing
+ * that varies hugely between athletes, and the defaults' own doc says so:
+ * they come from ONE recorded 55km ultra and are "a reasonable default, not
+ * a precise universal figure". Left unfitted they are provably wrong for a
+ * given athlete in the binding direction -- on this athlete's own races the
+ * default cap forbade 3:44/km at -12..-8% (it allows 5:24/km) and 7:06/km
+ * below -18% (it allows 7:54/km), both sustained in the very races their
+ * aerobic ceiling is fitted to rest on, which made those races predict ~9%
+ * slow. See scripts/diagDescentCapVsReality.ts.
+ */
+export interface DescentCapCurve {
+  /** Max controllable speed at the onset grade (-10%), m/s. */
+  onsetSpeedMs: number;
+  /** Max controllable speed at the steepest clamped grade (-45%), m/s. */
+  clampSpeedMs: number;
+}
+
+export const DEFAULT_DESCENT_CAP_CURVE: DescentCapCurve = {
+  onsetSpeedMs: DESCENT_LIMIT_SPEED_AT_ONSET_MS,
+  clampSpeedMs: DESCENT_LIMIT_SPEED_AT_CLAMP_MS,
+};
+
+/** The grades the two fitted parameters are pinned to -- exported so the
+ * fit states its own anchors rather than re-deriving them. */
+export const DESCENT_CAP_ONSET_GRADE = DESCENT_LIMIT_ONSET_GRADE;
+export const DESCENT_CAP_CLAMP_GRADE = -GRADE_CLAMP;
+
+/**
  * Max running speed on a descent, independent of metabolic cost -- reflects
  * biomechanical/technical control limits rather than energy availability.
  * No limit above the ramp-start grade (mild downhill is genuinely both
@@ -185,15 +218,20 @@ const DESCENT_LIMIT_SPEED_AT_CLAMP_MS = 1.0;
  * pieces, not one step), then continues the original, separately
  * calibrated onset-to-clamp line unchanged.
  */
-export function gradeOnlyMaxDescentSpeedMs(i: number): number {
+export function gradeOnlyMaxDescentSpeedMs(i: number, cap: DescentCapCurve = DEFAULT_DESCENT_CAP_CURVE): number {
   if (i >= DESCENT_LIMIT_RAMP_START_GRADE) return Infinity;
+  // The ramp start stays at its fixed, deliberately generous speed: a
+  // fitted onset above it would otherwise invert the ramp and make the cap
+  // RISE as the descent steepens, so take the more permissive of the two
+  // rather than let a fast descender produce a non-monotonic curve.
+  const rampStart = Math.max(DESCENT_LIMIT_SPEED_AT_RAMP_START_MS, cap.onsetSpeedMs);
   if (i >= DESCENT_LIMIT_ONSET_GRADE) {
     const t = (i - DESCENT_LIMIT_RAMP_START_GRADE) / (DESCENT_LIMIT_ONSET_GRADE - DESCENT_LIMIT_RAMP_START_GRADE);
-    return DESCENT_LIMIT_SPEED_AT_RAMP_START_MS + (DESCENT_LIMIT_SPEED_AT_ONSET_MS - DESCENT_LIMIT_SPEED_AT_RAMP_START_MS) * t;
+    return rampStart + (cap.onsetSpeedMs - rampStart) * t;
   }
   const clamped = Math.max(-GRADE_CLAMP, i);
   const t = (clamped - DESCENT_LIMIT_ONSET_GRADE) / (-GRADE_CLAMP - DESCENT_LIMIT_ONSET_GRADE);
-  return DESCENT_LIMIT_SPEED_AT_ONSET_MS + (DESCENT_LIMIT_SPEED_AT_CLAMP_MS - DESCENT_LIMIT_SPEED_AT_ONSET_MS) * t;
+  return cap.onsetSpeedMs + (cap.clampSpeedMs - cap.onsetSpeedMs) * t;
 }
 
 /**
@@ -273,8 +311,13 @@ export function descentPacingMultiplier(
  * likewise defaults to DEFAULT_DESCENT_PACING_CURVE when this athlete has
  * no fitted one.
  */
-export function maxDescentSpeedMs(i: number, totalDistanceKm?: number, curve?: DescentPacingCurve): number {
-  const cap = gradeOnlyMaxDescentSpeedMs(i);
+export function maxDescentSpeedMs(
+  i: number,
+  totalDistanceKm?: number,
+  curve?: DescentPacingCurve,
+  capCurve?: DescentCapCurve,
+): number {
+  const cap = gradeOnlyMaxDescentSpeedMs(i, capCurve);
   if (totalDistanceKm === undefined || !Number.isFinite(cap)) return cap;
   return cap * descentPacingMultiplier(totalDistanceKm, curve);
 }

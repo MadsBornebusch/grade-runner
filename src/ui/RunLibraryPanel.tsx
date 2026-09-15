@@ -29,10 +29,11 @@ import { MIN_MARGIN_FIT_RACES, type PacingMarginFitResult } from "../model/pacin
 import {
   MIN_DESCENT_DISTANCE_SPAN_RATIO,
   MIN_DESCENT_PACING_RACES,
+  MIN_DESCENT_CAP_DISTANCE_M,
   MIN_DURATION_CEILING_RACES,
   MIN_DURATION_CEILING_SPAN_RATIO,
 } from "../model/pacingFit";
-import type { DescentPacingCurve } from "../model/minetti";
+import type { DescentCapCurve, DescentPacingCurve } from "../model/minetti";
 import { resolveCeilingParams, resolveGlycogenStoreG, resolveLt1Lt2Fractions, type FormInputs, type Vo2MaxEntry } from "./formInputs";
 import {
   ensurePointsForRun,
@@ -62,6 +63,7 @@ interface RunLibraryPanelProps {
   onApplyHrCalibration: (slope: number, intercept: number) => void;
   onApplyPacingMargin: (fit: PacingMarginFitResult) => void;
   onApplyDescentPacingCurve: (curve: DescentPacingCurve) => void;
+  onApplyDescentCapCurve: (curve: DescentCapCurve) => void;
   onApplyDurationCeiling: (fraction60Min: number, exponent: number) => void;
   onApplyAnaerobicCapacityMin: (anaerobicCapacityMin: number) => void;
   onAddVo2MaxEntry: (entry: Vo2MaxEntry) => void;
@@ -102,6 +104,14 @@ const AUTO_FETCH_CANDIDATE_COUNT = 60;
  * ratcheted up by roughly one new run per success and never converged, so
  * "needs to download N" refilled itself forever. */
 const AUTO_FETCH_TOTAL_CAP = 60;
+
+/** m/s as a min/km pace string -- the descent cap is stored as a speed but
+ * is only legible to a runner as a pace. */
+function paceFromMs(speedMs: number): string {
+  if (!(speedMs > 0)) return "--";
+  const s = 1000 / speedMs;
+  return `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+}
 
 const DEFAULT_HALF_LIFE_DAYS = 75;
 /** Only the strongest few estimates are shown -- see vo2MaxEstimates below
@@ -175,6 +185,7 @@ export function RunLibraryPanel({
   onApplySurfaceCostMultipliers,
   onApplyPacingMargin,
   onApplyDescentPacingCurve,
+  onApplyDescentCapCurve,
   onApplyDurationCeiling,
   onApplyAnaerobicCapacityMin,
   onApplyHrCalibration,
@@ -199,6 +210,7 @@ export function RunLibraryPanel({
   const pacingMarginFitResult = runFitStatus.result?.marginFit ?? null;
   const descentPacingFitResult = runFitStatus.result?.descentPacingFit ?? null;
   const durationCeilingFitResult = runFitStatus.result?.durationCeilingFit ?? null;
+  const descentCapFitResult = runFitStatus.result?.descentCapFit ?? null;
   const anaerobicFitResult = runFitStatus.result?.anaerobicFit ?? null;
   const safeFitTier = runFitStatus.result?.safeFitTier ?? null;
   const transitGapCount = runFitStatus.result?.transitGapCount ?? 0;
@@ -536,6 +548,7 @@ export function RunLibraryPanel({
       onApplyHrCalibration,
       onApplyPacingMargin,
       onApplyDescentPacingCurve,
+      onApplyDescentCapCurve,
       onApplyDurationCeiling,
       onApplyAnaerobicCapacityMin,
       onRacesFitted,
@@ -773,6 +786,12 @@ export function RunLibraryPanel({
                 telling about f0/f_inf/tau. The fit still runs and still
                 applies for an athlete without enough confirmed races for
                 the envelope, which is why it isn't simply removed. */}
+            <li>
+              Descent speed cap:{" "}
+              {formInputs.descentCapCurve
+                ? `${paceFromMs(formInputs.descentCapCurve.onsetSpeedMs)}/km at -10%, ${paceFromMs(formInputs.descentCapCurve.clampSpeedMs)}/km at -45%`
+                : "not fit yet -- using the built-in curve"}
+            </li>
             <li>
               Descent pacing:{" "}
               {formInputs.durationCurve === "powerLaw"
@@ -1039,6 +1058,51 @@ export function RunLibraryPanel({
             </tbody>
           </table>
           <p className="field-group-note">Applied automatically -- {pacingMarginFitResult.raceCount} confirmed races cleared the minimum to fit this curve.</p>
+        </div>
+      )}
+
+      {descentCapFitResult && (
+        <div className="run-library__experimental-fit">
+          <p className="field-group-note">Descent speed cap -- how fast you control a slope</p>
+          <p className="field-group-help">
+            The fastest you demonstrably descend at a given gradient, fitted as an envelope over every downhill
+            segment in your library -- the tightest curve that still allows what you have actually run. This is a
+            control limit, not an effort one: it is what stops a big power budget from implying a downhill speed
+            nobody could hold. The built-in default came from one other athlete's single 55 km ultra.
+          </p>
+          {descentCapFitResult.tier === "defaults" ? (
+            <p className="field-group-help">
+              NOT APPLIED -- only {(descentCapFitResult.totalDescentM / 1000).toFixed(1)} km of descent across{" "}
+              {descentCapFitResult.bandCount} gradient bands, below the{" "}
+              {(MIN_DESCENT_CAP_DISTANCE_M / 1000).toFixed(0)} km minimum. Using the built-in curve.
+            </p>
+          ) : (
+            <>
+              <p className="field-group-help">
+                Fit from {(descentCapFitResult.totalDescentM / 1000).toFixed(0)} km of descent across{" "}
+                {descentCapFitResult.bandCount} gradient bands:{" "}
+                <strong>{paceFromMs(descentCapFitResult.curve.onsetSpeedMs)}/km at -10%</strong>, easing to{" "}
+                <strong>{paceFromMs(descentCapFitResult.curve.clampSpeedMs)}/km at -45%</strong>
+                {descentCapFitResult.bindingGradients.length > 0 && (
+                  <>
+                    {" "}
+                    -- set by your descending at{" "}
+                    {descentCapFitResult.bindingGradients
+                      .map((g) => `${(g * 100).toFixed(0)}%`)
+                      .join(", ")}
+                    .
+                  </>
+                )}
+              </p>
+              {descentCapFitResult.tier === "onsetOnly" && (
+                <p className="field-group-help">
+                  Only {(descentCapFitResult.steepDescentM / 1000).toFixed(1)} km of your descending is steeper than
+                  -20%, which is not enough to measure the steep end independently -- it is carried at the default
+                  curve's shape. Run more genuinely steep downhill to pin it down.
+                </p>
+              )}
+            </>
+          )}
         </div>
       )}
 
