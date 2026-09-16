@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { maxDescentSpeedMs } from "./minetti";
 import type { CourseSegment } from "../gpx/pipeline";
-import { findFlatPacedFinishTime, findSustainableTheta, findThetaForTargetTime, simulate, type SolverInputs } from "./solver";
+import {
+  findFlatPacedFinishTime,
+  findSustainableTheta,
+  findThetaForTargetTime,
+  simulate,
+  type SimulationResult,
+  type SolverInputs,
+} from "./solver";
 
 function makeSegments(n: number, segLenM: number, gradient: number): CourseSegment[] {
   const segments: CourseSegment[] = [];
@@ -162,6 +169,84 @@ describe("simulate", () => {
       expect(owned.segments[0].speedMs).toBeLessThan(maxDescentSpeedMs(-0.15) * 1.0001);
       expect(owned.segments[0].speedMs).toBeLessThan(5);
     });
+  });
+});
+
+describe("pacing distribution", () => {
+  /** Gentle rolling course: shallow enough that neither the descent-speed
+   * cap nor walking can bind, so nothing but the distribution differs. */
+  function gentleRolling(steps: number): CourseSegment[] {
+    let elevation = 0;
+    return makeSegments(steps, 50, 0).map((seg, i) => {
+      const gradient = i % 2 === 0 ? 0.05 : -0.05;
+      elevation += gradient * 50;
+      return { ...seg, gradient, elevation };
+    });
+  }
+
+  it("finish time depends ONLY on average power, not on how that power is distributed", () => {
+    // Why there is no gradient-aware pacing feature here, and why building
+    // one is wasted work. Minetti cost per metre is independent of speed,
+    // so a segment's energy is cost x distance however fast it is run, and
+    // total energy E = sum(cost x distance) is a property of the COURSE,
+    // not of pacing. Finish time is therefore exactly E / mean power:
+    // redistributing power at a fixed average cannot move it.
+    //
+    // The "surge the climbs" intuition is real but belongs to cycling,
+    // where power rises with the cube of speed through air resistance.
+    // Running as modelled here has no such term. Measured on this athlete's
+    // own races the distribution really does differ from the solver's
+    // (15-24% more into climbs -- see scripts/diagPacingShapeVsActual.ts),
+    // but that is not what makes them faster, and a shape term built to
+    // copy it changed a gentle rolling course's finish by 0.01%.
+    const course = baseInputs({ segments: gentleRolling(400) });
+    const result = simulate(1, course);
+    let work = 0;
+    let time = 0;
+    let energy = 0;
+    for (let i = 0; i < result.segments.length; i++) {
+      work += result.segments[i].grossPowerWPerKg * result.segments[i].timeS;
+      time += result.segments[i].timeS;
+      energy += result.segments[i].grossPowerWPerKg * result.segments[i].timeS;
+    }
+    expect(result.segments.every((s) => s.mode === "run")).toBe(true);
+    // T = E / meanPower, to numerical precision.
+    expect(energy / (work / time)).toBeCloseTo(time, 6);
+  });
+
+  it("two genuinely different distributions at the same average power finish together", () => {
+    // The same claim demonstrated rather than derived, using
+    // targetGrossPowerWPerKgOverride to impose an arbitrary distribution:
+    // one flat, one pushing the climbs and easing the descents, scaled to
+    // land on the same time-averaged power. They finish within 0.1%.
+    const course = baseInputs({ segments: gentleRolling(400) });
+    const meanPower = (r: SimulationResult) => {
+      let w = 0;
+      let t = 0;
+      for (const seg of r.segments) {
+        w += seg.grossPowerWPerKg * seg.timeS;
+        t += seg.timeS;
+      }
+      return w / t;
+    };
+    const LEVEL = 13;
+    const flat = simulate(1, course, { targetGrossPowerWPerKgOverride: () => LEVEL });
+
+    // Scale the shaped override until its realised average matches flat's.
+    let scale = 1;
+    let shaped = flat;
+    for (let i = 0; i < 12; i++) {
+      shaped = simulate(1, course, {
+        targetGrossPowerWPerKgOverride: (index) => LEVEL * scale * (index % 2 === 0 ? 1.3 : 0.7),
+      });
+      const ratio = meanPower(shaped) / meanPower(flat);
+      if (Math.abs(ratio - 1) < 1e-6) break;
+      scale /= ratio;
+    }
+
+    expect(shaped.segments.every((seg) => seg.mode === "run")).toBe(true);
+    expect(meanPower(shaped)).toBeCloseTo(meanPower(flat), 4);
+    expect(Math.abs(shaped.finishTimeS - flat.finishTimeS) / flat.finishTimeS).toBeLessThan(0.001);
   });
 });
 
