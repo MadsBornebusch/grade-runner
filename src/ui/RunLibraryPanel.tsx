@@ -211,6 +211,21 @@ export function RunLibraryPanel({
   const descentPacingFitResult = runFitStatus.result?.descentPacingFit ?? null;
   const durationCeilingFitResult = runFitStatus.result?.durationCeilingFit ?? null;
   const descentCapFitResult = runFitStatus.result?.descentCapFit ?? null;
+  // Once the duration-ceiling envelope is fitted, sustainableFraction takes
+  // the power-law branch and never reads f0, f_inf or tau (ceiling.ts), and
+  // the solver stops passing total distance to maxDescentSpeedMs so the
+  // descent PACING curve stops reaching it too. Several panels below still
+  // describe those parameters, and without a note they read as though they
+  // drive predictions. Saying so is the same fix the "Currently applied"
+  // summary already got -- showing an athlete fitted-looking numbers the
+  // model ignores is the thing to avoid.
+  const supersededByFittedCeiling = formInputs.durationCurve === "powerLaw";
+  const fadeCurveSupersededNote = supersededByFittedCeiling ? (
+    <p className="field-group-note">
+      Not in use -- your aerobic ceiling comes from the fitted duration curve below, which doesn't read f0, f_inf or
+      tau. Kept here as a diagnostic.
+    </p>
+  ) : null;
   const anaerobicFitResult = runFitStatus.result?.anaerobicFit ?? null;
   const safeFitTier = runFitStatus.result?.safeFitTier ?? null;
   const transitGapCount = runFitStatus.result?.transitGapCount ?? 0;
@@ -856,6 +871,7 @@ export function RunLibraryPanel({
 
       {fitResult && (
         <>
+          {fadeCurveSupersededNote}
           <p className="field-group-note">
             Best-fit tau across {fitResult.perRace.length} run{fitResult.perRace.length === 1 ? "" : "s"}: {fitResult.tauMin} min.
           </p>
@@ -909,7 +925,8 @@ export function RunLibraryPanel({
 
       {fInfFitResult && (
         <div className="run-library__experimental-fit">
-          <p className="field-group-note">Experimental: joint fInf/tau fit (PLAN.md §11)</p>
+          <p className="field-group-note">Experimental: joint fInf/tau fit</p>
+          {fadeCurveSupersededNote}
           <p className="field-group-help">
             Fits fInf and tau together, holding VO2max and f0 fixed. Doesn't independently verify VO2max or f0 --
             fInf absorbs any error in both.
@@ -918,8 +935,8 @@ export function RunLibraryPanel({
             Duration range across these races: {fInfFitResult.durationDiversityRatio.toFixed(1)}x (longest ÷
             shortest).{" "}
             {fInfFitResult.durationDiversityRatio < 2
-              ? "PLAN.md recommends at least ~2x for fInf to be separable from tau -- treat this result as a rough guess, not a firm number."
-              : "At or above the ~2x PLAN.md recommends for separating fInf from tau."}
+              ? "Separating fInf from tau wants at least ~2x -- treat this result as a rough guess, not a firm number."
+              : "At or above the ~2x wanted for separating fInf from tau."}
           </p>
           <p className="field-group-note">
             Best fit: fInf {fInfFitResult.fInf.toFixed(2)}, tau {fInfFitResult.tauMin} min, across{" "}
@@ -999,7 +1016,7 @@ export function RunLibraryPanel({
 
       {hrCalibrationFitResult && (
         <div className="run-library__experimental-fit">
-          <p className="field-group-note">HR-effort calibration -- from your training history (PLAN.md §11)</p>
+          <p className="field-group-note">HR-effort calibration -- from your training history</p>
           <p className="field-group-help">
             Maps heart rate to effort fraction, fit from each race's early portion (least cardiac drift). Doesn't
             affect pace/power predictions -- used for HR-based effort estimates elsewhere (e.g. Analysis mode).
@@ -1152,6 +1169,12 @@ export function RunLibraryPanel({
       {descentPacingFitResult && (
         <div className="run-library__experimental-fit">
           <p className="field-group-note">Descent pacing -- how hard you let yourself go downhill</p>
+          {supersededByFittedCeiling && (
+            <p className="field-group-note">
+              Not in use -- your aerobic ceiling is fitted from your own races, so it already accounts for how you
+              descend, and applying this on top would count it twice. Kept here as a diagnostic.
+            </p>
+          )}
           <p className="field-group-help">
             How fast you actually run steep descents compared with the model's grade-only speed limit, as a function of
             the race's TOTAL distance -- faster than the limit on a short race, progressively more conservative as the

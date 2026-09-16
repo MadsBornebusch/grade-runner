@@ -504,7 +504,14 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
         {!values.pacingCurveEnabled && (
           <p className="field-group-note">Off — your plan uses a single flat effort level for the whole event.</p>
         )}
-        {values.pacingCurveEnabled && (
+        {values.pacingCurveEnabled && values.durationCurve === "powerLaw" && (
+          <p className="field-group-note">
+            Current: <strong>{(values.powerLawFraction60Min * 100).toFixed(1)}%</strong> of VO2max sustainable for an
+            hour, falling with an exponent of <strong>{values.powerLawExponent.toFixed(3)}</strong>, fitted from your
+            own races. The f0 / f_inf / tau values below are not in use while this is applied.
+          </p>
+        )}
+        {values.pacingCurveEnabled && values.durationCurve !== "powerLaw" && (
           <p className="field-group-note">
             Current: f0 {values.f0.toFixed(2)}, f_inf {values.fInf.toFixed(2)}, tau {values.tauMin} min.
           </p>
@@ -515,6 +522,13 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
             Models how your sustainable effort fades with duration: starts at <strong>f0</strong>, decays to{" "}
             <strong>f_inf</strong> over <strong>tau</strong> minutes. Only change if you know your own fade rate and
             don't want the fit above.
+            {values.durationCurve === "powerLaw" && (
+              <>
+                {" "}
+                <strong>These three have no effect right now:</strong> your ceiling is the fitted power-law curve
+                above, which doesn't read them. Turning the pacing curve off entirely still uses f0.
+              </>
+            )}
           </p>
           <NumberField
             label="f0"
