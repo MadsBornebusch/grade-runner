@@ -276,7 +276,6 @@ export interface RunFitCallbacks {
   onApplyDescentCapCurve: (curve: DescentCapCurve) => void;
   onApplyDurationCeiling: (fraction60Min: number, exponent: number) => void;
   onApplyAnaerobicCapacityMin: (anaerobicCapacityMin: number) => void;
-  onRacesFitted?: (races: EffortTrendPoint[][], raceDates: (Date | null)[]) => void;
 }
 
 /**
@@ -569,7 +568,6 @@ export async function runFitBatch(
     } else if (safeFit.tier === "tauOnly") {
       callbacks.onApplyTau(safeFit.ceilingParams.tauMin ?? formInputs.tauMin);
     }
-    callbacks.onRacesFitted?.(races, raceDates);
 
     // The tau confidence interval is BY FAR the most expensive thing here --
     // 100 bootstrap resamples, each a full tau refit across the whole race
@@ -603,6 +601,13 @@ export async function runFitBatch(
         completedAt: Date.now(),
     };
     setStatus({ running: false, progress: null, result: resultWithoutCI, error: null });
+
+    // Once the duration-ceiling envelope is applied, sustainableFraction
+    // stops reading tau entirely, so the interval is neither displayed nor
+    // an input to anything -- and it is the single most expensive thing in
+    // the batch (~100 resampled refits, minutes on a large library). Don't
+    // compute it.
+    if (formInputs.durationCurve === "powerLaw") return;
 
     // Not awaited: this resolves long after runFitBatch returns. The
     // generation guard stops a slow bootstrap from clobbering a NEWER fit's

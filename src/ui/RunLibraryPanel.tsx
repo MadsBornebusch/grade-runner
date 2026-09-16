@@ -6,7 +6,6 @@ import {
   bootstrapTauConfidenceInterval,
   MIN_INFORMATIVE_RACES,
   suggestFitImprovements,
-  type EffortTrendPoint,
   type TauConfidenceInterval,
 } from "../model/pacingFit";
 import { DURABILITY_MIN_DURATION_S, selectFetchCandidateIds } from "../model/suggestRuns";
@@ -67,11 +66,6 @@ interface RunLibraryPanelProps {
   onApplyDurationCeiling: (fraction60Min: number, exponent: number) => void;
   onApplyAnaerobicCapacityMin: (anaerobicCapacityMin: number) => void;
   onAddVo2MaxEntry: (entry: Vo2MaxEntry) => void;
-  /** Reports the races/raceDates behind the just-completed fit up to the
-   * parent -- lets the Results tab's finish-time-range feature reuse the
-   * exact same training data without this panel needing to know anything
-   * about Planning mode's course or the solver. */
-  onRacesFitted?: (races: EffortTrendPoint[][], raceDates: (Date | null)[]) => void;
 }
 
 /** suggestRunsForFit's own default (10 per bucket) is deliberately small --
@@ -190,7 +184,6 @@ export function RunLibraryPanel({
   onApplyAnaerobicCapacityMin,
   onApplyHrCalibration,
   onAddVo2MaxEntry,
-  onRacesFitted,
 }: RunLibraryPanelProps) {
   const { connected: stravaConnected } = useStravaSession();
   const [runs, setRuns] = useState<StoredRun[]>([]);
@@ -214,18 +207,12 @@ export function RunLibraryPanel({
   // Once the duration-ceiling envelope is fitted, sustainableFraction takes
   // the power-law branch and never reads f0, f_inf or tau (ceiling.ts), and
   // the solver stops passing total distance to maxDescentSpeedMs so the
-  // descent PACING curve stops reaching it too. Several panels below still
-  // describe those parameters, and without a note they read as though they
-  // drive predictions. Saying so is the same fix the "Currently applied"
-  // summary already got -- showing an athlete fitted-looking numbers the
-  // model ignores is the thing to avoid.
-  const supersededByFittedCeiling = formInputs.durationCurve === "powerLaw";
-  const fadeCurveSupersededNote = supersededByFittedCeiling ? (
-    <p className="field-group-note">
-      Not in use -- your aerobic ceiling comes from the fitted duration curve below, which doesn't read f0, f_inf or
-      tau. Kept here as a diagnostic.
-    </p>
-  ) : null;
+  // descent PACING curve never reaches it either. The panels describing
+  // those parameters are hidden rather than annotated: a number on screen
+  // that changes nothing about the plan is noise however carefully it is
+  // labelled. They still render for an athlete without enough confirmed
+  // races for the envelope, where those fits ARE their ceiling.
+  const fadeCurveSuperseded = formInputs.durationCurve === "powerLaw";
   const anaerobicFitResult = runFitStatus.result?.anaerobicFit ?? null;
   const safeFitTier = runFitStatus.result?.safeFitTier ?? null;
   const transitGapCount = runFitStatus.result?.transitGapCount ?? 0;
@@ -566,7 +553,6 @@ export function RunLibraryPanel({
       onApplyDescentCapCurve,
       onApplyDurationCeiling,
       onApplyAnaerobicCapacityMin,
-      onRacesFitted,
     }).then(refresh);
   };
 
@@ -807,14 +793,14 @@ export function RunLibraryPanel({
                 ? `${paceFromMs(formInputs.descentCapCurve.onsetSpeedMs)}/km at -10%, ${paceFromMs(formInputs.descentCapCurve.clampSpeedMs)}/km at -45%`
                 : "not fit yet -- using the built-in curve"}
             </li>
-            <li>
-              Descent pacing:{" "}
-              {formInputs.durationCurve === "powerLaw"
-                ? "not in use -- your aerobic ceiling is fit from your own races, so it already accounts for how you descend"
-                : formInputs.descentPacingCurve
+            {formInputs.durationCurve !== "powerLaw" && (
+              <li>
+                Descent pacing:{" "}
+                {formInputs.descentPacingCurve
                   ? `f0 ${formInputs.descentPacingCurve.f0.toFixed(2)}, f_inf ${formInputs.descentPacingCurve.fInf.toFixed(2)}, tau ${formInputs.descentPacingCurve.tauKm.toFixed(0)} km`
                   : "not fit yet -- using the built-in curve"}
-            </li>
+              </li>
+            )}
             <li>
               Terrain cost:{" "}
               {formInputs.surfaceCostMultipliers && Object.keys(formInputs.surfaceCostMultipliers).length > 0
@@ -848,7 +834,9 @@ export function RunLibraryPanel({
             <p className="field-group-note">
               Fitted {new Date(fitCompletedAt).toLocaleString()} ({formatRelativeAge(fitCompletedAt)}) from{" "}
               {runFitStatus.result?.races.length ?? 0} runs.
-              {runFitStatus.result?.tauCI === null && " Estimating the tau range… (this part runs in the background)"}
+              {!fadeCurveSuperseded &&
+                runFitStatus.result?.tauCI === null &&
+                " Estimating the tau range… (this part runs in the background)"}
             </p>
           )}
 
@@ -869,9 +857,8 @@ export function RunLibraryPanel({
             </p>
           )}
 
-      {fitResult && (
+      {fitResult && !fadeCurveSuperseded && (
         <>
-          {fadeCurveSupersededNote}
           <p className="field-group-note">
             Best-fit tau across {fitResult.perRace.length} run{fitResult.perRace.length === 1 ? "" : "s"}: {fitResult.tauMin} min.
           </p>
@@ -923,10 +910,9 @@ export function RunLibraryPanel({
         </>
       )}
 
-      {fInfFitResult && (
+      {fInfFitResult && !fadeCurveSuperseded && (
         <div className="run-library__experimental-fit">
           <p className="field-group-note">Experimental: joint fInf/tau fit</p>
-          {fadeCurveSupersededNote}
           <p className="field-group-help">
             Fits fInf and tau together, holding VO2max and f0 fixed. Doesn't independently verify VO2max or f0 --
             fInf absorbs any error in both.
@@ -1166,15 +1152,9 @@ export function RunLibraryPanel({
         </div>
       )}
 
-      {descentPacingFitResult && (
+      {descentPacingFitResult && !fadeCurveSuperseded && (
         <div className="run-library__experimental-fit">
           <p className="field-group-note">Descent pacing -- how hard you let yourself go downhill</p>
-          {supersededByFittedCeiling && (
-            <p className="field-group-note">
-              Not in use -- your aerobic ceiling is fitted from your own races, so it already accounts for how you
-              descend, and applying this on top would count it twice. Kept here as a diagnostic.
-            </p>
-          )}
           <p className="field-group-help">
             How fast you actually run steep descents compared with the model's grade-only speed limit, as a function of
             the race's TOTAL distance -- faster than the limit on a short race, progressively more conservative as the
@@ -1272,7 +1252,7 @@ export function RunLibraryPanel({
         </div>
       )}
 
-      {fitImprovementSuggestions.length > 0 && (
+      {!fadeCurveSuperseded && fitImprovementSuggestions.length > 0 && (
         <div className="run-library__fit-improvements">
           <p className="field-group-note">What would improve this fit?</p>
           <ul className="run-library__fit-notes">

@@ -14,7 +14,6 @@ import { FuelingFields } from "./ui/InputsPanel";
 import { PageCarousel } from "./ui/PageCarousel";
 import { ElevationProfileChart } from "./ui/ElevationProfileChart";
 import { GradeHistogram } from "./ui/GradeHistogram";
-import { FinishTimeRangePanel } from "./ui/FinishTimeRangePanel";
 import { FuelChart } from "./ui/FuelChart";
 import { SubstrateChart } from "./ui/SubstrateChart";
 import { PaceEffortChart } from "./ui/PaceEffortChart";
@@ -22,7 +21,7 @@ import { RouteMap } from "./ui/RouteMap";
 import { PacingFitPanel } from "./ui/PacingFitPanel";
 import { PowerHrChart } from "./ui/PowerHrChart";
 import { SettingsModal } from "./ui/SettingsModal";
-import { buildEffortTrendPoints, type EffortTrendPoint } from "./model/pacingFit";
+import { buildEffortTrendPoints } from "./model/pacingFit";
 import { SplitTable } from "./ui/SplitTable";
 import { ResultsSummary } from "./ui/ResultsSummary";
 import { AnalysisSummary } from "./ui/AnalysisSummary";
@@ -78,9 +77,6 @@ function App() {
   // the Results tab's finish-time-range feature can reuse the exact same
   // training data without RunLibraryPanel needing to know about Planning
   // mode's course or the solver.
-  const [fittedRaces, setFittedRaces] = useState<{ races: EffortTrendPoint[][]; raceDates: (Date | null)[] } | null>(
-    null,
-  );
 
   const [rawPoints, setRawPoints] = useState<GpxPoint[] | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -351,15 +347,6 @@ function App() {
     const margin = formInputs.pacingMargin;
     return findFlatPacedFinishTime(solverInputs, { marginCurve: (h) => predictBestDemonstratedTheta(h, margin) });
   }, [solverInputs, formInputs.pacingMargin]);
-
-  // Same shape predictFinishTimeRange needs (everything findSustainableTheta
-  // needs except segments/ceilingParams, both of which vary per bootstrap
-  // candidate/target).
-  const solverBaseInputs = useMemo(() => {
-    if (!solverInputs) return null;
-    const { segments: _segments, ceilingParams: _ceilingParams, ...rest } = solverInputs;
-    return rest;
-  }, [solverInputs]);
 
   // Shared by both chart-point builders below -- undefined (not applied)
   // whenever no HR-effort calibration has been fit yet, so estimated HR
@@ -660,14 +647,6 @@ function App() {
                           : null
                       }
                     />
-                    {solverInputs && solverBaseInputs && (
-                      <FinishTimeRangePanel
-                        fittedRaces={fittedRaces}
-                        ceilingParams={solverInputs.ceilingParams ?? {}}
-                        solverBaseInputs={solverBaseInputs}
-                        targetSegments={courseResult.segments}
-                      />
-                    )}
                     <RouteMap
                       routePoints={courseResult.routePoints}
                       splitPoints={chartPoints}
@@ -834,7 +813,6 @@ function App() {
         onAddVo2MaxEntry={(entry: Vo2MaxEntry) =>
           setFormInputs((prev) => ({ ...prev, vo2MaxHistory: [...prev.vo2MaxHistory, entry] }))
         }
-        onRacesFitted={(races, raceDates) => setFittedRaces({ races, raceDates })}
       />
 
       <AddCoursePanel

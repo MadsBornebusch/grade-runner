@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import type { SurfaceCategory } from "../gpx/pipeline";
-import type { EffortTrendPoint } from "../model/pacingFit";
 import type { PacingMarginFitResult } from "../model/pacingMarginFit";
 import type { DescentCapCurve, DescentPacingCurve } from "../model/minetti";
 import { AthleteFields } from "./InputsPanel";
@@ -23,7 +22,6 @@ interface SettingsModalProps {
   onApplyDurationCeiling: (fraction60Min: number, exponent: number) => void;
   onApplyAnaerobicCapacityMin: (anaerobicCapacityMin: number) => void;
   onAddVo2MaxEntry: (entry: Vo2MaxEntry) => void;
-  onRacesFitted: (races: EffortTrendPoint[][], raceDates: (Date | null)[]) => void;
 }
 
 /**
@@ -50,7 +48,6 @@ export function SettingsModal({
   onApplyDurationCeiling,
   onApplyAnaerobicCapacityMin,
   onAddVo2MaxEntry,
-  onRacesFitted,
 }: SettingsModalProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -104,7 +101,6 @@ export function SettingsModal({
             onApplyDurationCeiling={onApplyDurationCeiling}
             onApplyAnaerobicCapacityMin={onApplyAnaerobicCapacityMin}
             onAddVo2MaxEntry={onAddVo2MaxEntry}
-            onRacesFitted={onRacesFitted}
           />
         </div>
       </div>
