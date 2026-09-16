@@ -2,12 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { SurfaceCategory } from "../gpx/pipeline";
 import { runPipeline } from "../gpx/pipeline";
 import { analyzeRun } from "../model/analysis";
-import {
-  bootstrapTauConfidenceInterval,
-  MIN_INFORMATIVE_RACES,
-  suggestFitImprovements,
-  type TauConfidenceInterval,
-} from "../model/pacingFit";
 import { DURABILITY_MIN_DURATION_S, selectFetchCandidateIds } from "../model/suggestRuns";
 import { dedupeStoredRuns } from "../model/dedupeRuns";
 import { splitAtTransitGaps } from "../gpx/transitGap";
@@ -26,8 +20,6 @@ import {
 import { looksLikeGenericStravaTitle } from "../model/raceCandidates";
 import { MIN_MARGIN_FIT_RACES, type PacingMarginFitResult } from "../model/pacingMarginFit";
 import {
-  MIN_DESCENT_DISTANCE_SPAN_RATIO,
-  MIN_DESCENT_PACING_RACES,
   MIN_DESCENT_CAP_DISTANCE_M,
   MIN_DURATION_CEILING_RACES,
   MIN_DURATION_CEILING_SPAN_RATIO,
@@ -56,8 +48,6 @@ import { useStravaSession } from "./useStravaSession";
 
 interface RunLibraryPanelProps {
   formInputs: FormInputs;
-  onApplyTau: (tauMin: number) => void;
-  onApplyFInf: (fInf: number) => void;
   onApplySurfaceCostMultipliers: (multipliers: Partial<Record<SurfaceCategory, number>>) => void;
   onApplyHrCalibration: (slope: number, intercept: number) => void;
   onApplyPacingMargin: (fit: PacingMarginFitResult) => void;
@@ -174,8 +164,6 @@ function formatRelativeAge(epochMs: number, now = Date.now()): string {
 
 export function RunLibraryPanel({
   formInputs,
-  onApplyTau,
-  onApplyFInf,
   onApplySurfaceCostMultipliers,
   onApplyPacingMargin,
   onApplyDescentPacingCurve,
@@ -196,12 +184,9 @@ export function RunLibraryPanel({
   const fitting = runFitStatus.running;
   const fitRan = runFitStatus.result !== null;
   const fitCompletedAt = runFitStatus.result?.completedAt ?? null;
-  const fitResult = runFitStatus.result?.fitResult ?? null;
-  const fInfFitResult = runFitStatus.result?.fInfFitResult ?? null;
   const surfaceCostMultiplierFitResult = runFitStatus.result?.surfaceFit ?? null;
   const hrCalibrationFitResult = runFitStatus.result?.hrCalibrationFit ?? null;
   const pacingMarginFitResult = runFitStatus.result?.marginFit ?? null;
-  const descentPacingFitResult = runFitStatus.result?.descentPacingFit ?? null;
   const durationCeilingFitResult = runFitStatus.result?.durationCeilingFit ?? null;
   const descentCapFitResult = runFitStatus.result?.descentCapFit ?? null;
   // Once the duration-ceiling envelope is fitted, sustainableFraction takes
@@ -212,20 +197,10 @@ export function RunLibraryPanel({
   // that changes nothing about the plan is noise however carefully it is
   // labelled. They still render for an athlete without enough confirmed
   // races for the envelope, where those fits ARE their ceiling.
-  const fadeCurveSuperseded = formInputs.durationCurve === "powerLaw";
   const anaerobicFitResult = runFitStatus.result?.anaerobicFit ?? null;
-  const safeFitTier = runFitStatus.result?.safeFitTier ?? null;
   const transitGapCount = runFitStatus.result?.transitGapCount ?? 0;
   const excludedForDurationCount = runFitStatus.result?.excludedForDurationCount ?? 0;
-  const lastFittedRaces = runFitStatus.result
-    ? { races: runFitStatus.result.races, raceDates: runFitStatus.result.raceDates }
-    : null;
-  // A manual re-estimate (button below) overrides the auto-computed one --
-  // bootstrap resampling is random, so re-clicking gives a fresh read on
-  // the same underlying data without re-running the whole fit.
-  const [manualTauCI, setManualTauCI] = useState<TauConfidenceInterval | "insufficient" | null>(null);
-  const [computingTauCI, setComputingTauCI] = useState(false);
-  const tauCI = manualTauCI ?? runFitStatus.result?.tauCI ?? null;
+
   const [halfLifeDays, setHalfLifeDays] = useState(DEFAULT_HALF_LIFE_DAYS);
 
   const [backfillFrom, setBackfillFrom] = useState(() => loadLastBackfillDate() ?? twoYearsAgoDateInput());
@@ -503,9 +478,6 @@ export function RunLibraryPanel({
     formInputs.lt1PaceMinPerKm,
     formInputs.lt2PaceMinPerKm,
     formInputs.walkMaxMs,
-    formInputs.f0,
-    formInputs.fInf,
-    formInputs.tauMin,
     formInputs.pacingCurveEnabled,
     formInputs.durabilityDriftPerHour,
     formInputs.intakeGPerH,
@@ -544,8 +516,6 @@ export function RunLibraryPanel({
     const readyRuns = dedupedRuns.filter((r) => r.points !== null);
     setError(null);
     void runFitBatch(readyRuns, formInputs, ceilingParams, halfLifeDays, {
-      onApplyTau,
-      onApplyFInf,
       onApplySurfaceCostMultipliers,
       onApplyHrCalibration,
       onApplyPacingMargin,
@@ -559,22 +529,6 @@ export function RunLibraryPanel({
   /** On-demand, not a live recompute -- ~100 sequential tau refits is too
    * slow to run on every render. Reuses the exact races/raceDates from the
    * fit above, so this needs no target course or solver at all. */
-  const handleEstimateTauCI = async () => {
-    if (!lastFittedRaces) return;
-    setComputingTauCI(true);
-    setManualTauCI(null);
-    try {
-      const ci = await bootstrapTauConfidenceInterval(lastFittedRaces.races, lastFittedRaces.raceDates, ceilingParams);
-      setManualTauCI(ci ?? "insufficient");
-    } finally {
-      setComputingTauCI(false);
-    }
-  };
-
-  const fitImprovementSuggestions = useMemo(
-    () => suggestFitImprovements(fitResult, fInfFitResult, tauCI === "insufficient" ? null : tauCI),
-    [fitResult, fInfFitResult, tauCI],
-  );
 
   // One-time catch-up for runs backfilled before this flag existed (or from
   // any earlier session where marking didn't happen yet) -- guarded so it
@@ -761,46 +715,16 @@ export function RunLibraryPanel({
         <div className="run-library__applied-summary">
           <p className="field-group-note">Currently applied</p>
           <ul>
-            {/* Which curve is live decides which numbers mean anything.
-                In powerLaw mode sustainableFraction never reads f0/fInf/
-                tau at all, so listing them unconditionally (as this used
-                to) showed an athlete three fitted-looking values the model
-                was ignoring -- and gave no way to tell which ceiling they
-                were actually predicting with. */}
-            {formInputs.durationCurve === "powerLaw" ? (
-              <li>
-                Aerobic ceiling (power law): {(formInputs.powerLawFraction60Min * 100).toFixed(1)}% for an hour,
-                exponent {formInputs.powerLawExponent.toFixed(3)}
-              </li>
-            ) : (
-              <li>
-                Aerobic ceiling (exponential): f0 {formInputs.f0.toFixed(2)}, f_inf {formInputs.fInf.toFixed(2)}, tau{" "}
-                {formInputs.tauMin.toFixed(0)} min
-              </li>
-            )}
-            {/* Once the duration-ceiling envelope is live it owns descent
-                pacing outright (SolverInputs.descentPacingInCeiling): the
-                solver stops passing total distance to maxDescentSpeedMs,
-                which is what makes the curve argument reachable at all, so
-                a fitted curve stops affecting any prediction. Saying
-                "applied" here would be the same lie this panel just stopped
-                telling about f0/f_inf/tau. The fit still runs and still
-                applies for an athlete without enough confirmed races for
-                the envelope, which is why it isn't simply removed. */}
+            <li>
+              Aerobic ceiling: {(formInputs.powerLawFraction60Min * 100).toFixed(1)}% of VO2max for an hour, exponent{" "}
+              {formInputs.powerLawExponent.toFixed(3)}
+            </li>
             <li>
               Descent speed cap:{" "}
               {formInputs.descentCapCurve
                 ? `${paceFromMs(formInputs.descentCapCurve.onsetSpeedMs)}/km at -10%, ${paceFromMs(formInputs.descentCapCurve.clampSpeedMs)}/km at -45%`
                 : "not fit yet -- using the built-in curve"}
             </li>
-            {formInputs.durationCurve !== "powerLaw" && (
-              <li>
-                Descent pacing:{" "}
-                {formInputs.descentPacingCurve
-                  ? `f0 ${formInputs.descentPacingCurve.f0.toFixed(2)}, f_inf ${formInputs.descentPacingCurve.fInf.toFixed(2)}, tau ${formInputs.descentPacingCurve.tauKm.toFixed(0)} km`
-                  : "not fit yet -- using the built-in curve"}
-              </li>
-            )}
             <li>
               Terrain cost:{" "}
               {formInputs.surfaceCostMultipliers && Object.keys(formInputs.surfaceCostMultipliers).length > 0
@@ -820,12 +744,6 @@ export function RunLibraryPanel({
         </div>
       )}
 
-      {fitRan && !fitResult && (
-        <p className="warning">
-          Not enough moving time across your stored runs to fit a trend -- add longer recordings, or more of them.
-        </p>
-      )}
-
       {fitRan && (
         <details className="run-library__fit-details">
           <summary>Fit details</summary>
@@ -834,9 +752,6 @@ export function RunLibraryPanel({
             <p className="field-group-note">
               Fitted {new Date(fitCompletedAt).toLocaleString()} ({formatRelativeAge(fitCompletedAt)}) from{" "}
               {runFitStatus.result?.races.length ?? 0} runs.
-              {!fadeCurveSuperseded &&
-                runFitStatus.result?.tauCI === null &&
-                " Estimating the tau range… (this part runs in the background)"}
             </p>
           )}
 
@@ -851,113 +766,9 @@ export function RunLibraryPanel({
           {excludedForDurationCount > 0 && (
             <p className="field-group-note">
               Left out {excludedForDurationCount} run{excludedForDurationCount === 1 ? "" : "s"} under{" "}
-              {(DURABILITY_MIN_DURATION_S / 60).toFixed(0)} minutes -- too short to say anything real about
-              fatigue-decay over an ultra-scale race, and pooling them in anyway can pull tau toward an implausibly
-              small value rather than just having no effect.
+              {(DURABILITY_MIN_DURATION_S / 60).toFixed(0)} minutes -- too short to contribute a usable effort trend.
             </p>
           )}
-
-      {fitResult && !fadeCurveSuperseded && (
-        <>
-          <p className="field-group-note">
-            Best-fit tau across {fitResult.perRace.length} run{fitResult.perRace.length === 1 ? "" : "s"}: {fitResult.tauMin} min.
-          </p>
-          {fitResult.informativeRaceCount < MIN_INFORMATIVE_RACES && (
-            <p className="warning">
-              Only {fitResult.informativeRaceCount} of {fitResult.perRace.length} runs actually constrained this fit
-              (too short or too long relative to the fitted tau for their modeled ceiling to move) -- with fewer than{" "}
-              {MIN_INFORMATIVE_RACES}, this isn't really a pooled result, it's effectively one run's own pacing
-              labeled as a fit across many. Treat this tau with real caution -- more stored runs of a genuinely
-              different duration would help.
-            </p>
-          )}
-          <button type="button" className="fatox-add" onClick={() => onApplyTau(fitResult.tauMin)}>
-            Apply tau = {fitResult.tauMin} min
-          </button>
-          <p className="field-group-note">
-            {safeFitTier === "tauOnly"
-              ? "Applied automatically -- this fit had enough informative races, stayed within its search range, and the joint fInf/tau fit below wasn't well-supported enough to prefer instead."
-              : safeFitTier === "joint"
-                ? "Not applied automatically from here -- the joint fInf/tau fit below was better-supported and was applied instead (as a matched fInf+tau pair, not mixed with this fit's own tau)."
-                : "Not applied automatically -- see the notes above; you can still apply it manually if you trust it."}
-          </p>
-          {fitResult.hitSearchBoundary && (
-            <p className="field-group-note">
-              This landed at the {fitResult.hitSearchBoundary} edge of the search range -- treat it as a bound, not a
-              precise value. The true tau may be even{" "}
-              {fitResult.hitSearchBoundary === "upper" ? "larger (a slower fade)" : "smaller (a faster fade)"}.
-            </p>
-          )}
-
-          <button type="button" onClick={handleEstimateTauCI} disabled={computingTauCI}>
-            {computingTauCI ? "Estimating…" : "Estimate tau confidence interval"}
-          </button>
-          <p className="field-group-help">How much tau would vary on a slightly different sample of your runs.</p>
-          {tauCI === "insufficient" && (
-            <p className="warning">
-              Not enough informative runs to estimate a confidence interval -- the same support bar the tau fit above
-              needed.
-            </p>
-          )}
-          {tauCI && tauCI !== "insufficient" && (
-            <p className="field-group-note">
-              Tau confidence interval: {tauCI.lowTauMin.toFixed(0)}–{tauCI.highTauMin.toFixed(0)} min (median{" "}
-              {tauCI.medianTauMin.toFixed(0)}), point estimate {tauCI.pointEstimateTauMin.toFixed(0)} min. Based on{" "}
-              {tauCI.sampleCount} usable bootstrap resamples ({tauCI.skippedCount} skipped for not clearing the same
-              support bar the fit above needed).
-            </p>
-          )}
-        </>
-      )}
-
-      {fInfFitResult && !fadeCurveSuperseded && (
-        <div className="run-library__experimental-fit">
-          <p className="field-group-note">Experimental: joint fInf/tau fit</p>
-          <p className="field-group-help">
-            Fits fInf and tau together, holding VO2max and f0 fixed. Doesn't independently verify VO2max or f0 --
-            fInf absorbs any error in both.
-          </p>
-          <p className={fInfFitResult.durationDiversityRatio < 2 ? "warning" : "field-group-note"}>
-            Duration range across these races: {fInfFitResult.durationDiversityRatio.toFixed(1)}x (longest ÷
-            shortest).{" "}
-            {fInfFitResult.durationDiversityRatio < 2
-              ? "Separating fInf from tau wants at least ~2x -- treat this result as a rough guess, not a firm number."
-              : "At or above the ~2x wanted for separating fInf from tau."}
-          </p>
-          <p className="field-group-note">
-            Best fit: fInf {fInfFitResult.fInf.toFixed(2)}, tau {fInfFitResult.tauMin} min, across{" "}
-            {fInfFitResult.perRace.length} run{fInfFitResult.perRace.length === 1 ? "" : "s"}.
-          </p>
-          {fInfFitResult.informativeRaceCount < MIN_INFORMATIVE_RACES && (
-            <p className="warning">
-              Only {fInfFitResult.informativeRaceCount} of {fInfFitResult.perRace.length} runs actually constrained
-              this fit -- with fewer than {MIN_INFORMATIVE_RACES}, "fInf {fInfFitResult.fInf.toFixed(2)}, tau{" "}
-              {fInfFitResult.tauMin}min" is really just one run's own pacing, not a genuine multi-race result. More
-              stored runs of a different duration would help.
-            </p>
-          )}
-          <button type="button" className="fatox-add" onClick={() => onApplyFInf(fInfFitResult.fInf)}>
-            Apply fInf = {fInfFitResult.fInf.toFixed(2)}
-          </button>
-          <p className="field-group-note">
-            {safeFitTier === "joint"
-              ? "Applied automatically, together with tau from this same joint fit -- both applied as a matched pair, not independently."
-              : "Not applied automatically -- see the notes above; you can still apply it manually if you trust it (note: doing so pairs it with whatever tau is currently applied, which this fit did not itself produce)."}
-          </p>
-          {(fInfFitResult.hitSearchBoundary.fInf || fInfFitResult.hitSearchBoundary.tau) && (
-            <p className="field-group-note">
-              Hit a search boundary on{" "}
-              {[
-                fInfFitResult.hitSearchBoundary.fInf && `fInf (${fInfFitResult.hitSearchBoundary.fInf})`,
-                fInfFitResult.hitSearchBoundary.tau && `tau (${fInfFitResult.hitSearchBoundary.tau})`,
-              ]
-                .filter(Boolean)
-                .join(" and ")}{" "}
-              -- treat as a bound, not a precise value.
-            </p>
-          )}
-        </div>
-      )}
 
       {surfaceCostMultiplierFitResult && (
         <div className="run-library__experimental-fit">
@@ -1152,42 +963,6 @@ export function RunLibraryPanel({
         </div>
       )}
 
-      {descentPacingFitResult && !fadeCurveSuperseded && (
-        <div className="run-library__experimental-fit">
-          <p className="field-group-note">Descent pacing -- how hard you let yourself go downhill</p>
-          <p className="field-group-help">
-            How fast you actually run steep descents compared with the model's grade-only speed limit, as a function of
-            the race's TOTAL distance -- faster than the limit on a short race, progressively more conservative as the
-            distance grows. Fit from your confirmed races' own recorded GPS speed.
-          </p>
-          {descentPacingFitResult.tier === "defaults" ? (
-            <p className="field-group-note">
-              NOT APPLIED (needs at least {MIN_DESCENT_PACING_RACES} confirmed races with real steep descent; had{" "}
-              {descentPacingFitResult.raceCount}) -- using the built-in default curve, which came from one specific
-              athlete's races rather than yours.
-            </p>
-          ) : (
-            <>
-              <p className="field-group-note">
-                Fit from {descentPacingFitResult.raceCount} confirmed race
-                {descentPacingFitResult.raceCount === 1 ? "" : "s"}: {descentPacingFitResult.curve.f0.toFixed(2)}x the
-                speed limit on a very short race, easing to {descentPacingFitResult.curve.fInf.toFixed(2)}x by ultra
-                distance (half-way point around {(descentPacingFitResult.curve.tauKm * Math.LN2).toFixed(0)}km).
-              </p>
-              {descentPacingFitResult.tier === "fInfTau" && (
-                <p className="field-group-note">
-                  Your races span too narrow a range of distances (longest / shortest ={" "}
-                  {descentPacingFitResult.distanceSpanRatio.toFixed(1)}x, want at least{" "}
-                  {MIN_DESCENT_DISTANCE_SPAN_RATIO}x) to tell how you descend on a SHORT race, so that end of the curve
-                  is held at the default rather than guessed. Confirm a race noticeably shorter or longer than the ones
-                  you have to pin it down.
-                </p>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
       {hrCalibrationFitResult &&
         (() => {
           const maxAerobic = maxAerobicPower(0, ceilingParams);
@@ -1252,18 +1027,6 @@ export function RunLibraryPanel({
         </div>
       )}
 
-      {!fadeCurveSuperseded && fitImprovementSuggestions.length > 0 && (
-        <div className="run-library__fit-improvements">
-          <p className="field-group-note">What would improve this fit?</p>
-          <ul className="run-library__fit-notes">
-            {fitImprovementSuggestions.map((s, i) => (
-              <li key={i} className={s.severity === "warning" ? "warning" : "field-group-note"}>
-                {s.message}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       {vo2MaxEstimates.length > 0 && (
         <div className="run-library__vo2max-estimates">

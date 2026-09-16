@@ -491,120 +491,26 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
       </fieldset>
 
       <fieldset>
-        <legend>Pacing curve</legend>
-        <p className="field-group-help">Fit automatically from your race history below, or leave at the defaults.</p>
+        <legend>Aerobic ceiling</legend>
+        <p className="field-group-help">Fit automatically from your confirmed races below.</p>
         <label className="field field--checkbox">
           <input
             type="checkbox"
             checked={values.pacingCurveEnabled}
             onChange={(e) => set("pacingCurveEnabled", e.target.checked)}
           />
-          <span>Enable pacing curve</span>
+          <span>Let sustainable effort fall with race length</span>
         </label>
-        {!values.pacingCurveEnabled && (
-          <p className="field-group-note">Off — your plan uses a single flat effort level for the whole event.</p>
-        )}
-        {values.pacingCurveEnabled && values.durationCurve === "powerLaw" && (
+        {values.pacingCurveEnabled ? (
           <p className="field-group-note">
-            Current: <strong>{(values.powerLawFraction60Min * 100).toFixed(1)}%</strong> of VO2max sustainable for an
-            hour, falling with an exponent of <strong>{values.powerLawExponent.toFixed(3)}</strong>, fitted from your
-            own races.
+            <strong>{(values.powerLawFraction60Min * 100).toFixed(1)}%</strong> of VO2max sustainable for an hour,
+            falling with an exponent of <strong>{values.powerLawExponent.toFixed(3)}</strong>.
           </p>
-        )}
-        {values.pacingCurveEnabled && values.durationCurve !== "powerLaw" && (
+        ) : (
           <p className="field-group-note">
-            Current: f0 {values.f0.toFixed(2)}, f_inf {values.fInf.toFixed(2)}, tau {values.tauMin} min.
+            Off — your plan holds {(values.powerLawFraction60Min * 100).toFixed(1)}% of VO2max for the whole event,
+            however long it is. Realistic only for a short race.
           </p>
-        )}
-        {/* Hidden while the fitted power-law ceiling is applied: it does not
-            read f0, f_inf or tau, so these three controls would accept input
-            and change nothing. They still matter for an athlete without
-            enough confirmed races for the envelope fit. */}
-        {values.durationCurve !== "powerLaw" && (
-          <details>
-            <summary>Advanced: override the pacing curve manually</summary>
-            <p className="field-group-help">
-              Models how your sustainable effort fades with duration: starts at <strong>f0</strong>, decays to{" "}
-              <strong>f_inf</strong> over <strong>tau</strong> minutes. Only change if you know your own fade rate and
-              don't want the fit above.
-            </p>
-            <NumberField
-              label="f0"
-              hint="starting sustainable fraction"
-              value={values.f0}
-              step={0.01}
-              min={0.5}
-              max={1}
-              disabled={!values.pacingCurveEnabled}
-              onChange={(v) => set("f0", v)}
-            />
-            <NumberField
-              label="f_inf"
-              hint="asymptotic sustainable fraction"
-              value={values.fInf}
-              step={0.01}
-              min={0.1}
-              max={0.9}
-              disabled={!values.pacingCurveEnabled}
-              onChange={(v) => set("fInf", v)}
-            />
-            <NumberField
-              label="tau"
-              hint="minutes, decay time constant"
-              value={values.tauMin}
-              step={10}
-              min={10}
-              disabled={!values.pacingCurveEnabled}
-              onChange={(v) => set("tauMin", v)}
-            />
-            <label className="field field--checkbox">
-              <input
-                type="checkbox"
-                checked={values.durabilityDriftPerHour > 0}
-                disabled={!values.pacingCurveEnabled}
-                onChange={(e) => set("durabilityDriftPerHour", e.target.checked ? 0.01 : 0)}
-              />
-              <span>Durability drift</span>
-            </label>
-            <p className="field-group-help">Extra fade for accumulated muscular fatigue on very long days. Off by default.</p>
-            {values.durabilityDriftPerHour > 0 && (
-              <NumberField
-                label="Drift rate"
-                hint="fraction lost per hour"
-                value={values.durabilityDriftPerHour}
-                step={0.001}
-                min={0}
-                max={0.1}
-                disabled={!values.pacingCurveEnabled}
-                onChange={(v) => set("durabilityDriftPerHour", v)}
-              />
-            )}
-            <label className="field field--checkbox">
-              <input
-                type="checkbox"
-                checked={values.anaerobicCapacityMin > 0}
-                disabled={!values.pacingCurveEnabled}
-                onChange={(e) => set("anaerobicCapacityMin", e.target.checked ? 1 : 0)}
-              />
-              <span>Anaerobic capacity (short-race boost)</span>
-            </label>
-            <p className="field-group-help">
-              Lets short races push above LT2 (critical-power model): roughly +25% at 4 min, +12% at 8 min, +7% at 15
-              min, +3% at 30 min, fading to ~0 by 50-60 min. On by default.
-            </p>
-            {values.anaerobicCapacityMin > 0 && (
-              <NumberField
-                label="W'/CP"
-                hint="minutes of extra capacity above LT2"
-                value={values.anaerobicCapacityMin}
-                step={0.1}
-                min={0}
-                max={5}
-                disabled={!values.pacingCurveEnabled}
-                onChange={(v) => set("anaerobicCapacityMin", v)}
-              />
-            )}
-          </details>
         )}
       </fieldset>
 

@@ -11,7 +11,7 @@ import {
   type PacingMarginFitResult,
 } from "./pacingMarginFit";
 
-const baseParams: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, f0: 0.94, fInf: 0.38, tauMin: 250 };
+const baseParams: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, };
 
 // slope=1, intercept=0 -> predictPowerFromHr(hr, calib) === hr, so a race's
 // own recorded "heart rate" can just BE the target power (in whatever units

@@ -2,7 +2,7 @@
 // fits a per-athlete HR-to-power mapping from any recorded run with both
 // pace-derived power (see analysis.ts -- always derived from GPS pace +
 // gradient via Minetti, never a device's own power reading) and heart rate.
-// Unlike the tau/fInf fits in pacingFit.ts, this isn't a within-race
+// Unlike the pooled curve fits in pacingFit.ts, this isn't a within-race
 // fatigue shape -- HR-to-power should be a roughly stable athlete-level
 // relationship across races, so pooling every (HR, power) pair from every
 // race into one weighted linear regression is the right level of
@@ -57,7 +57,7 @@
 
 import type { CeilingParams } from "./ceiling";
 import { maxAerobicPower } from "./ceiling";
-import { type EffortTrendPoint, MIN_FIT_POINTS, poolIndicesInformativeAtReference } from "./pacingFit";
+import { type EffortTrendPoint, MIN_FIT_POINTS } from "./pacingFit";
 import { paceToGrossPowerWPerKg } from "./substrate";
 
 /** Fraction of each race's own duration considered "early enough" to trust
@@ -68,6 +68,38 @@ import { paceToGrossPowerWPerKg } from "./substrate";
  * (a chosen-effort estimate built from drift-elevated late-race HR would
  * read as artificially high effort, not a genuine margin measurement). */
 export const EARLY_WINDOW_FRACTION = 0.65;
+
+/**
+ * Races shorter than this are dropped from the pooled HR-power fit when
+ * enough longer ones exist. A short race contributes HR samples from a
+ * regime where the relationship is steepest and least representative, and
+ * pooling many of them pulls the intercept toward "lower HR for a given
+ * power" -- a real source of the 4-10bpm under-prediction this gate was
+ * built to fix.
+ *
+ * This used to be expressed as "at least as long as the reference tau",
+ * which is why it lived in pacingFit.ts. The exponential fade curve it
+ * referenced is retired, so the threshold is now stated directly; the value
+ * is the same one that reference defaulted to.
+ */
+export const MIN_POOLED_RACE_MINUTES = 250;
+
+/** Minimum races clearing the duration gate before it is applied at all.
+ * Two is enough to say a result reflects more than one race, which is the
+ * property this guards; it carries over unchanged from the shared
+ * MIN_INFORMATIVE_RACES the gate used to reference. */
+const MIN_POOLED_RACES = 2;
+
+/**
+ * Indices of races long enough to pool. Falls back to every race if fewer
+ * than MIN_POOLED_RACES clear the bar, rather than starving the fit
+ * entirely -- the caller's own quality gates still catch a genuinely
+ * under-supported result.
+ */
+function pooledRaceIndices(totalMinPerRace: number[]): number[] {
+  const eligible = totalMinPerRace.map((d, i) => (d >= MIN_POOLED_RACE_MINUTES ? i : -1)).filter((i) => i >= 0);
+  return eligible.length >= MIN_POOLED_RACES ? eligible : totalMinPerRace.map((_, i) => i);
+}
 
 /** Trailing window (seconds) over which power is smoothed before
  * regressing against HR -- see this file's header doc for the real-data
@@ -290,7 +322,6 @@ function collectRaceSamples(race: EffortTrendPoint[], recencyWeightForRace: numb
  */
 export function fitHrToPowerCalibrationAcrossRaces(
   races: EffortTrendPoint[][],
-  ceilingParams: CeilingParams,
   opts: {
     raceDates?: (Date | null)[];
     halfLifeDays?: number;
@@ -315,7 +346,7 @@ export function fitHrToPowerCalibrationAcrossRaces(
   const now = opts.now ?? new Date();
 
   const totalMinPerRace = races.map((race) => (race.length > 0 ? Math.max(...race.map((p) => p.tHours + p.dtS / 3600)) * 60 : 0));
-  const longEnoughIndices = new Set(poolIndicesInformativeAtReference(totalMinPerRace, ceilingParams));
+  const longEnoughIndices = new Set(pooledRaceIndices(totalMinPerRace));
 
   const samples: Sample[] = [];
   const contributingRaceIndices = new Set<number>();

@@ -68,7 +68,11 @@ describe("simulate", () => {
   });
 
   it("walks flat ground at very easy efforts (Cw < Cr, and the walk cap isn't binding yet)", () => {
-    const result = simulate(0.5, baseInputs({ segments: makeSegments(5, 50, 0) }));
+    // theta is low enough that running is slower than walking at the same
+    // power -- the point of the test. It used to be 0.5; the short-course
+    // ceiling is higher now that the LT2 clamp is gone, so the same theta
+    // buys enough power to run.
+    const result = simulate(0.35, baseInputs({ segments: makeSegments(5, 50, 0) }));
     expect(result.segments.every((s) => s.mode === "walk")).toBe(true);
   });
 
@@ -266,11 +270,13 @@ describe("findSustainableTheta", () => {
     });
 
     // Sanity: confirm the scenario actually brackets a feasibility boundary.
-    // (0.2, not 0.15, is the first comfortably-feasible sample here — below
+    // (0.3, not 0.2, is the first comfortably-feasible sample here — below
     // that, target power dips under resting metabolism and simulate reports
-    // a stall rather than a bonk; see findSustainableTheta's doc comment.)
+    // a stall rather than a bonk; see findSustainableTheta's doc comment.
+    // The stall threshold sits higher than it did on the retired
+    // exponential ceiling, whose LT2 clamp held the early fraction down.)
     expect(simulate(1, long).feasible).toBe(false);
-    expect(simulate(0.2, long).feasible).toBe(true);
+    expect(simulate(0.3, long).feasible).toBe(true);
 
     const { theta, result } = findSustainableTheta(long);
     expect(theta).toBeGreaterThan(0.1);
@@ -451,16 +457,18 @@ describe("findFlatPacedFinishTime (pacing-margin follow-up)", () => {
     expect(margined.targetFraction).toBeGreaterThan(unmargined.targetFraction * 0.6);
   });
 
-  it("barely diverges from the theta-based model for a short race (duration well under tau)", () => {
-    // Default 10km flat course finishes in well under an hour -- tiny
-    // relative to tau's default 250min, so the duration-decay curve has
-    // barely moved and there's little room for the two designs to differ.
+  it("is slower than the theta-based model on a short race too, not just a long one", () => {
+    // This used to assert the opposite -- that the two barely diverge on a
+    // short race, because a 10km finishes well inside the retired
+    // exponential curve's 250min tau and its decay had barely started. A
+    // power law has no such flat region: it falls fastest at the SHORT end,
+    // so the declining solver opens at near-VO2max power and the gap is
+    // widest exactly where it used to be narrowest.
     const short = baseInputs();
     const thetaBased = findSustainableTheta(short);
     const flat = findFlatPacedFinishTime(short);
     expect(flat.result.feasible).toBe(true);
-    const pctDiff = Math.abs(flat.result.finishTimeS - thetaBased.result.finishTimeS) / thetaBased.result.finishTimeS;
-    expect(pctDiff).toBeLessThan(0.02);
+    expect(flat.result.finishTimeS).toBeGreaterThan(thetaBased.result.finishTimeS);
   });
 
   it("predicts a meaningfully SLOWER finish time than the theta-based model for a long, aerobically-limited ultra", () => {
@@ -678,12 +686,12 @@ describe("unpaved terrain cost multiplier", () => {
     // Half unpaved, then half paved -- if this were a cumulative/durability
     // effect (like the discarded earlier design), the back half would still
     // show some lingering penalty. It shouldn't: cost is evaluated fresh
-    // per segment from surfaceUnpaved alone. Flat ceiling (f0=fInf, no
-    // time-based fade) isolates this from the ceiling's own natural decay,
+    // per segment from surfaceUnpaved alone. A ceiling that does not fade
+    // with duration (exponent 0) isolates this from its own natural decay,
     // which would otherwise also make the back half differ between the two
     // courses (it starts later, at a different elapsed time, in the mixed
     // course) for a reason that has nothing to do with surface.
-    const flatCeiling = { f0: 0.7, fInf: 0.7, tauMin: 250 };
+    const flatCeiling = { powerLawFraction60Min: 0.7, powerLawExponent: 0 };
     const segments = [...segmentsWithSurface(100, 50, true), ...segmentsWithSurface(100, 50, false)];
     const mixed = simulate(SURFACE_TEST_THETA, baseInputs({ segments, unpavedCostMultiplier: 1.75, ceilingParams: flatCeiling }));
     const allPaved = simulate(
@@ -792,26 +800,27 @@ describe("findThetaForTargetTime", () => {
     expect(theta).toBeGreaterThan(1);
   });
 
-  it("caps out at the gentlest feasible pace when the target is far slower than anything reachable", () => {
+  it("still returns a feasible plan when the target is far slower than anything reachable", () => {
     const course = baseInputs();
     const fastest = findSustainableTheta(course);
 
     // Low enough theta stalls (infeasible for a different reason than
-    // bonking -- see simulate's docs), so there's a real floor on how slow
-    // a plan this knob can produce; an even-slower target must cap there.
-    // Far enough out that the gentlest reachable pace really is the binding
-    // constraint. Even pacing reaches slower plans than the old decaying
-    // target did, so this needs to be further out than it once was.
-    const veryFarTarget = fastest.result.finishTimeS * 1000;
-    const evenFartherTarget = fastest.result.finishTimeS * 5000;
-
-    const capped = findThetaForTargetTime(course, veryFarTarget);
-    const evenFarther = findThetaForTargetTime(course, evenFartherTarget);
+    // bonking -- see simulate's docs), so there is a real floor on how slow
+    // a plan this knob can produce. What's guaranteed past that floor is
+    // only that the answer stays feasible and never comes back FASTER than
+    // the fastest plan.
+    //
+    // This used to also assert that two different unreachable targets give
+    // byte-identical answers -- a stable plateau. That was an artifact of
+    // the retired exponential ceiling's LT2-clamped flat region. A power
+    // law has no flat region, so the search wanders in this degenerate
+    // corner (at 1000x it reaches the target exactly, at 10000x it doesn't)
+    // and pinning that wandering would be encoding noise as a contract.
+    const target = fastest.result.finishTimeS * 100;
+    const capped = findThetaForTargetTime(course, target);
     expect(capped.result.feasible).toBe(true);
-    expect(capped.result.finishTimeS).toBeLessThan(veryFarTarget);
-    // Receding the target further doesn't change the answer -- it's already
-    // pinned to the gentlest feasible pace this knob can reach.
-    expect(evenFarther).toEqual(capped);
+    expect(capped.result.finishTimeS).toBeGreaterThan(fastest.result.finishTimeS);
+    expect(capped.theta).toBeLessThan(fastest.theta);
   });
 
   it("produces a slower finish time for a slower target, holding the course fixed", () => {

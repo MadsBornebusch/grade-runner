@@ -1,4 +1,4 @@
-// Runs the "fit full athlete model" pipeline (tau/fInf, terrain surface
+// Runs the "fit full athlete model" pipeline (aerobic ceiling, terrain surface
 // cost, HR-effort calibration, pacing margin, tau confidence interval) as a
 // module-level process, same pattern and same reason as
 // autoFetchRuns.ts/backfillRuns.ts: Settings intentionally unmounts
@@ -24,7 +24,6 @@ import {
   type HrPowerCalibration,
 } from "../model/hrCalibration";
 import {
-  bootstrapTauConfidenceInterval,
   buildEffortTrendPoints,
   fitSurfaceCostMultipliersFromIntensity,
   buildDescentPacingObservation,
@@ -39,13 +38,8 @@ import {
   fitDurationCeilingAcrossRaces,
   type DurationCeilingFitResult,
   type DurationCeilingObservation,
-  fitTauFInfWithSupportGate,
   type EffortTrendPoint,
-  type FInfTauFitResult,
-  type MultiRaceTauFitResult,
-  type SafeFitResult,
   type SurfaceCostMultiplierFitResult,
-  type TauConfidenceInterval,
 } from "../model/pacingFit";
 import { fitPacingMarginAcrossRaces, type PacingMarginFitResult } from "../model/pacingMarginFit";
 import type { DescentCapCurve, DescentPacingCurve } from "../model/minetti";
@@ -71,7 +65,7 @@ export function runDate(run: StoredRun): Date | null {
 
 /** A watch left running across a train/bus/car leg can hide a transit hop
  * inside an otherwise-real run (see gpx/transitGap.ts) -- fed straight into
- * a fit, that shows up as impossible pace and can badly distort tau/fInf.
+ * a fit, that shows up as impossible pace and can badly distort the result.
  * Splits at any detected gap and processes each leg as its own course.
  * Below this only applies when a split actually happened -- an unsplit run
  * is used regardless of its own length, unchanged from prior behavior. */
@@ -82,7 +76,7 @@ export const MIN_LEG_DISTANCE_KM = 5;
  * HR-effort calibration. */
 export const MIN_HR_CALIBRATION_R_SQUARED = 0.5;
 
-/** Same role as MIN_INFORMATIVE_RACES for the tau/fInf fits, scaled up: this
+/** Same role as the pooled fits' own informative-race minimum, scaled up: this
  * fit pools individual runs (not just races), so a handful isn't enough to
  * trust the per-category split even though the regression itself won't
  * refuse to return a result. */
@@ -168,9 +162,6 @@ function yieldToBrowser(): Promise<void> {
 }
 
 export interface RunFitResult {
-  fitResult: MultiRaceTauFitResult | null;
-  fInfFitResult: FInfTauFitResult | null;
-  safeFitTier: SafeFitResult["tier"] | null;
   surfaceFit: SurfaceCostMultiplierFitResult | null;
   hrCalibrationFit: HrPowerCalibration | null;
   marginFit: PacingMarginFitResult | null;
@@ -182,7 +173,6 @@ export interface RunFitResult {
   excludedForDurationCount: number;
   races: EffortTrendPoint[][];
   raceDates: (Date | null)[];
-  tauCI: TauConfidenceInterval | "insufficient" | null;
   /** When this fit finished, epoch ms -- so the panel can say how old the
    * displayed numbers are rather than showing them undated. */
   completedAt: number;
@@ -202,7 +192,6 @@ let status: RunFitStatus = { running: false, progress: null, result: null, error
 /** Bumped per fit so a still-running bootstrap from an older fit can tell
  * it has been superseded and drop its result instead of overwriting a
  * newer one. */
-let fitGeneration = 0;
 const listeners = new Set<() => void>();
 
 function setStatus(next: RunFitStatus) {
@@ -267,8 +256,6 @@ export function analyzeOptionsFor(formInputs: FormInputs, ceilingParams: Ceiling
 }
 
 export interface RunFitCallbacks {
-  onApplyTau: (tauMin: number) => void;
-  onApplyFInf: (fInf: number) => void;
   onApplySurfaceCostMultipliers: (multipliers: SurfaceCostMultiplierFitResult["surfaceCostMultipliers"]) => void;
   onApplyHrCalibration: (slope: number, intercept: number) => void;
   onApplyPacingMargin: (fit: PacingMarginFitResult) => void;
@@ -283,7 +270,7 @@ export interface RunFitCallbacks {
  * autoFetchRuns.ts/backfillRuns.ts -- a second call while one is already
  * running is a silent no-op, so it's safe to call from every mount/remount
  * (including reopening Settings mid-fit) without risking a duplicate,
- * competing fit. The auto-apply gating (which tier's tau/fInf to apply,
+ * competing fit. The auto-apply gating (which tier to apply,
  * the R²/run-count bars for surface cost and HR calibration) lives here
  * now too, alongside the fit itself, since it's part of the same atomic
  * operation -- not left for the caller to re-derive from the result.
@@ -302,7 +289,7 @@ export async function runFitBatch(
     const races: EffortTrendPoint[][] = [];
     const raceDates: (Date | null)[] = [];
     // Every leg with usable segments contributes here, NOT just the ones
-    // long/race-paced enough for the tau/fInf pool below -- unlike the
+    // long/race-paced enough for the pooled fits below -- unlike the
     // flat multiplier this replaced, fitSurfaceCostMultipliersFromIntensity
     // conditions on the athlete's own recorded heart rate as the effort
     // signal rather than the solver's max-sustainable-effort assumption,
@@ -433,10 +420,7 @@ export async function runFitBatch(
     // downstream consumer (HR calibration, pacing margin) evaluates through
     // sustainableFraction, which ignores them. Skipping it is
     // behaviour-preserving and removes real work from the batch.
-    const fadeCurveSuperseded = formInputs.durationCurve === "powerLaw";
-    const safeFit: SafeFitResult = fadeCurveSuperseded
-      ? { ceilingParams, tier: "defaults", tauFit: null, fInfFit: null }
-      : fitTauFInfWithSupportGate(races, ceilingParams, { raceDates, halfLifeDays });
+
 
     // Per-category surface cost, conditioned on recorded heart rate as the
     // effort signal instead of the solver's own max-sustainable-effort
@@ -477,9 +461,9 @@ export async function runFitBatch(
         fatOxPoints: formInputs.fatOxPoints,
         walkMaxMs: formInputs.walkMaxMs,
       },
-      safeFit.ceilingParams,
+      ceilingParams,
     );
-    const maxAerobic = maxAerobicPower(0, safeFit.ceilingParams);
+    const maxAerobic = maxAerobicPower(0, ceilingParams);
     const lt2Anchor =
       formInputs.lt2HeartRateBpm !== null && maxAerobic > 0
         ? { hr: formInputs.lt2HeartRateBpm, powerWPerKg: lt2Fraction * maxAerobic }
@@ -487,7 +471,7 @@ export async function runFitBatch(
     // Auto-apply is gated on rSquared -- a low rSquared is a legitimate
     // result (HR may just not track this athlete's power well), not a
     // reason to lower the bar until it passes.
-    const hrCalibrationFit = fitHrToPowerCalibrationAcrossRaces(races, safeFit.ceilingParams, {
+    const hrCalibrationFit = fitHrToPowerCalibrationAcrossRaces(races, {
       raceDates,
       halfLifeDays,
       thresholdAnchors,
@@ -514,10 +498,10 @@ export async function runFitBatch(
           fatOxPoints: formInputs.fatOxPoints,
           walkMaxMs: formInputs.walkMaxMs,
         },
-        safeFit.ceilingParams,
+        ceilingParams,
       );
     const marginFit = marginCalibration
-      ? fitPacingMarginAcrossRaces(confirmedRaceTrendPoints, confirmedRaceNames, marginCalibration, safeFit.ceilingParams)
+      ? fitPacingMarginAcrossRaces(confirmedRaceTrendPoints, confirmedRaceNames, marginCalibration, ceilingParams)
       : null;
     if (marginFit) callbacks.onApplyPacingMargin(marginFit);
 
@@ -568,79 +552,21 @@ export async function runFitBatch(
       if (anaerobicFit.identifiable) callbacks.onApplyAnaerobicCapacityMin(anaerobicFit.anaerobicCapacityMin);
     }
 
-    // Auto-apply once fitTauFInfWithSupportGate picks a well-supported,
-    // internally-consistent (fInf, tau) pair. Deliberately NOT applying
-    // tauFit/fInfFit independently: they're two different searches (one
-    // holds fInf fixed, the other floats it), so a tauMin from one paired
-    // with an fInf from the other is a combination neither fit produced.
-    if (safeFit.tier === "joint") {
-      callbacks.onApplyTau(safeFit.ceilingParams.tauMin ?? formInputs.tauMin);
-      callbacks.onApplyFInf(safeFit.ceilingParams.fInf ?? formInputs.fInf);
-    } else if (safeFit.tier === "tauOnly") {
-      callbacks.onApplyTau(safeFit.ceilingParams.tauMin ?? formInputs.tauMin);
-    }
-
-    // The tau confidence interval is BY FAR the most expensive thing here --
-    // 100 bootstrap resamples, each a full tau refit across the whole race
-    // pool. Measured at ~210s against a 168-run library, against ~10s for
-    // every other fit on this page combined. It used to be awaited before
-    // the fit reported anything, so the entire fit appeared to take three
-    // and a half minutes even though every value it applies was ready in
-    // the first few seconds.
-    //
-    // So: publish the fit NOW, with tauCI still pending, and let the
-    // interval fill in afterwards. Everything auto-applied above has
-    // already been handed to the callbacks, so nothing downstream is
-    // waiting on this -- the CI is a displayed diagnostic, not an input to
-    // any other fit.
-    const resultWithoutCI: RunFitResult = {
-        fitResult: safeFit.tauFit,
-        fInfFitResult: safeFit.fInfFit,
-        safeFitTier: safeFit.tier,
-        surfaceFit,
-        hrCalibrationFit,
-        marginFit,
-        descentPacingFit,
-        descentCapFit,
-        durationCeilingFit,
-        anaerobicFit,
-        transitGapCount: detectedTransitGaps,
-        excludedForDurationCount: excludedForDuration,
-        races,
-        raceDates,
-        tauCI: null,
-        completedAt: Date.now(),
+    const result: RunFitResult = {
+      surfaceFit,
+      hrCalibrationFit,
+      marginFit,
+      descentPacingFit,
+      descentCapFit,
+      durationCeilingFit,
+      anaerobicFit,
+      transitGapCount: detectedTransitGaps,
+      excludedForDurationCount: excludedForDuration,
+      races,
+      raceDates,
+      completedAt: Date.now(),
     };
-    setStatus({ running: false, progress: null, result: resultWithoutCI, error: null });
-
-    // Once the duration-ceiling envelope is applied, sustainableFraction
-    // stops reading tau entirely, so the interval is neither displayed nor
-    // an input to anything -- and it is the single most expensive thing in
-    // the batch (~100 resampled refits, minutes on a large library). Don't
-    // compute it.
-    if (fadeCurveSuperseded) return;
-
-    // Not awaited: this resolves long after runFitBatch returns. The
-    // generation guard stops a slow bootstrap from clobbering a NEWER fit's
-    // result if the user refits while this one is still grinding.
-    const generation = ++fitGeneration;
-    void bootstrapTauConfidenceInterval(races, raceDates, ceilingParams)
-      .then((tauCI) => {
-        if (generation !== fitGeneration) return;
-        if (status.result !== resultWithoutCI) return;
-        setStatus({
-          running: false,
-          progress: null,
-          result: { ...resultWithoutCI, tauCI: tauCI ?? "insufficient" },
-          error: null,
-        });
-      })
-      .catch(() => {
-        // A failed CI must not surface as a failed fit -- the fit itself
-        // succeeded and its values are already applied.
-        if (generation !== fitGeneration || status.result !== resultWithoutCI) return;
-        setStatus({ running: false, progress: null, result: { ...resultWithoutCI, tauCI: "insufficient" }, error: null });
-      });
+    setStatus({ running: false, progress: null, result, error: null });
     return;
   } catch (err) {
     setStatus({ running: false, progress: null, result: null, error: err instanceof Error ? err.message : "Fit failed" });

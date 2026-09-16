@@ -171,7 +171,7 @@ describe("speedFromMs / speedToMs", () => {
   });
 });
 
-describe("duration curve", () => {
+describe("aerobic ceiling", () => {
   const KEY = "grade-runner:inputs";
   // The suite runs in node, which has no localStorage. A minimal in-memory
   // stand-in is enough: loadFormInputs only ever does getItem here.
@@ -201,39 +201,27 @@ describe("duration curve", () => {
     }
   };
 
-  it("is the power law for a brand new athlete", () => {
-    // The exponential curve is no longer offered. Its fInf asymptote stops
-    // responding to duration entirely -- 38.2% of VO2max at 24h and 38.0%
-    // at 48h -- which asserts an athlete can hold that fraction forever.
-    expect(DEFAULT_FORM_INPUTS.durationCurve).toBe("powerLaw");
-  });
-
-  it("carries an unfitted athlete on a default curve, not a broken one", () => {
-    // With fewer than 3 confirmed races nothing is fitted, so the default
-    // anchors are what every new athlete actually predicts through. They
-    // should be a plausible curve rather than a placeholder.
+  it("carries an unfitted athlete on a plausible default curve", () => {
+    // With fewer than 3 confirmed races nothing is fitted, so these anchors
+    // are what every new athlete actually predicts through. There is no
+    // second curve to fall back to any more, which is the point: the one
+    // that used to fill that role asserted an athlete could hold 38% of
+    // VO2max forever.
     expect(DEFAULT_FORM_INPUTS.powerLawFraction60Min).toBeGreaterThan(0.6);
     expect(DEFAULT_FORM_INPUTS.powerLawFraction60Min).toBeLessThan(0.95);
     expect(DEFAULT_FORM_INPUTS.powerLawExponent).toBeGreaterThan(0.05);
     expect(DEFAULT_FORM_INPUTS.powerLawExponent).toBeLessThan(0.3);
   });
 
-  it("migrates an existing profile off the exponential curve", () => {
-    // Without this an athlete who saved before the switch would silently
-    // keep predicting through the retired curve forever.
-    const migrated = withSaved({ durationCurve: "exponential", bodyMassKg: 72 }, loadFormInputs);
-    expect(migrated.durationCurve).toBe("powerLaw");
-    expect(migrated.bodyMassKg).toBe(72);
-  });
-
-  it("leaves an already-migrated profile alone", () => {
-    const kept = withSaved(
-      { durationCurve: "powerLaw", powerLawFraction60Min: 0.8207, powerLawExponent: 0.151 },
+  it("loads a profile saved under the retired exponential curve without choking", () => {
+    // Those keys are simply no longer read. An old save must still produce a
+    // working profile rather than throwing or resetting everything.
+    const loaded = withSaved(
+      { durationCurve: "exponential", f0: 0.94, fInf: 0.38, tauMin: 250, bodyMassKg: 72 },
       loadFormInputs,
     );
-    expect(kept.durationCurve).toBe("powerLaw");
-    expect(kept.powerLawFraction60Min).toBeCloseTo(0.8207, 6);
-    expect(kept.powerLawExponent).toBeCloseTo(0.151, 6);
+    expect(loaded.bodyMassKg).toBe(72);
+    expect(loaded.powerLawFraction60Min).toBe(DEFAULT_FORM_INPUTS.powerLawFraction60Min);
   });
 
   it("keeps a saved profile's own fitted anchors rather than resetting them", () => {

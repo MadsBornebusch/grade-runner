@@ -72,11 +72,6 @@ function App() {
     if (justFinished && !settingsOpen) setHasUnseenFitResult(true);
   }, [runFitStatus, settingsOpen]);
 
-  // The races/raceDates behind the Settings modal's most recent tau/fInf
-  // fit -- lifted up here (rather than kept local to RunLibraryPanel) so
-  // the Results tab's finish-time-range feature can reuse the exact same
-  // training data without RunLibraryPanel needing to know about Planning
-  // mode's course or the solver.
 
   const [rawPoints, setRawPoints] = useState<GpxPoint[] | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -260,12 +255,10 @@ function App() {
       anaerobicCapacityMin: formInputs.anaerobicCapacityMin,
       descentPacingCurve: formInputs.descentPacingCurve ?? undefined,
       descentCapCurve: formInputs.descentCapCurve ?? undefined,
-      // durationCurve only ever becomes "powerLaw" via onApplyDurationCeiling
-      // below -- there is no manual control for it -- so it is exactly the
-      // signal that this athlete's ceiling came from the envelope fit, and
-      // therefore already prices in how they descend (see
+      // The aerobic ceiling is fitted from this athlete's own races, so it
+      // already accounts for how they descend (see
       // SolverInputs.descentPacingInCeiling).
-      descentPacingInCeiling: formInputs.durationCurve === "powerLaw",
+      descentPacingInCeiling: true,
     };
     lastSolverInputsRef.current = built;
     return built;
@@ -290,9 +283,6 @@ function App() {
     formInputs.lt2PaceMinPerKm,
     formInputs.walkMaxMs,
     formInputs.fatOxPoints,
-    formInputs.f0,
-    formInputs.fInf,
-    formInputs.tauMin,
     formInputs.pacingCurveEnabled,
     formInputs.durabilityDriftPerHour,
     formInputs.foPeakGPerMin,
@@ -305,7 +295,6 @@ function App() {
     formInputs.surfaceCostMultipliers,
     formInputs.descentPacingCurve,
     formInputs.descentCapCurve,
-    formInputs.durationCurve,
   ]);
 
   // Even-paced, NOT findSustainableTheta. That one holds a constant fraction
@@ -471,9 +460,6 @@ function App() {
     formInputs.lt2PaceMinPerKm,
     formInputs.walkMaxMs,
     formInputs.fatOxPoints,
-    formInputs.f0,
-    formInputs.fInf,
-    formInputs.tauMin,
     formInputs.pacingCurveEnabled,
     formInputs.durabilityDriftPerHour,
     formInputs.foPeakGPerMin,
@@ -750,7 +736,6 @@ function App() {
                           <PacingFitPanel
                             points={pacingFitPoints}
                             ceilingParams={analysisInputs.ceilingParams ?? {}}
-                            onApplyTau={(tauMin) => setFormInputs((prev) => ({ ...prev, tauMin }))}
                             onApplyDrift={(durabilityDriftPerHour) =>
                               setFormInputs((prev) => ({ ...prev, durabilityDriftPerHour }))
                             }
@@ -781,8 +766,6 @@ function App() {
         onClose={() => setSettingsOpen(false)}
         formInputs={formInputs}
         onChange={setFormInputs}
-        onApplyTau={(tauMin) => setFormInputs((prev) => ({ ...prev, tauMin }))}
-        onApplyFInf={(fInf) => setFormInputs((prev) => ({ ...prev, fInf }))}
         onApplySurfaceCostMultipliers={(surfaceCostMultipliers) => setFormInputs((prev) => ({ ...prev, surfaceCostMultipliers }))}
         onApplyDescentPacingCurve={(descentPacingCurve) => setFormInputs((prev) => ({ ...prev, descentPacingCurve }))}
         onApplyDescentCapCurve={(descentCapCurve) => setFormInputs((prev) => ({ ...prev, descentCapCurve }))}
@@ -795,7 +778,6 @@ function App() {
             ...prev,
             powerLawFraction60Min,
             powerLawExponent,
-            durationCurve: "powerLaw",
           }))
         }
         onApplyAnaerobicCapacityMin={(anaerobicCapacityMin) =>

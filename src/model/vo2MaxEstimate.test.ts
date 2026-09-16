@@ -79,7 +79,7 @@ describe("estimateVo2MaxFromRun", () => {
     // hand-picked number) against two different assumptions should still
     // land on the same implied true vo2max.
     const trueVo2Max = 60;
-    const sharedParams: CeilingParams = { lt2Fraction: 0.85, f0: 0.94, fInf: 0.38, tauMin: 250, durabilityDriftPerHour: 0.02 };
+    const sharedParams: CeilingParams = { lt2Fraction: 0.85, durabilityDriftPerHour: 0.02 };
     const durationMin = 40;
     const stepMin = 5;
 

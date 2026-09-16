@@ -11,7 +11,7 @@ import {
   type ThresholdCalibrationInputs,
 } from "./hrCalibration";
 
-const baseParams: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, f0: 0.94, fInf: 0.38, tauMin: 250 };
+const baseParams: CeilingParams = { vo2MaxMlPerKgPerMin: 50, lt2Fraction: 0.85, };
 
 /** Builds a race whose recorded HR follows a known true (slope, intercept)
  * relationship to raw gross power, plus optional noise -- lets the fit be
@@ -75,7 +75,7 @@ describe("fitHrToPowerCalibrationAcrossRaces", () => {
     const race = makeHrRace(4, trueSlope, trueIntercept, {
       noise: (i) => 0.5 * Math.sin(i / 3),
     });
-    const result = fitHrToPowerCalibrationAcrossRaces([race], baseParams);
+    const result = fitHrToPowerCalibrationAcrossRaces([race]);
     expect(result).not.toBeNull();
     expect(result!.slope).toBeCloseTo(trueSlope, 1);
     expect(result!.intercept).toBeCloseTo(trueIntercept, 0);
@@ -88,7 +88,7 @@ describe("fitHrToPowerCalibrationAcrossRaces", () => {
     const trueIntercept = 110;
     const raceA = makeHrRace(3, trueSlope, trueIntercept, { targetPowerWPerKg: 7, noise: (i) => 0.4 * Math.sin(i / 2) });
     const raceB = makeHrRace(5, trueSlope, trueIntercept, { targetPowerWPerKg: 9, noise: (i) => 0.4 * Math.cos(i / 4) });
-    const result = fitHrToPowerCalibrationAcrossRaces([raceA, raceB], baseParams);
+    const result = fitHrToPowerCalibrationAcrossRaces([raceA, raceB]);
     expect(result).not.toBeNull();
     expect(result!.slope).toBeCloseTo(trueSlope, 0);
     expect(result!.raceCount).toBe(2);
@@ -105,7 +105,7 @@ describe("fitHrToPowerCalibrationAcrossRaces", () => {
     for (let i = cutoffIndex; i < race.length; i++) {
       race[i] = { ...race[i], heartRateBpm: (race[i].heartRateBpm ?? 0) + 40 }; // drifted HR, same power
     }
-    const result = fitHrToPowerCalibrationAcrossRaces([race], baseParams);
+    const result = fitHrToPowerCalibrationAcrossRaces([race]);
     expect(result).not.toBeNull();
     expect(result!.slope).toBeCloseTo(trueSlope, 0);
   });
@@ -123,7 +123,7 @@ describe("fitHrToPowerCalibrationAcrossRaces", () => {
     for (const p of race) {
       if (p.tHours < 0.25) p.heartRateBpm = (p.heartRateBpm ?? 0) - 40; // warm-up-depressed HR, same power
     }
-    const result = fitHrToPowerCalibrationAcrossRaces([race], baseParams);
+    const result = fitHrToPowerCalibrationAcrossRaces([race]);
     expect(result).not.toBeNull();
     expect(result!.slope).toBeCloseTo(trueSlope, 0);
   });
@@ -131,21 +131,21 @@ describe("fitHrToPowerCalibrationAcrossRaces", () => {
   it("returns null when fewer than MIN_FIT_POINTS points have HR data", () => {
     const race = makeHrRace(0.3, 5, 100, { stepMinutes: 6 });
     expect(race.length).toBeLessThan(10);
-    expect(fitHrToPowerCalibrationAcrossRaces([race], baseParams)).toBeNull();
+    expect(fitHrToPowerCalibrationAcrossRaces([race])).toBeNull();
   });
 
   it("returns null when no point has HR data at all", () => {
     const race = makeHrRace(4, 5, 100).map((p) => ({ ...p, heartRateBpm: undefined }));
-    expect(fitHrToPowerCalibrationAcrossRaces([race], baseParams)).toBeNull();
+    expect(fitHrToPowerCalibrationAcrossRaces([race])).toBeNull();
   });
 
   it("returns null when power has no variance to regress against", () => {
     const race = makeHrRace(4, 5, 100).map((p) => ({ ...p, grossPowerWPerKg: 8 }));
-    expect(fitHrToPowerCalibrationAcrossRaces([race], baseParams)).toBeNull();
+    expect(fitHrToPowerCalibrationAcrossRaces([race])).toBeNull();
   });
 
   it("returns null for an empty race list", () => {
-    expect(fitHrToPowerCalibrationAcrossRaces([], baseParams)).toBeNull();
+    expect(fitHrToPowerCalibrationAcrossRaces([])).toBeNull();
   });
 
   it("recovers the true slope through large high-frequency power noise HR doesn't track -- the smoothing this fit relies on", () => {
@@ -158,19 +158,19 @@ describe("fitHrToPowerCalibrationAcrossRaces", () => {
     const trueSlope = 5;
     const trueIntercept = 100;
     const race = makeHrRaceWithPowerNoise(4, trueSlope, trueIntercept, 3, 0.25);
-    const result = fitHrToPowerCalibrationAcrossRaces([race], baseParams);
+    const result = fitHrToPowerCalibrationAcrossRaces([race]);
     expect(result).not.toBeNull();
     expect(result!.slope).toBeGreaterThan(0); // recovers the right sign/rough scale despite the noise
     expect(result!.slope).toBeLessThan(trueSlope * 3);
     expect(result!.rSquared).toBeGreaterThan(0.3); // would be near 0 without smoothing at this noise level
   });
 
-  it("does not let numerous short races pull the calibration away from what a couple of long races show (regression test: real held-out data found the unrestricted pool under-predicts heart rate on long races by 4-10+ bpm, fixed by reusing pacingFit.ts's poolIndicesInformativeAtReference)", () => {
+  it("does not let numerous short races pull the calibration away from what a couple of long races show (regression test: real held-out data found the unrestricted pool under-predicts heart rate on long races by 4-10+ bpm, fixed by a minimum-duration gate on the pool)", () => {
     const trueSlope = 5;
     const trueIntercept = 100;
     const misleadingSlope = 15;
     const misleadingIntercept = 60;
-    // Long races (>= baseParams.tauMin=250min=4.17h) carry the TRUE
+    // Long races (>= MIN_POOLED_RACE_MINUTES = 250min = 4.17h) carry the TRUE
     // relationship; many short (1h) races carry a deliberately different
     // one -- mirrors the real bug (hundreds of short training runs sitting
     // at low power swamping a pooled fit that should reflect the athlete's
@@ -180,7 +180,7 @@ describe("fitHrToPowerCalibrationAcrossRaces", () => {
     const manyShortRaces = Array.from({ length: 100 }, (_, i) =>
       makeHrRace(1, misleadingSlope, misleadingIntercept, { targetPowerWPerKg: 5, noise: (j) => 0.2 * Math.sin((i + j) / 2) }),
     );
-    const result = fitHrToPowerCalibrationAcrossRaces([longRaceA, longRaceB, ...manyShortRaces], baseParams);
+    const result = fitHrToPowerCalibrationAcrossRaces([longRaceA, longRaceB, ...manyShortRaces]);
     expect(result).not.toBeNull();
     expect(result!.slope).toBeCloseTo(trueSlope, 0);
     expect(result!.raceCount).toBe(2);
@@ -192,7 +192,7 @@ describe("fitHrToPowerCalibrationAcrossRaces", () => {
     const longRaceA = makeHrRace(5, trueSlope, trueIntercept, { targetPowerWPerKg: 7, noise: (i) => 0.3 * Math.sin(i / 3) });
     const longRaceB = makeHrRace(6, trueSlope, trueIntercept, { targetPowerWPerKg: 7.5, noise: (i) => 0.3 * Math.cos(i / 4) });
 
-    const raceOnly = fitHrToPowerCalibrationAcrossRaces([longRaceA, longRaceB], baseParams);
+    const raceOnly = fitHrToPowerCalibrationAcrossRaces([longRaceA, longRaceB]);
     expect(raceOnly).not.toBeNull();
 
     // An anchor well above the race data's own power range and inconsistent
@@ -202,7 +202,7 @@ describe("fitHrToPowerCalibrationAcrossRaces", () => {
     const raceOnlyPrediction = predictHeartRateFromPower(anchorPowerWPerKg, raceOnly!);
     expect(Math.abs(raceOnlyPrediction - anchorHr)).toBeGreaterThan(3); // confirms the gap this test is closing
 
-    const blended = fitHrToPowerCalibrationAcrossRaces([longRaceA, longRaceB], baseParams, {
+    const blended = fitHrToPowerCalibrationAcrossRaces([longRaceA, longRaceB], {
       thresholdAnchors: [{ hr: anchorHr, powerWPerKg: anchorPowerWPerKg }],
     });
     expect(blended).not.toBeNull();
@@ -221,7 +221,7 @@ describe("fitHrToPowerCalibrationAcrossRaces", () => {
     const longRaceB = makeHrRace(6, trueSlope, trueIntercept, { targetPowerWPerKg: 7.5, noise: (i) => 0.3 * Math.cos(i / 4) });
 
     const anchor = { hr: 165, powerWPerKg: 15 };
-    const locked = fitHrToPowerCalibrationAcrossRaces([longRaceA, longRaceB], baseParams, { lockThroughLt2: anchor });
+    const locked = fitHrToPowerCalibrationAcrossRaces([longRaceA, longRaceB], { lockThroughLt2: anchor });
     expect(locked).not.toBeNull();
     // Exact, not just "closer" -- the whole point of locking.
     expect(predictHeartRateFromPower(anchor.powerWPerKg, locked!)).toBeCloseTo(anchor.hr, 6);
@@ -241,7 +241,7 @@ describe("fitHrToPowerCalibrationAcrossRaces", () => {
     // reaches (near-LT2) -- should reinforce, not distort, the long-race-only result.
     const anchorPowerWPerKg = 15;
     const anchorHr = trueIntercept + trueSlope * anchorPowerWPerKg;
-    const result = fitHrToPowerCalibrationAcrossRaces([longRaceA, longRaceB, ...manyShortRaces], baseParams, {
+    const result = fitHrToPowerCalibrationAcrossRaces([longRaceA, longRaceB, ...manyShortRaces], {
       thresholdAnchors: [{ hr: anchorHr, powerWPerKg: anchorPowerWPerKg }],
     });
     expect(result).not.toBeNull();
@@ -253,7 +253,7 @@ describe("fitHrToPowerCalibrationAcrossRaces", () => {
     const trueSlope = 5;
     const trueIntercept = 100;
     const race = makeHrRace(4, trueSlope, trueIntercept, { noise: (i) => 0.3 * Math.sin(i / 3) });
-    const clean = fitHrToPowerCalibrationAcrossRaces([race], baseParams);
+    const clean = fitHrToPowerCalibrationAcrossRaces([race]);
     expect(clean).not.toBeNull();
 
     // Inject a duplicate-timestamp-style artifact: near-zero dt, absurd
@@ -263,7 +263,7 @@ describe("fitHrToPowerCalibrationAcrossRaces", () => {
       ...race,
       { tHours: race[5].tHours + 0.0001, grossPowerWPerKg: 500, altitudeM: 0, dtS: 0.05, heartRateBpm: 90 },
     ];
-    const result = fitHrToPowerCalibrationAcrossRaces([contaminated], baseParams);
+    const result = fitHrToPowerCalibrationAcrossRaces([contaminated]);
     expect(result).not.toBeNull();
     expect(result!.slope).toBeCloseTo(clean!.slope, 2);
     expect(result!.pointCount).toBe(clean!.pointCount); // the artifact point itself was dropped
@@ -276,7 +276,7 @@ describe("fitHrToPowerCalibrationAcrossRaces", () => {
     // signal to protect), dtS=30s steps so the 180s lookback window covers
     // several prior points.
     const clean = makeHrRace(3, trueSlope, trueIntercept, { stepMinutes: 0.5, targetPowerWPerKg: 9, noise: (i) => 2 * Math.sin(i / 20) });
-    const baseline = fitHrToPowerCalibrationAcrossRaces([clean], baseParams);
+    const baseline = fitHrToPowerCalibrationAcrossRaces([clean]);
     expect(baseline).not.toBeNull();
 
     // Splice in a short recovery-lag block partway through: power crashes
@@ -288,7 +288,7 @@ describe("fitHrToPowerCalibrationAcrossRaces", () => {
     const peakHr = clean[spliceStart - 1].heartRateBpm!;
     const contaminated = clean.map((p, i) => (i >= spliceStart && i < spliceStart + spliceLen ? { ...p, grossPowerWPerKg: 2, heartRateBpm: peakHr } : p));
 
-    const result = fitHrToPowerCalibrationAcrossRaces([contaminated], baseParams);
+    const result = fitHrToPowerCalibrationAcrossRaces([contaminated]);
     expect(result).not.toBeNull();
     // Without down-weighting, the recovery-lag block would pull the slope
     // noticeably away from the clean baseline; down-weighted, it should

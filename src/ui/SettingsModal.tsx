@@ -12,8 +12,6 @@ interface SettingsModalProps {
   onClose: () => void;
   formInputs: FormInputs;
   onChange: (values: FormInputs) => void;
-  onApplyTau: (tauMin: number) => void;
-  onApplyFInf: (fInf: number) => void;
   onApplySurfaceCostMultipliers: (multipliers: Partial<Record<SurfaceCategory, number>>) => void;
   onApplyHrCalibration: (slope: number, intercept: number) => void;
   onApplyPacingMargin: (fit: PacingMarginFitResult) => void;
@@ -38,8 +36,6 @@ export function SettingsModal({
   onClose,
   formInputs,
   onChange,
-  onApplyTau,
-  onApplyFInf,
   onApplySurfaceCostMultipliers,
   onApplyHrCalibration,
   onApplyPacingMargin,
@@ -91,8 +87,6 @@ export function SettingsModal({
           <StravaConnectionStatus />
           <RunLibraryPanel
             formInputs={formInputs}
-            onApplyTau={onApplyTau}
-            onApplyFInf={onApplyFInf}
             onApplySurfaceCostMultipliers={onApplySurfaceCostMultipliers}
             onApplyHrCalibration={onApplyHrCalibration}
             onApplyPacingMargin={onApplyPacingMargin}

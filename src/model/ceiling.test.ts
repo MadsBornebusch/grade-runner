@@ -1,21 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { altitudeFraction, anaerobicCapacityMultiplier, ceilingPower, sustainableFraction,
-  forceExponentialCurve
-} from "./ceiling";
+import { altitudeFraction, anaerobicCapacityMultiplier, ceilingPower, sustainableFraction } from "./ceiling";
 import type { CeilingParams } from "./ceiling";
 
 describe("sustainableFraction", () => {
-  it("starts near f0 and decays toward f_inf, capped by LT2", () => {
-    expect(sustainableFraction(0)).toBeCloseTo(0.85, 6); // f0=0.94 capped to lt2=0.85
+  it("holds VO2max at t=0 and keeps falling out to ultra durations", () => {
+    // The power law diverges as t->0, so the VO2max cap -- not an LT2
+    // clamp -- is what bounds the short end.
+    expect(sustainableFraction(0)).toBeCloseTo(1, 6);
     const long = sustainableFraction(24 * 60);
     expect(long).toBeGreaterThan(0.38);
-    expect(long).toBeLessThan(0.5);
+    expect(long).toBeLessThan(0.55);
   });
 
-  it("never exceeds LT2", () => {
+  it("never exceeds VO2max", () => {
     for (const t of [0, 1, 10, 100, 1000]) {
-      expect(sustainableFraction(t, { lt2Fraction: 0.85 })).toBeLessThanOrEqual(0.85);
+      expect(sustainableFraction(t)).toBeLessThanOrEqual(1);
     }
+  });
+
+  it("keeps responding to duration at ultra lengths", () => {
+    // The exact failure that retired the exponential curve: its asymptote
+    // flattened out (38.2% at 24h, 38.0% at 48h), asserting the athlete
+    // could hold that fraction forever. A power law never stops falling.
+    const day = sustainableFraction(24 * 60);
+    const twoDays = sustainableFraction(48 * 60);
+    expect(twoDays).toBeLessThan(day * 0.95);
   });
 
   it("stays positive for 24h+ (replaces the Saltin fraction that goes negative)", () => {
@@ -24,15 +33,28 @@ describe("sustainableFraction", () => {
     }
   });
 
-  it("respects a custom LT2 cap", () => {
-    expect(sustainableFraction(0, { lt2Fraction: 0.7 })).toBeCloseTo(0.7, 6);
+  it("is set by the fitted anchors, not by LT2", () => {
+    // LT2 used to cap this curve. It no longer enters: the envelope fit
+    // measures the one-hour anchor from the athlete's own races directly.
+    const params = { powerLawFraction60Min: 0.7, powerLawExponent: 0.16 };
+    expect(sustainableFraction(60, params)).toBeCloseTo(0.7, 6);
+    expect(sustainableFraction(60, { ...params, lt2Fraction: 0.5 })).toBeCloseTo(0.7, 6);
   });
 
-  it("returns a flat f0-at-LT2-cap fraction for any tMin when disabled, ignoring fInf/tau entirely", () => {
-    const params = { pacingCurveEnabled: false, f0: 0.9, fInf: 0.3, tauMin: 100, lt2Fraction: 0.85 };
+  it("holds the one-hour fraction flat for any duration when disabled", () => {
+    // "Off" means no duration decay at all. It used to hold f0 -- the
+    // retired exponential curve's t=0 anchor, which has no meaning now that
+    // curve is gone -- so the athlete's own fitted one-hour fraction is
+    // what stays flat instead.
+    const params = { pacingCurveEnabled: false, powerLawFraction60Min: 0.82, powerLawExponent: 0.16 };
     for (const t of [0, 60, 600, 6000]) {
-      expect(sustainableFraction(t, params)).toBeCloseTo(0.85, 6); // capped by lt2Fraction, not decaying toward fInf
+      expect(sustainableFraction(t, params)).toBeCloseTo(0.82, 6);
     }
+  });
+
+  it("never lets the disabled branch exceed VO2max", () => {
+    const params = { pacingCurveEnabled: false, powerLawFraction60Min: 1.4 };
+    expect(sustainableFraction(60, params)).toBeCloseTo(1, 6);
   });
 });
 
@@ -154,16 +176,15 @@ describe("ceilingPower", () => {
 
 describe("power-law duration curve", () => {
   const POWER_LAW: CeilingParams = {
-    durationCurve: "powerLaw",
     powerLawFraction60Min: 0.813,
     powerLawExponent: 0.1602,
     lt2Fraction: 0.814,
   };
 
   it("is byte-for-byte unchanged when durationCurve is omitted (exponential default)", () => {
-    const params: CeilingParams = { f0: 0.94, fInf: 0.66, tauMin: 220, lt2Fraction: 0.814 };
+    const params: CeilingParams = { lt2Fraction: 0.814 };
     for (const tMin of [10, 42, 92, 505, 1464]) {
-      expect(sustainableFraction(tMin, { ...params, durationCurve: "exponential" })).toBe(
+      expect(sustainableFraction(tMin, { ...params, })).toBe(
         sustainableFraction(tMin, params),
       );
     }
@@ -213,19 +234,5 @@ describe("power-law duration curve", () => {
   it("decreases monotonically with duration past the VO2max cap", () => {
     const f = [20, 42, 92, 240, 505, 816, 1464, 2880].map((t) => sustainableFraction(t, POWER_LAW));
     for (let i = 1; i < f.length; i++) expect(f[i]).toBeLessThan(f[i - 1]);
-  });
-});
-
-describe("forceExponentialCurve", () => {
-  it("strips power-law mode so pacingFit's exponential searches stay meaningful", () => {
-    expect(forceExponentialCurve({ durationCurve: "powerLaw", fInf: 0.5 })).toEqual({
-      durationCurve: "exponential",
-      fInf: 0.5,
-    });
-  });
-
-  it("leaves exponential params untouched", () => {
-    const params: CeilingParams = { durationCurve: "exponential", fInf: 0.5 };
-    expect(forceExponentialCurve(params)).toBe(params);
   });
 });

@@ -10,11 +10,7 @@ export interface CeilingParams {
   vo2MaxMlPerKgPerMin?: number;
   /** LT2 as a fraction of VO2max — hard cap on sustainable fraction. Default 0.85. */
   lt2Fraction?: number;
-  /** Duration->fraction decay curve parameters (PLAN.md §5 P0 fix for Saltin). */
-  f0?: number;
-  fInf?: number;
-  tauMin?: number;
-  /** Fraction lost per hour of elapsed racing, applied on top of the ceiling. 0 = off (default). */
+    /** Fraction lost per hour of elapsed racing, applied on top of the ceiling. 0 = off (default). */
   durabilityDriftPerHour?: number;
   /**
    * PLAN.md §12/§13 stage 5: a second, independent durability term keyed to
@@ -37,28 +33,6 @@ export interface CeilingParams {
    */
   pacingCurveEnabled?: boolean;
   /**
-   * Which duration->fraction shape to use. "exponential" (the default, and
-   * byte-for-byte the behavior that existed before this field) is the
-   * f0/fInf/tauMin bounded decay above. "powerLaw" instead uses
-   * powerLawFraction60Min/powerLawExponent below.
-   *
-   * Motivated by a measured failure of the exponential across this
-   * athlete's own 8 confirmed races (42min-24h): real sustained fraction of
-   * VO2max spans 86%->41% (a factor of 2.1), while the fitted exponential
-   * spans only 83%->66% (a factor of 1.26). fInf is the culprit -- it's an
-   * asymptote no single race ever reaches, so the within-race fit that
-   * produces it leaves it essentially unconstrained, and it ends up far too
-   * high (0.66 against a real 24h value of 0.41). A power law has no
-   * absorbing asymptote and fits the whole range.
-   *
-   * IMPORTANT: pacingFit.ts's tau/fInf fits call ceilingPower directly on
-   * real recorded elapsed time to search EXPONENTIAL parameters. Handing
-   * them params in "powerLaw" mode would have them fitting an exponential
-   * against a power-law ceiling -- meaningless. Those fits force
-   * "exponential" explicitly; see forceExponentialCurve below.
-   */
-  durationCurve?: "exponential" | "powerLaw";
-  /**
    * Sustainable fraction of VO2max at 60 minutes -- the power law's anchor.
    * Deliberately anchored at 60min rather than at t=1 (whose raw
    * coefficient is a meaningless extrapolation well above 1.0): LT2 is
@@ -74,30 +48,15 @@ export interface CeilingParams {
   powerLawExponent?: number;
 }
 
-/**
- * Strips `durationCurve` back to "exponential" -- for pacingFit.ts's
- * tau/fInf searches, which are only meaningful against the exponential
- * shape they're searching parameters of (see durationCurve's own doc). A
- * no-op for params already in exponential mode, so it's safe to apply
- * unconditionally at those call sites.
- */
-export function forceExponentialCurve(params: CeilingParams): CeilingParams {
-  return params.durationCurve === "powerLaw" ? { ...params, durationCurve: "exponential" } : params;
-}
-
 /** Exported so pacingFit.ts's tau/fInf hot loop can hoist this merge out
  * of its per-point inner loop -- ceilingPower otherwise allocates a fresh
  * merged object for every point of every candidate. */
 export const CEILING_DEFAULTS: Required<CeilingParams> = {
   vo2MaxMlPerKgPerMin: 50,
   lt2Fraction: 0.85,
-  f0: 0.94,
-  fInf: 0.38,
-  tauMin: 250,
   durabilityDriftPerHour: 0,
   durabilityDriftPerDescentUnit: 0,
   pacingCurveEnabled: true,
-  durationCurve: "exponential",
   powerLawFraction60Min: 0.81,
   powerLawExponent: 0.16,
 };
@@ -118,25 +77,29 @@ export const CEILING_DEFAULTS: Required<CeilingParams> = {
 const MAX_AEROBIC_FRACTION = 1;
 
 /**
- * Sustainable fraction of VO2max as a function of event duration so far,
- * minutes. Bounded decay (replaces Saltin's `(940-t)/1000`, which goes
- * negative past ~15.6h) always capped by LT2.
+ * Sustainable fraction of VO2max as a function of event duration, minutes.
+ *
+ * A power law, f(t) = f60 * (t/60)^-b, fitted per athlete as an envelope
+ * over their confirmed races. It replaced a bounded exponential decay
+ * (f_inf + (f0 - f_inf)e^-t/tau, capped at LT2), which failed in both
+ * tails: its asymptote stopped responding to duration entirely -- 38.2% of
+ * VO2max at 24h and 38.0% at 48h, asserting an athlete could hold that
+ * forever, against a literature finding that critical-power asymptotes
+ * aren't sustainable past 30-70 minutes -- while the LT2 cap flattened
+ * every race under ~131 minutes to a single value.
  */
 export function sustainableFraction(
   tMin: number,
   params: CeilingParams = {},
 ): number {
-  const { f0, fInf, tauMin, lt2Fraction, pacingCurveEnabled, durationCurve, powerLawFraction60Min, powerLawExponent } =
-    { ...CEILING_DEFAULTS, ...params };
-  if (!pacingCurveEnabled) return Math.min(f0, lt2Fraction);
-  if (durationCurve === "powerLaw") {
-    // Guard t<=0 (and the t->0 blow-up generally) via the same VO2max cap
-    // that bounds the short end -- see MAX_AEROBIC_FRACTION's own doc.
-    if (!(tMin > 0)) return MAX_AEROBIC_FRACTION;
-    return Math.min(powerLawFraction60Min * Math.pow(tMin / 60, -powerLawExponent), MAX_AEROBIC_FRACTION);
-  }
-  const fraction = fInf + (f0 - fInf) * Math.exp(-tMin / tauMin);
-  return Math.min(fraction, lt2Fraction);
+  const { pacingCurveEnabled, powerLawFraction60Min, powerLawExponent } = { ...CEILING_DEFAULTS, ...params };
+  // "Off" means no duration decay at all: hold the one-hour fraction for
+  // the whole event, however long it is.
+  if (!pacingCurveEnabled) return Math.min(powerLawFraction60Min, MAX_AEROBIC_FRACTION);
+  // Guard t<=0 (and the t->0 blow-up generally) via the same VO2max cap
+  // that bounds the short end -- see MAX_AEROBIC_FRACTION's own doc.
+  if (!(tMin > 0)) return MAX_AEROBIC_FRACTION;
+  return Math.min(powerLawFraction60Min * Math.pow(tMin / 60, -powerLawExponent), MAX_AEROBIC_FRACTION);
 }
 
 /** Below this many minutes, anaerobicCapacityMultiplier holds its value flat
