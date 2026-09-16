@@ -425,7 +425,18 @@ export async function runFitBatch(
       error: null,
     });
     await yieldToBrowser();
-    const safeFit = fitTauFInfWithSupportGate(races, ceilingParams, { raceDates, halfLifeDays });
+    // The exponential fade curve (f0/f_inf/tau) is only ever the athlete's
+    // ceiling when the power-law envelope hasn't been fitted. Under the
+    // power law, sustainableFraction reads none of those three, so this
+    // search -- and everything it feeds -- is provably inert: the params it
+    // returns differ from `ceilingParams` only in tau/f_inf, and every
+    // downstream consumer (HR calibration, pacing margin) evaluates through
+    // sustainableFraction, which ignores them. Skipping it is
+    // behaviour-preserving and removes real work from the batch.
+    const fadeCurveSuperseded = formInputs.durationCurve === "powerLaw";
+    const safeFit: SafeFitResult = fadeCurveSuperseded
+      ? { ceilingParams, tier: "defaults", tauFit: null, fInfFit: null }
+      : fitTauFInfWithSupportGate(races, ceilingParams, { raceDates, halfLifeDays });
 
     // Per-category surface cost, conditioned on recorded heart rate as the
     // effort signal instead of the solver's own max-sustainable-effort
@@ -607,7 +618,7 @@ export async function runFitBatch(
     // an input to anything -- and it is the single most expensive thing in
     // the batch (~100 resampled refits, minutes on a large library). Don't
     // compute it.
-    if (formInputs.durationCurve === "powerLaw") return;
+    if (fadeCurveSuperseded) return;
 
     // Not awaited: this resolves long after runFitBatch returns. The
     // generation guard stops a slow bootstrap from clobbering a NEWER fit's

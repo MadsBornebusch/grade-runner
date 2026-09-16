@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import {
+  DEFAULT_FORM_INPUTS,
+  loadFormInputs,
   equivalentLT1LT2,
   resolveSubstrateAnchors,
   resolveVo2Max,
@@ -166,5 +168,77 @@ describe("speedFromMs / speedToMs", () => {
   it("is identity for m/s", () => {
     expect(speedFromMs(2.0, "ms")).toBe(2.0);
     expect(speedToMs(2.0, "ms")).toBe(2.0);
+  });
+});
+
+describe("duration curve", () => {
+  const KEY = "grade-runner:inputs";
+  // The suite runs in node, which has no localStorage. A minimal in-memory
+  // stand-in is enough: loadFormInputs only ever does getItem here.
+  beforeAll(() => {
+    if (typeof globalThis.localStorage !== "undefined") return;
+    const store = new Map<string, string>();
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => void store.set(k, String(v)),
+        removeItem: (k: string) => void store.delete(k),
+        clear: () => store.clear(),
+      },
+    });
+  });
+
+  const withSaved = <T,>(saved: Record<string, unknown> | null, fn: () => T): T => {
+    const before = localStorage.getItem(KEY);
+    try {
+      if (saved === null) localStorage.removeItem(KEY);
+      else localStorage.setItem(KEY, JSON.stringify(saved));
+      return fn();
+    } finally {
+      if (before === null) localStorage.removeItem(KEY);
+      else localStorage.setItem(KEY, before);
+    }
+  };
+
+  it("is the power law for a brand new athlete", () => {
+    // The exponential curve is no longer offered. Its fInf asymptote stops
+    // responding to duration entirely -- 38.2% of VO2max at 24h and 38.0%
+    // at 48h -- which asserts an athlete can hold that fraction forever.
+    expect(DEFAULT_FORM_INPUTS.durationCurve).toBe("powerLaw");
+  });
+
+  it("carries an unfitted athlete on a default curve, not a broken one", () => {
+    // With fewer than 3 confirmed races nothing is fitted, so the default
+    // anchors are what every new athlete actually predicts through. They
+    // should be a plausible curve rather than a placeholder.
+    expect(DEFAULT_FORM_INPUTS.powerLawFraction60Min).toBeGreaterThan(0.6);
+    expect(DEFAULT_FORM_INPUTS.powerLawFraction60Min).toBeLessThan(0.95);
+    expect(DEFAULT_FORM_INPUTS.powerLawExponent).toBeGreaterThan(0.05);
+    expect(DEFAULT_FORM_INPUTS.powerLawExponent).toBeLessThan(0.3);
+  });
+
+  it("migrates an existing profile off the exponential curve", () => {
+    // Without this an athlete who saved before the switch would silently
+    // keep predicting through the retired curve forever.
+    const migrated = withSaved({ durationCurve: "exponential", bodyMassKg: 72 }, loadFormInputs);
+    expect(migrated.durationCurve).toBe("powerLaw");
+    expect(migrated.bodyMassKg).toBe(72);
+  });
+
+  it("leaves an already-migrated profile alone", () => {
+    const kept = withSaved(
+      { durationCurve: "powerLaw", powerLawFraction60Min: 0.8207, powerLawExponent: 0.151 },
+      loadFormInputs,
+    );
+    expect(kept.durationCurve).toBe("powerLaw");
+    expect(kept.powerLawFraction60Min).toBeCloseTo(0.8207, 6);
+    expect(kept.powerLawExponent).toBeCloseTo(0.151, 6);
+  });
+
+  it("keeps a saved profile's own fitted anchors rather than resetting them", () => {
+    const kept = withSaved({ powerLawFraction60Min: 0.77, powerLawExponent: 0.19 }, loadFormInputs);
+    expect(kept.powerLawFraction60Min).toBeCloseTo(0.77, 6);
+    expect(kept.powerLawExponent).toBeCloseTo(0.19, 6);
   });
 });

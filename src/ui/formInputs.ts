@@ -50,13 +50,25 @@ export interface FormInputs {
    * they saw there too. */
   lt1HeartRateBpm: number | null;
   lt2HeartRateBpm: number | null;
+  /**
+   * The retired exponential fade curve. Kept in the type only so an older
+   * saved profile still parses and so the fits and diagnostics that search
+   * over them (tauDiagnostic, the joint fInf/tau fit) still compile --
+   * nothing reads them for a prediction any more, because durationCurve is
+   * "powerLaw" for every athlete. See loadFormInputs' own migration note.
+   */
   f0: number;
   fInf: number;
   tauMin: number;
-  /** Which duration->fraction ceiling shape to use (see
-   * CeilingParams.durationCurve). "exponential" is the historical default;
-   * "powerLaw" spans short and ultra durations the exponential provably
-   * cannot, at the cost of needing its own between-race fit. */
+  /**
+   * Which duration->fraction ceiling shape to use (see
+   * CeilingParams.durationCurve). "powerLaw" for everyone: it is the only
+   * shape offered, fitted from 3+ confirmed races (4x duration span to fit
+   * the exponent as well as the level) and otherwise left at a default
+   * that tracks the published Peronnet-Thibault curve. "exponential"
+   * remains in the union only so an older saved profile parses before
+   * loadFormInputs migrates it.
+   */
   durationCurve: "exponential" | "powerLaw";
   /** Power-law anchor: sustainable fraction of VO2max at 60 minutes. Should
    * land near lt2Fraction (LT2 is conventionally ~60-minute power). */
@@ -166,7 +178,7 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   f0: 0.94,
   fInf: 0.38,
   tauMin: 250,
-  durationCurve: "exponential",
+  durationCurve: "powerLaw",
   powerLawFraction60Min: 0.81,
   powerLawExponent: 0.16,
   pacingCurveEnabled: true,
@@ -220,6 +232,17 @@ export function loadFormInputs(): FormInputs {
         { date: new Date().toISOString().slice(0, 10), value: parsed.vo2MaxMlPerKgPerMin, source: "manual" },
       ];
     }
+    // The exponential fade curve is no longer offered. It failed in both
+    // tails: its fInf asymptote stops responding to duration entirely
+    // (38.2% of VO2max at 24h, 38.0% at 48h -- asserting the athlete can
+    // hold that forever, against a literature finding that critical-power
+    // asymptotes aren't sustainable past 30-70 minutes), and its LT2 clamp
+    // flattened every race under ~131 minutes to one value. The power law
+    // replaces it for everyone, fitted from 3+ confirmed races and
+    // otherwise left at a default that tracks the published
+    // Peronnet-Thibault curve closely across the whole range this app
+    // plans for.
+    if (parsed.durationCurve === "exponential") merged.durationCurve = "powerLaw";
     // Migrate a pre-g/kg save (a raw glycogenStoreG gram total, no
     // glycogenGPerKg yet) into the equivalent per-kg figure at that user's
     // own body mass, so a customized store carries forward instead of
