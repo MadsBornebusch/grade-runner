@@ -71,3 +71,43 @@ describe("prefetchSurfaceEdges", () => {
     expect(fetchSurfaceEdges.mock.calls.length).toBeLessThan(400);
   });
 });
+
+describe("analyzeOptionsFor", () => {
+  const formInputs = {
+    bodyMassKg: 70,
+    intakeGPerH: 60,
+    glycogenGPerKg: 7.5,
+    walkMaxMs: 2,
+    altitudeAdjustment: true,
+    surfaceCostMultipliers: { gravel: 1.06, path: 1.17 },
+  } as never;
+
+  it("measures against the terrain cost the solver will predict with", () => {
+    // The invariant. A fit measures what the athlete produced; the solver
+    // spends that measurement back. Measured on plain Minetti and spent on
+    // a terrain-charged course, the duration-ceiling envelope licensed too
+    // little power on unpaved races -- Ecotrail 80 predicted +6.5% and
+    // Askerspurten +4.4%, both races the envelope RESTS ON and should
+    // reproduce. Consistent measurement gives +1.3% and +1.5%.
+    expect(__testing.analyzeOptionsFor(formInputs, {}).surfaceCostMultipliers).toEqual({
+      gravel: 1.06,
+      path: 1.17,
+    });
+  });
+
+  it("passes undefined, not an empty object, when nothing is fitted yet", () => {
+    // analysis.ts distinguishes "no surface model" from "a model that says
+    // 1.0x"; an empty object would read as the latter.
+    const unfitted = { ...(formInputs as object), surfaceCostMultipliers: null } as never;
+    expect(__testing.analyzeOptionsFor(unfitted, {}).surfaceCostMultipliers).toBeUndefined();
+  });
+
+  it("carries the rest of the athlete's physiology through unchanged", () => {
+    const opts = __testing.analyzeOptionsFor(formInputs, { vo2MaxMlPerKgPerMin: 55 });
+    expect(opts.bodyMassKg).toBe(70);
+    expect(opts.walkMaxMs).toBe(2);
+    expect(opts.altitudeAdjustment).toBe(true);
+    expect(opts.fueling).toEqual({ intakeGPerH: 60 });
+    expect(opts.ceilingParams).toEqual({ vo2MaxMlPerKgPerMin: 55 });
+  });
+});

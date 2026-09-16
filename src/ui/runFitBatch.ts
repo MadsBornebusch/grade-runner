@@ -230,6 +230,42 @@ export function resetRunFitStatus(): void {
   setStatus({ running: false, progress: null, result: null, error: null });
 }
 
+/**
+ * The cost/physiology basis every measurement in a fit is taken against.
+ *
+ * Extracted so the one invariant that matters here is visible and testable:
+ * it must match what App.tsx puts into SolverInputs for prediction. A fit
+ * measures what the athlete produced; the solver spends that measurement
+ * back. If the two use different cost models the difference shows up as a
+ * prediction error nobody can locate.
+ *
+ * That is exactly what surfaceCostMultipliers being absent here did. The
+ * duration-ceiling envelope's sustainedFraction was measured as if every
+ * race were plain Minetti, then spent on a course charged for its terrain,
+ * so a race predicted slow in proportion to how much unpaved ground it had
+ * -- Ecotrail 80 at +6.5% and Askerspurten at +4.4%, both races the
+ * envelope is fitted to REST ON and should reproduce. Measured
+ * consistently they come out at +1.3% and +1.5%. See
+ * scripts/diagCeilingTerrainConsistency.ts.
+ */
+export function analyzeOptionsFor(formInputs: FormInputs, ceilingParams: CeilingParams) {
+  return {
+    bodyMassKg: formInputs.bodyMassKg,
+    ceilingParams,
+    fueling: { intakeGPerH: formInputs.intakeGPerH },
+    glycogenStoreG: resolveGlycogenStoreG(formInputs),
+    walkMaxMs: formInputs.walkMaxMs,
+    altitudeAdjustment: formInputs.altitudeAdjustment,
+    // The multipliers currently applied to the athlete's model, i.e. what
+    // the solver will predict with -- not the ones this batch is about to
+    // fit, which land in formInputs afterwards and are measured against on
+    // the next fit. That fixed point converges in one round, and the fitted
+    // values move little between runs (1.17 -> 1.14 on this athlete, ~0.4%
+    // on Ecotrail) next to the ~5% error this removes.
+    surfaceCostMultipliers: formInputs.surfaceCostMultipliers ?? undefined,
+  };
+}
+
 export interface RunFitCallbacks {
   onApplyTau: (tauMin: number) => void;
   onApplyFInf: (fInf: number) => void;
@@ -334,14 +370,7 @@ export async function runFitBatch(
         if (pointLegs.length > 1 && course.totalDistance3D / 1000 < MIN_LEG_DISTANCE_KM) continue;
         const segments = surfaceEdges ? attachSurfaceData(course.segments, surfaceEdges) : course.segments;
         libraryInputs.push({ runId: pointLegs.length > 1 ? `${run.id}-leg${i + 1}` : run.id, segments });
-        const analysis = analyzeRun(segments, {
-          bodyMassKg: formInputs.bodyMassKg,
-          ceilingParams,
-          fueling: { intakeGPerH: formInputs.intakeGPerH },
-          glycogenStoreG: resolveGlycogenStoreG(formInputs),
-          walkMaxMs: formInputs.walkMaxMs,
-          altitudeAdjustment: formInputs.altitudeAdjustment,
-        });
+        const analysis = analyzeRun(segments, analyzeOptionsFor(formInputs, ceilingParams));
         if (run.raceTag === "race") {
           confirmedRaceTrendPoints.push(buildEffortTrendPoints(segments, analysis.segments, formInputs.altitudeAdjustment));
           confirmedRaceNames.push(pointLegs.length > 1 ? `${run.name} (leg ${i + 1})` : run.name);
@@ -603,4 +632,9 @@ export async function runFitBatch(
 }
 
 /** Internals exposed for runFitBatch.test.ts only. */
-export const __testing = { prefetchSurfaceEdges, SURFACE_FETCH_CONCURRENCY, SURFACE_FETCH_BUDGET_MS };
+export const __testing = {
+  analyzeOptionsFor,
+  prefetchSurfaceEdges,
+  SURFACE_FETCH_CONCURRENCY,
+  SURFACE_FETCH_BUDGET_MS,
+};
