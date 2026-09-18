@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { maxDescentSpeedMs } from "./minetti";
 import type { CourseSegment } from "../gpx/pipeline";
 import {
   findFlatPacedFinishTime,
@@ -114,66 +113,6 @@ describe("simulate", () => {
     expect(result.segments).toHaveLength(2000);
   });
 
-  it("scales the descent-speed cap by the WHOLE course's total distance (minetti.ts's descentPacingMultiplier), not just each segment's own grade", () => {
-    // Same steep-descent grade (-0.15, past the cap's onset) simulated as a
-    // short course vs. a long one, at an effort high enough that the
-    // aerobic ceiling alone would ask for a speed well above either cap --
-    // so the descent-speed cap is what actually binds on every descent
-    // segment in both cases, and only the course's total distance differs.
-    const shortDescent = simulate(1, baseInputs({ segments: makeSegments(100, 50, -0.15) })); // 5km
-    const longDescent = simulate(1, baseInputs({ segments: makeSegments(2000, 50, -0.15) })); // 100km
-    expect(shortDescent.feasible).toBe(true);
-    expect(longDescent.feasible).toBe(true);
-    // A 5km race's descent-cap-eligible segments should be paced faster
-    // (descentPacingMultiplier > 1 there) than the same grade on a 100km
-    // race (descentPacingMultiplier < 1) -- confirms totalDistanceKm is
-    // actually threaded from inputs.segments into maxDescentSpeedMs, not
-    // silently ignored.
-    expect(shortDescent.segments[0].speedMs).toBeGreaterThan(longDescent.segments[0].speedMs);
-  });
-
-  describe("descentPacingInCeiling", () => {
-    // 100km of steep descent at full effort, so the descent cap is what
-    // binds on every segment and nothing else can confound the comparison.
-    const longSteep = () => makeSegments(2000, 50, -0.15);
-
-    it("is off by default -- the distance-scaled multiplier still applies", () => {
-      const withFlag = simulate(1, baseInputs({ segments: longSteep(), descentPacingInCeiling: false }));
-      const without = simulate(1, baseInputs({ segments: longSteep() }));
-      expect(withFlag.segments[0].speedMs).toBe(without.segments[0].speedMs);
-    });
-
-    it("drops the distance-scaled pacing term when the ceiling already owns it", () => {
-      // The double-count this fixes: the duration-ceiling envelope is fit
-      // from a time-weighted mean of real gross power over the athlete's
-      // actual trace, descents included, so how conservatively they descend
-      // a long race is already inside the fitted fraction. Scaling the cap
-      // down by distance as well subtracted it twice, and a race the
-      // envelope rests on came back ~17% slow.
-      const owned = simulate(1, baseInputs({ segments: longSteep(), descentPacingInCeiling: true }));
-      const doubleCounted = simulate(1, baseInputs({ segments: longSteep() }));
-      expect(owned.segments[0].speedMs).toBeGreaterThan(doubleCounted.segments[0].speedMs);
-    });
-
-    it("leaves a 100km race's descents capped exactly as a short race's are", () => {
-      // What "drop the distance term" has to mean concretely: total
-      // distance stops entering the cap at all, so the same gradient caps
-      // identically on a 5km and a 100km course.
-      const long100 = simulate(1, baseInputs({ segments: makeSegments(2000, 50, -0.15), descentPacingInCeiling: true }));
-      const short5 = simulate(1, baseInputs({ segments: makeSegments(100, 50, -0.15), descentPacingInCeiling: true }));
-      expect(long100.segments[0].speedMs).toBeCloseTo(short5.segments[0].speedMs, 9);
-    });
-
-    it("still applies the grade-only cap -- this must not revive absurd downhill speeds", () => {
-      // The regression guard. The grade-only cap is a biomechanical limit
-      // on controlling a gradient, not a pacing choice, so it survives.
-      // Without it, a large power budget divided by Minetti cost near its
-      // minimum implies a speed no one can hold on a -15% slope.
-      const owned = simulate(1, baseInputs({ segments: longSteep(), descentPacingInCeiling: true }));
-      expect(owned.segments[0].speedMs).toBeLessThan(maxDescentSpeedMs(-0.15) * 1.0001);
-      expect(owned.segments[0].speedMs).toBeLessThan(5);
-    });
-  });
 });
 
 describe("pacing distribution", () => {
@@ -308,11 +247,8 @@ describe("findSustainableTheta", () => {
     const hillyInputs = baseInputs({
       segments: hilly,
       fueling: { intakeGPerH: 30 },
-      // 280, not 390 -- this 100km course's descents are now scaled by
-      // descentPacingMultiplier (minetti.ts), which caps descent speed (and
-      // so carb burn) more tightly at ultra distance than the old flat
-      // grade-only cap did, so less glycogen headroom is needed to keep
-      // this scenario landing on the same fuel-bound-not-ceiling-bound edge.
+      // Tuned so this scenario lands on the fuel-bound rather than
+      // ceiling-bound side of the edge it is testing.
       glycogenStoreG: 280,
     });
     const { theta, result } = findSustainableTheta(hillyInputs);

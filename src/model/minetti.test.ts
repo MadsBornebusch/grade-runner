@@ -3,9 +3,8 @@ import {
   GRADE_CLAMP,
   costOfRunning,
   costOfWalking,
-  descentPacingMultiplier,
   gradeAdjustedSpeedMs,
-  maxDescentSpeedMs,
+  gradeOnlyMaxDescentSpeedMs,
 } from "./minetti";
 
 describe("costOfRunning", () => {
@@ -68,16 +67,16 @@ describe("costOfWalking", () => {
   });
 });
 
-describe("maxDescentSpeedMs", () => {
+describe("gradeOnlyMaxDescentSpeedMs", () => {
   it("is unlimited on flat, uphill, and mild downhill (above the ramp-start grade)", () => {
-    expect(maxDescentSpeedMs(0.1)).toBe(Infinity);
-    expect(maxDescentSpeedMs(0)).toBe(Infinity);
-    expect(maxDescentSpeedMs(-0.03)).toBe(Infinity);
+    expect(gradeOnlyMaxDescentSpeedMs(0.1)).toBe(Infinity);
+    expect(gradeOnlyMaxDescentSpeedMs(0)).toBe(Infinity);
+    expect(gradeOnlyMaxDescentSpeedMs(-0.03)).toBe(Infinity);
   });
 
   it("decreases monotonically as the descent steepens past the ramp-start grade", () => {
     const grades = [-0.04, -0.06, -0.08, -0.1, -0.15, -0.2, -0.25, -0.3, -0.35, -0.4, -0.45];
-    const speeds = grades.map((g) => maxDescentSpeedMs(g));
+    const speeds = grades.map((g) => gradeOnlyMaxDescentSpeedMs(g));
     for (let k = 1; k < speeds.length; k++) {
       expect(speeds[k]).toBeLessThan(speeds[k - 1]);
     }
@@ -93,9 +92,9 @@ describe("maxDescentSpeedMs", () => {
     // by ~2.7 m/s -- the whole Infinity-to-2.8 jump landing in one step).
     const eps = 0.0005;
     const onsetGrade = -0.1;
-    const justAbove = maxDescentSpeedMs(onsetGrade + eps);
-    const at = maxDescentSpeedMs(onsetGrade);
-    const justBelow = maxDescentSpeedMs(onsetGrade - eps);
+    const justAbove = gradeOnlyMaxDescentSpeedMs(onsetGrade + eps);
+    const at = gradeOnlyMaxDescentSpeedMs(onsetGrade);
+    const justBelow = gradeOnlyMaxDescentSpeedMs(onsetGrade - eps);
     expect(Math.abs(justAbove - at)).toBeLessThan(0.1);
     expect(Math.abs(at - justBelow)).toBeLessThan(0.1);
   });
@@ -104,76 +103,23 @@ describe("maxDescentSpeedMs", () => {
     // A grade halfway through the ramp should sit meaningfully between the
     // ramp-start cap (effectively non-binding, ~5.5 m/s) and the onset
     // speed (2.8 m/s) -- not equal to either endpoint.
-    const halfway = maxDescentSpeedMs(-0.07);
+    const halfway = gradeOnlyMaxDescentSpeedMs(-0.07);
     expect(halfway).toBeGreaterThan(2.9);
     expect(halfway).toBeLessThan(5.4);
   });
 
   it("clamps beyond the steepest validated grade instead of continuing to fall", () => {
-    expect(maxDescentSpeedMs(-0.6)).toBeCloseTo(maxDescentSpeedMs(-GRADE_CLAMP), 6);
-    expect(maxDescentSpeedMs(-2)).toBeCloseTo(maxDescentSpeedMs(-GRADE_CLAMP), 6);
+    expect(gradeOnlyMaxDescentSpeedMs(-0.6)).toBeCloseTo(gradeOnlyMaxDescentSpeedMs(-GRADE_CLAMP), 6);
+    expect(gradeOnlyMaxDescentSpeedMs(-2)).toBeCloseTo(gradeOnlyMaxDescentSpeedMs(-GRADE_CLAMP), 6);
   });
 
   it("stays well below what raw metabolic cost alone would allow at the steepest cheap grades", () => {
     // This is the exact failure mode being fixed: a large power budget divided
     // by Cr(i) near its minimum implies an absurd speed; the cap should hold
     // it to something a person could plausibly control on a technical descent.
-    expect(maxDescentSpeedMs(-0.18)).toBeLessThan(4);
+    expect(gradeOnlyMaxDescentSpeedMs(-0.18)).toBeLessThan(4);
   });
 
-  it("is unaffected by totalDistanceKm on flat/uphill/mild-downhill (still Infinity)", () => {
-    expect(maxDescentSpeedMs(0.1, 10)).toBe(Infinity);
-    expect(maxDescentSpeedMs(-0.03, 200)).toBe(Infinity);
-  });
-
-  it("omitting totalDistanceKm is byte-for-byte identical to the grade-only cap", () => {
-    for (const grade of [-0.1, -0.2, -0.3]) {
-      expect(maxDescentSpeedMs(grade, undefined)).toBe(maxDescentSpeedMs(grade));
-    }
-  });
-
-  it("scales the grade-only cap up for a short race and down for a long one", () => {
-    const gradeOnly = maxDescentSpeedMs(-0.15);
-    const short = maxDescentSpeedMs(-0.15, 10);
-    const long = maxDescentSpeedMs(-0.15, 150);
-    expect(short).toBeGreaterThan(gradeOnly);
-    expect(long).toBeLessThan(gradeOnly);
-    expect(long).toBeLessThan(short);
-  });
-});
-
-describe("descentPacingMultiplier", () => {
-  it("is 1 for zero, negative, or non-finite distance (no scaling applied)", () => {
-    expect(descentPacingMultiplier(0)).toBe(1);
-    expect(descentPacingMultiplier(-5)).toBe(1);
-    expect(descentPacingMultiplier(NaN)).toBe(1);
-  });
-
-  it("decreases monotonically as total distance grows", () => {
-    const distances = [5, 10, 20, 40, 80, 100, 150, 200];
-    const multipliers = distances.map((d) => descentPacingMultiplier(d));
-    for (let k = 1; k < multipliers.length; k++) {
-      expect(multipliers[k]).toBeLessThan(multipliers[k - 1]);
-    }
-  });
-
-  it("is above 1 for a short race and below 1 for a long one, matching the real fit data it's calibrated from", () => {
-    // scripts/fitDescentPacingMultiplier.ts: 10.2km real ratio 1.12,
-    // 113.2km real ratio 0.57 -- not asserting the exact fitted numbers
-    // here (that's the fit script's job), just the qualitative shape a
-    // regression on these constants should never invert.
-    expect(descentPacingMultiplier(10)).toBeGreaterThan(1);
-    expect(descentPacingMultiplier(110)).toBeLessThan(0.7);
-  });
-
-  it("converges to a stable floor rather than continuing to fall for an absurdly long extrapolated distance", () => {
-    // The exponential decay's fInf asymptote -- an extrapolation guard by
-    // construction, not a separate clamp: a 1000km "race" shouldn't produce
-    // a multiplier meaningfully different from a 500km one.
-    const far = descentPacingMultiplier(500);
-    const fartherStill = descentPacingMultiplier(5000);
-    expect(Math.abs(far - fartherStill)).toBeLessThan(0.01);
-  });
 });
 
 describe("gradeAdjustedSpeedMs", () => {

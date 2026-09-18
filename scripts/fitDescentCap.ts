@@ -48,7 +48,7 @@ for (const o of observations) {
   console.log(
     `  ${(o.gradient * 100).toFixed(0).padStart(4)}%     ${(o.distanceM / 1000).toFixed(1).padStart(6)} km   ` +
       `${pace(o.speedMs).padStart(11)}/km   ${pace(gradeOnlyMaxDescentSpeedMs(o.gradient)).padStart(8)}/km   ` +
-      `${pace(gradeOnlyMaxDescentSpeedMs(o.gradient, fit.curve)).padStart(7)}/km${binds ? "  <-- binds" : ""}`,
+      `${pace(gradeOnlyMaxDescentSpeedMs(o.gradient)).padStart(7)}/km${binds ? "  <-- binds" : ""}`,
   );
 }
 console.log(`\ndefault: onset ${DEFAULT_DESCENT_CAP_CURVE.onsetSpeedMs.toFixed(2)} m/s, clamp ${DEFAULT_DESCENT_CAP_CURVE.clampSpeedMs.toFixed(2)} m/s`);
@@ -76,7 +76,7 @@ function predict(segments: CourseSegment[], capCurve?: DescentCapCurve) {
     walkMaxMs: applied.walkMaxMs, altitudeAdjustment: applied.altitudeAdjustment,
     anaerobicCapacityMin: applied.anaerobicCapacityMin,
     surfaceCostMultipliers: applied.surfaceCostMultipliers ?? undefined,
-    descentPacingInCeiling: true, descentCapCurve: capCurve,
+    descentCapCurve: capCurve,
   };
   const r = findFlatPacedFinishTime(si).result;
   let work = 0;

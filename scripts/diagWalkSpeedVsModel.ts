@@ -91,7 +91,7 @@ const si: SolverInputs = {
   fueling: { intakeGPerH: inp.intakeGPerH }, glycogenStoreG: resolveGlycogenStoreG(inp),
   walkMaxMs: inp.walkMaxMs, altitudeAdjustment: inp.altitudeAdjustment,
   anaerobicCapacityMin: inp.anaerobicCapacityMin, surfaceCostMultipliers: inp.surfaceCostMultipliers ?? undefined,
-  descentPacingInCeiling: true, descentCapCurve: capCurve,
+  descentCapCurve: capCurve,
 };
 const r = findFlatPacedFinishTime(si).result;
 console.log("\nEcotrail 80 climbs -- YOU vs the MODEL\n");

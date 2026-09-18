@@ -78,7 +78,7 @@ for (const race of RACES) {
     walkMaxMs: applied.walkMaxMs, altitudeAdjustment: applied.altitudeAdjustment,
     anaerobicCapacityMin: applied.anaerobicCapacityMin,
     surfaceCostMultipliers: applied.surfaceCostMultipliers ?? undefined,
-    descentPacingInCeiling: true, descentCapCurve: capCurve,
+    descentCapCurve: capCurve,
   };
   const sim = findFlatPacedFinishTime(si).result;
   const actual = analyzeRun(segments, {

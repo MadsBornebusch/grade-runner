@@ -62,7 +62,7 @@ function predict(segments: CourseSegment[], walkMaxMs: number) {
     fueling: { intakeGPerH: inp.intakeGPerH }, glycogenStoreG: resolveGlycogenStoreG(inp),
     walkMaxMs, altitudeAdjustment: inp.altitudeAdjustment, anaerobicCapacityMin: inp.anaerobicCapacityMin,
     surfaceCostMultipliers: inp.surfaceCostMultipliers ?? undefined,
-    descentPacingInCeiling: true, descentCapCurve: capCurve,
+    descentCapCurve: capCurve,
   };
   const r = findFlatPacedFinishTime(si).result;
   let walkM = 0, totM = 0;

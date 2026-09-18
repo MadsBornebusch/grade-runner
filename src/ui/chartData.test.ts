@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { summarizeChartPoints, type ChartPoint,
   buildGradeHistogram,
 } from "./chartData";
-import { gradeAdjustedSpeedMs, maxDescentSpeedMs } from "../model/minetti";
+import { gradeAdjustedSpeedMs, gradeOnlyMaxDescentSpeedMs } from "../model/minetti";
 
 function point(overrides: Partial<ChartPoint> = {}): ChartPoint {
   return {
@@ -216,35 +216,32 @@ describe("buildGradeHistogram", () => {
   }
 
   it("buckets distance by gradient and omits empty bins", () => {
-    const bins = buildGradeHistogram(graded([{ gradient: 0.01, speedMs: 3 }, { gradient: 0.011, speedMs: 3 }]), 10);
+    const bins = buildGradeHistogram(graded([{ gradient: 0.01, speedMs: 3 }, { gradient: 0.011, speedMs: 3 }]));
     expect(bins).toHaveLength(1);
     expect(bins[0].distanceM).toBeCloseTo(200, 6);
   });
 
   it("flags the uphill bins where the plan walks", () => {
     const bins = buildGradeHistogram(
-      graded([{ gradient: 0.3, speedMs: 1, mode: "walk" }, { gradient: 0.01, speedMs: 3 }]),
-      10,
+      graded([{ gradient: 0.3, speedMs: 1, mode: "walk" }, { gradient: 0.01, speedMs: 3 }])
     );
     expect(bins.find((b) => b.fromGradient >= 0.3)!.hasWalking).toBe(true);
     expect(bins.find((b) => b.fromGradient === 0)!.hasWalking).toBe(false);
   });
 
   it("flags a descent bin as braking only when the cap is what bound it", () => {
-    const totalKm = 10;
     const gradient = -0.2;
-    const cap = maxDescentSpeedMs(gradient, totalKm);
-    const atCap = buildGradeHistogram(graded([{ gradient, speedMs: cap }]), totalKm);
+    const cap = gradeOnlyMaxDescentSpeedMs(gradient);
+    const atCap = buildGradeHistogram(graded([{ gradient, speedMs: cap }]));
     expect(atCap[0].hasBraking).toBe(true);
     // Comfortably under the cap -- power-limited, not braking.
-    const underCap = buildGradeHistogram(graded([{ gradient, speedMs: cap * 0.5 }]), totalKm);
+    const underCap = buildGradeHistogram(graded([{ gradient, speedMs: cap * 0.5 }]));
     expect(underCap[0].hasBraking).toBe(false);
   });
 
   it("returns bins in ascending gradient order", () => {
     const bins = buildGradeHistogram(
-      graded([{ gradient: 0.2, speedMs: 2 }, { gradient: -0.2, speedMs: 2 }, { gradient: 0, speedMs: 3 }]),
-      10,
+      graded([{ gradient: 0.2, speedMs: 2 }, { gradient: -0.2, speedMs: 2 }, { gradient: 0, speedMs: 3 }])
     );
     expect(bins.map((b) => b.fromGradient)).toEqual([...bins.map((b) => b.fromGradient)].sort((a, b) => a - b));
   });

@@ -27,10 +27,7 @@ import { descentStepForSegment } from "./descentImpact";
 import { fitIntensityConditionedSlowdownModel } from "./intensityConditionedSlowdownFit";
 import {
   DEFAULT_DESCENT_CAP_CURVE,
-  DEFAULT_DESCENT_PACING_CURVE,
   type DescentCapCurve,
-  type DescentPacingCurve,
-  descentPacingMultiplier,
   GRADE_CLAMP,
   gradeOnlyMaxDescentSpeedMs,
 } from "./minetti";
@@ -778,208 +775,6 @@ export function fitSurfaceCostMultipliersFromIntensity(
 }
 
 /**
- * One race's descent-pacing observation: how fast this athlete ACTUALLY ran
- * the descent-cap-eligible stretches, relative to the unscaled grade-only
- * cap (minetti.ts's gradeOnlyMaxDescentSpeedMs) over those same stretches.
- * The denominator must always be the UNSCALED cap -- using the already-
- * scaled maxDescentSpeedMs would make the fit circular (fitting a
- * multiplier against a target that already has one applied).
- */
-export interface DescentPacingObservation {
-  totalDistanceKm: number;
-  /** Distance-weighted mean actual speed / distance-weighted mean grade-only
-   * cap, over this race's cap-eligible segments. */
-  ratio: number;
-}
-
-/**
- * Builds a DescentPacingObservation from one race's recorded segments, or
- * null when the race has too little cap-eligible descent to say anything
- * (a flat road race constrains this curve not at all, and averaging over a
- * handful of segments would be noise, not signal).
- */
-export function buildDescentPacingObservation(
-  segments: CourseSegment[],
-  minCapEligibleDistanceM = 200,
-): DescentPacingObservation | null {
-  let weightedActual = 0;
-  let weightedCap = 0;
-  let capEligibleDistanceM = 0;
-  let totalDistanceM = 0;
-  for (const seg of segments) {
-    totalDistanceM = Math.max(totalDistanceM, seg.cumulativeDistance3D);
-    const cap = gradeOnlyMaxDescentSpeedMs(seg.gradient);
-    if (!Number.isFinite(cap)) continue;
-    if (seg.dtS === null || seg.dtS <= 0 || seg.paused) continue;
-    const speed = seg.distance3D / seg.dtS;
-    weightedActual += speed * seg.distance3D;
-    weightedCap += cap * seg.distance3D;
-    capEligibleDistanceM += seg.distance3D;
-  }
-  if (capEligibleDistanceM < minCapEligibleDistanceM || weightedCap <= 0 || totalDistanceM <= 0) return null;
-  return {
-    totalDistanceKm: totalDistanceM / 1000,
-    ratio: weightedActual / weightedCap,
-  };
-}
-
-/**
- * Minimum spread between the shortest and longest race in the pool before
- * the full three-parameter (f0, fInf, tauKm) curve is identifiable at all.
- * Directly motivated by a real observed failure: a leakage-free refit on 3
- * races clustered at 17/56/57km returned fInf=0.33 with SSE=0.0043 -- a
- * near-perfect fit whose asymptote was pure extrapolation, since no race in
- * the pool was long enough to constrain it. The same fit with races out to
- * 113km gave fInf=0.64. A near-zero SSE hides this completely, so span, not
- * residual, is what has to gate the tier.
- */
-export const MIN_DESCENT_DISTANCE_SPAN_RATIO = 4;
-
-/** Minimum races before any descent-pacing tier is trusted -- same rationale
- * as MIN_INFORMATIVE_RACES for the tau/fInf fits. */
-export const MIN_DESCENT_PACING_RACES = 3;
-
-export interface DescentPacingFitResult {
-  curve: DescentPacingCurve;
-  /**
-   * Which tier produced `curve`, mirroring fitTauFInfWithSupportGate's own
-   * three-tier shape. "full" = all three parameters fit (needs both a
-   * short and a long race, see MIN_DESCENT_DISTANCE_SPAN_RATIO); "fInfTau"
-   * = f0 held at the default and only the asymptote/scale fit (the pool has
-   * enough races but too narrow a distance span to identify the short-race
-   * end); "defaults" = not enough to trust anything, `curve` is exactly the
-   * default passed in and callers should NOT apply it as a fitted result.
-   */
-  tier: "full" | "fInfTau" | "defaults";
-  raceCount: number;
-  /** Longest race distance / shortest, the identifiability signal gating
-   * the "full" tier. */
-  distanceSpanRatio: number;
-  /** Sum of squared residuals at `curve` -- diagnostic only, deliberately
-   * NOT a gate (see MIN_DESCENT_DISTANCE_SPAN_RATIO's own doc on why a low
-   * SSE is not evidence the fit generalizes). */
-  sse: number;
-}
-
-/** Physically sane outer search bounds. A best fit sitting exactly ON one
- * of these is a boundary hit: the search wanted to keep going and was
- * clamped, so that parameter is pinned by the bound rather than identified
- * by the data -- the same failure fitTauFInfWithSupportGate guards with its
- * own hitSearchBoundary flags. Found in real data: this athlete's races
- * under 60km clear the distance-span gate (5.5x) yet still rail f0 to 1.3,
- * because no race short enough to constrain the short-race end exists in
- * that pool. */
-const DESCENT_F0_BOUNDS: [number, number] = [0.9, 1.3];
-const DESCENT_FINF_BOUNDS: [number, number] = [0.3, 0.9];
-const DESCENT_TAU_BOUNDS: [number, number] = [5, 200];
-
-function atBoundary(value: number, [lo, hi]: [number, number]): boolean {
-  const tolerance = (hi - lo) * 1e-6;
-  return value <= lo + tolerance || value >= hi - tolerance;
-}
-
-function descentSse(points: DescentPacingObservation[], curve: DescentPacingCurve): number {
-  let sum = 0;
-  for (const p of points) {
-    const err = descentPacingMultiplier(p.totalDistanceKm, curve) - p.ratio;
-    sum += err * err;
-  }
-  return sum;
-}
-
-/**
- * Coarse-then-refine grid search over the parameters `fitF0` selects.
- * Grid search rather than a closed-form or gradient method for the same
- * reason scripts/fitDescentPacingMultiplier.ts used one: the pool is a
- * handful of points, the surface is cheap to evaluate exhaustively, and a
- * grid is trivially verifiable against the printed residuals.
- */
-function searchDescentCurve(
-  points: DescentPacingObservation[],
-  fallback: DescentPacingCurve,
-  fitF0: boolean,
-): { curve: DescentPacingCurve; sse: number } {
-  const run = (
-    f0Range: [number, number],
-    fInfRange: [number, number],
-    tauRange: [number, number],
-    steps: number,
-  ): { curve: DescentPacingCurve; sse: number } => {
-    let best = { curve: fallback, sse: Infinity };
-    for (let i = 0; i <= steps; i++) {
-      const f0 = fitF0 ? f0Range[0] + ((f0Range[1] - f0Range[0]) * i) / steps : fallback.f0;
-      for (let j = 0; j <= steps; j++) {
-        const fInf = fInfRange[0] + ((fInfRange[1] - fInfRange[0]) * j) / steps;
-        for (let k = 0; k <= steps; k++) {
-          const tauKm = tauRange[0] + ((tauRange[1] - tauRange[0]) * k) / steps;
-          const curve = { f0, fInf, tauKm };
-          const sse = descentSse(points, curve);
-          if (sse < best.sse) best = { curve, sse };
-        }
-      }
-      if (!fitF0) break; // f0 held -- the outer loop has nothing to vary
-    }
-    return best;
-  };
-
-  const coarse = run(DESCENT_F0_BOUNDS, DESCENT_FINF_BOUNDS, DESCENT_TAU_BOUNDS, 40);
-  return run(
-    [Math.max(DESCENT_F0_BOUNDS[0], coarse.curve.f0 - 0.05), Math.min(DESCENT_F0_BOUNDS[1], coarse.curve.f0 + 0.05)],
-    [Math.max(DESCENT_FINF_BOUNDS[0], coarse.curve.fInf - 0.05), Math.min(DESCENT_FINF_BOUNDS[1], coarse.curve.fInf + 0.05)],
-    [Math.max(DESCENT_TAU_BOUNDS[0], coarse.curve.tauKm - 15), Math.min(DESCENT_TAU_BOUNDS[1], coarse.curve.tauKm + 15)],
-    60,
-  );
-}
-
-/**
- * Fits this athlete's own descent-pacing curve (minetti.ts's
- * DescentPacingCurve) from their confirmed races' actual descent speeds,
- * replacing DEFAULT_DESCENT_PACING_CURVE -- which is one specific athlete's
- * numbers and has no business being applied universally.
- *
- * Tiered exactly like fitTauFInfWithSupportGate, and for the same reason:
- * the three-parameter curve is genuinely unidentifiable on a narrow pool,
- * and a grid search will happily return a confident-looking near-zero-SSE
- * answer anyway (see MIN_DESCENT_DISTANCE_SPAN_RATIO's own doc for the real
- * case that motivated this). Callers should apply the result only when
- * `tier !== "defaults"`.
- */
-export function fitDescentPacingCurveAcrossRaces(
-  observations: DescentPacingObservation[],
-  fallback: DescentPacingCurve = DEFAULT_DESCENT_PACING_CURVE,
-  opts: { minRaces?: number; minDistanceSpanRatio?: number } = {},
-): DescentPacingFitResult {
-  const minRaces = opts.minRaces ?? MIN_DESCENT_PACING_RACES;
-  const minSpan = opts.minDistanceSpanRatio ?? MIN_DESCENT_DISTANCE_SPAN_RATIO;
-  const points = observations.filter((o) => o.totalDistanceKm > 0 && Number.isFinite(o.ratio));
-
-  const distances = points.map((p) => p.totalDistanceKm);
-  const distanceSpanRatio = distances.length > 0 ? Math.max(...distances) / Math.min(...distances) : 0;
-  const base = { raceCount: points.length, distanceSpanRatio };
-
-  if (points.length < minRaces) {
-    return { curve: fallback, tier: "defaults", ...base, sse: descentSse(points, fallback) };
-  }
-
-  if (distanceSpanRatio >= minSpan) {
-    const full = searchDescentCurve(points, fallback, true);
-    // A wide distance span is necessary but not sufficient: f0 can still
-    // rail to its search bound when the pool has no genuinely SHORT race
-    // (see DESCENT_F0_BOUNDS' own doc for the real case). Demote to the
-    // f0-held tier rather than shipping a pinned parameter as a fit.
-    if (!atBoundary(full.curve.f0, DESCENT_F0_BOUNDS)) {
-      return { curve: full.curve, tier: "full", ...base, sse: full.sse };
-    }
-  }
-
-  // Either clustered too tightly in distance to identify the short-race
-  // end, or f0 railed to its search boundary above -- either way, hold f0
-  // at the fallback and fit only fInf/tau.
-  const partial = searchDescentCurve(points, fallback, false);
-  return { curve: partial.curve, tier: "fInfTau", ...base, sse: partial.sse };
-}
-
-/**
  * One race's contribution to the duration-ceiling fit: how long it took and
  * what fraction of VO2max was actually sustained over it (time-weighted).
  * The "fraction" here is measured against a FIXED sea-level maxAerobicPower
@@ -1258,10 +1053,9 @@ function weightedPercentile(samples: { speedMs: number; weightM: number }[], p: 
  * Pools every run's descent segments into grade bands and reports the
  * demonstrated speed in each.
  *
- * Deliberately fed the WIDE run pool, not just confirmed races -- unlike
- * fitDescentPacingCurveAcrossRaces, which measures a race-day pacing
- * CHOICE and would be diluted by training runs. This measures a physical
- * capability, so a hard training descent is evidence of it just as much as
+ * Deliberately fed the WIDE run pool, not just confirmed races. This
+ * measures a physical capability rather than a race-day choice, so a hard
+ * training descent is evidence of it just as much as
  * a race one, and taking a high percentile means the extra easy-jogging
  * distance costs nothing while the extra fast tail helps.
  */

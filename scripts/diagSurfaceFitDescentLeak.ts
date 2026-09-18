@@ -1,5 +1,5 @@
 // Does the surface cost multiplier fit pick up descent slowdown that
-// maxDescentSpeedMs already models as a speed limit?
+// gradeOnlyMaxDescentSpeedMs already models as a speed limit?
 //
 // On a technical descent an athlete is slow at LOW heart rate, for footing
 // and braking reasons, not metabolic ones. The intensity-conditioned

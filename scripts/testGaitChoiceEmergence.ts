@@ -27,7 +27,7 @@
 //     forced override adds nothing.
 // (C) Real, not derived from power: for actually-running descending
 //     segments (speed > walkMaxMs), compare their real GPS speed against
-//     `maxDescentSpeedMs(grade)` -- checks whether that cap (a single
+//     `gradeOnlyMaxDescentSpeedMs(grade)` -- checks whether that cap (a single
 //     noisy 55km-ultra calibration point per its own doc comment) is
 //     actually consistent with how fast this athlete runs downhill.
 //
@@ -38,7 +38,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { costOfRunning, costOfWalking, maxDescentSpeedMs } from "../src/model/minetti.ts";
+import { costOfRunning, costOfWalking, gradeOnlyMaxDescentSpeedMs } from "../src/model/minetti.ts";
 import { runPipeline, type GpxPoint } from "../src/gpx/pipeline.ts";
 import { arg } from "./stravaScriptHelpers.ts";
 
@@ -113,7 +113,7 @@ function main() {
   for (const netPowerWPerKg of [6, 8, 10, 12, 15, 18]) {
     let crossoverGrade: number | null = null;
     for (let i = -0.05; i <= 0.5; i += 0.005) {
-      const vRun = Math.min(netPowerWPerKg / costOfRunning(i), maxDescentSpeedMs(i));
+      const vRun = Math.min(netPowerWPerKg / costOfRunning(i), gradeOnlyMaxDescentSpeedMs(i));
       const vWalk = Math.min(WALK_MAX_MS, netPowerWPerKg / costOfWalking(i));
       if (vWalk >= vRun) {
         crossoverGrade = i;
@@ -123,10 +123,10 @@ function main() {
     console.log(`${String(netPowerWPerKg).padStart(14)}   ${crossoverGrade !== null ? `${(crossoverGrade * 100).toFixed(1)}%` : "never (within +50%)"}`);
   }
 
-  // (C) Real, power-independent: does maxDescentSpeedMs actually cap this
+  // (C) Real, power-independent: does gradeOnlyMaxDescentSpeedMs actually cap this
   // athlete's real running descent speed, or is it more conservative than
   // their real behavior?
-  console.log("\n(C) Descent cap check -- real GPS speed on RUNNING descents vs. maxDescentSpeedMs(grade)");
+  console.log("\n(C) Descent cap check -- real GPS speed on RUNNING descents vs. gradeOnlyMaxDescentSpeedMs(grade)");
   console.log("grade    n     median actual speed   cap at this grade   actual/cap");
   for (const [grade, pts] of sorted) {
     if (grade >= -0.05) continue; // only descents where the cap can engage
@@ -134,7 +134,7 @@ function main() {
     if (runningPts.length < 5) continue;
     const speeds = runningPts.map((p) => p.speedMs).sort((a, b) => a - b);
     const medianSpeed = speeds[Math.floor(speeds.length / 2)];
-    const cap = maxDescentSpeedMs(grade);
+    const cap = gradeOnlyMaxDescentSpeedMs(grade);
     console.log(
       `${(grade * 100).toFixed(1).padStart(6)}%  ${String(runningPts.length).padStart(5)}   ${medianSpeed.toFixed(2).padStart(6)} m/s            ${cap === Infinity ? "inf" : cap.toFixed(2)} m/s          ${cap === Infinity ? "--" : (medianSpeed / cap).toFixed(2)}`,
     );

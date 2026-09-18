@@ -24,7 +24,7 @@ import {
   MIN_DURATION_CEILING_RACES,
   MIN_DURATION_CEILING_SPAN_RATIO,
 } from "../model/pacingFit";
-import type { DescentCapCurve, DescentPacingCurve } from "../model/minetti";
+import type { DescentCapCurve } from "../model/minetti";
 import { resolveCeilingParams, resolveGlycogenStoreG, resolveLt1Lt2Fractions, type FormInputs, type Vo2MaxEntry } from "./formInputs";
 import {
   ensurePointsForRun,
@@ -51,7 +51,6 @@ interface RunLibraryPanelProps {
   onApplySurfaceCostMultipliers: (multipliers: Partial<Record<SurfaceCategory, number>>) => void;
   onApplyHrCalibration: (slope: number, intercept: number) => void;
   onApplyPacingMargin: (fit: PacingMarginFitResult) => void;
-  onApplyDescentPacingCurve: (curve: DescentPacingCurve) => void;
   onApplyDescentCapCurve: (curve: DescentCapCurve) => void;
   onApplyDurationCeiling: (fraction60Min: number, exponent: number) => void;
   onApplyAnaerobicCapacityMin: (anaerobicCapacityMin: number) => void;
@@ -166,7 +165,6 @@ export function RunLibraryPanel({
   formInputs,
   onApplySurfaceCostMultipliers,
   onApplyPacingMargin,
-  onApplyDescentPacingCurve,
   onApplyDescentCapCurve,
   onApplyDurationCeiling,
   onApplyAnaerobicCapacityMin,
@@ -519,7 +517,6 @@ export function RunLibraryPanel({
       onApplySurfaceCostMultipliers,
       onApplyHrCalibration,
       onApplyPacingMargin,
-      onApplyDescentPacingCurve,
       onApplyDescentCapCurve,
       onApplyDurationCeiling,
       onApplyAnaerobicCapacityMin,

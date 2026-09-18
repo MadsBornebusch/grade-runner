@@ -120,7 +120,7 @@ function predict(segments: CourseSegment[], f60: number, exponent: number) {
     fueling: { intakeGPerH: use.intakeGPerH }, glycogenStoreG: resolveGlycogenStoreG(use),
     walkMaxMs: use.walkMaxMs, altitudeAdjustment: use.altitudeAdjustment,
     anaerobicCapacityMin: use.anaerobicCapacityMin, surfaceCostMultipliers: { ...MULTIPLIERS },
-    descentPacingInCeiling: true, descentCapCurve: capCurve,
+    descentCapCurve: capCurve,
   };
   return findFlatPacedFinishTime(si).result.finishTimeS;
 }

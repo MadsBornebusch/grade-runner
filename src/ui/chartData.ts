@@ -1,7 +1,7 @@
 import type { CourseSegment } from "../gpx/pipeline";
 import type { AnalysisSegmentResult } from "../model/analysis";
 import { applyHrInertia, type HrPowerCalibration, predictHeartRateFromPower } from "../model/hrCalibration";
-import { gradeAdjustedSpeedMs, maxDescentSpeedMs } from "../model/minetti";
+import { gradeAdjustedSpeedMs, gradeOnlyMaxDescentSpeedMs } from "../model/minetti";
 import type { SegmentResult } from "../model/solver";
 
 export interface ChartPoint {
@@ -249,12 +249,8 @@ export const GRADE_BIN_WIDTH = 0.02;
  * walking and which are descent-speed-capped ("braking"). Bins with no
  * distance at all are omitted, so a rolling course doesn't render dozens of
  * empty bars out to +/-45%.
- *
- * `totalDistanceKm` is the whole course's distance, needed because the
- * descent cap this compares against is itself scaled by it (see
- * minetti.ts's descentPacingMultiplier).
  */
-export function buildGradeHistogram(points: ChartPoint[], totalDistanceKm: number): GradeBin[] {
+export function buildGradeHistogram(points: ChartPoint[]): GradeBin[] {
   const byBin = new Map<number, GradeBin>();
   for (let i = 1; i < points.length; i++) {
     const cur = points[i];
@@ -263,7 +259,7 @@ export function buildGradeHistogram(points: ChartPoint[], totalDistanceKm: numbe
     if (distanceM <= 0) continue;
     const index = Math.floor(cur.gradient / GRADE_BIN_WIDTH);
     const existing = byBin.get(index);
-    const cap = maxDescentSpeedMs(cur.gradient, totalDistanceKm);
+    const cap = gradeOnlyMaxDescentSpeedMs(cur.gradient);
     // At the cap (not merely near it): the solver takes min(power-implied
     // speed, cap), so "braking" means the cap is what bound this segment.
     const braking = Number.isFinite(cap) && cur.speedMs >= cap - 1e-6;

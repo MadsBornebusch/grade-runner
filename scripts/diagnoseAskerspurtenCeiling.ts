@@ -26,7 +26,7 @@
 import { runPipeline } from "../src/gpx/pipeline.ts";
 import { analyzeRun } from "../src/model/analysis.ts";
 import { anaerobicCapacityMultiplier, ceilingPower, maxAerobicPower, type CeilingParams } from "../src/model/ceiling.ts";
-import { maxDescentSpeedMs } from "../src/model/minetti.ts";
+import { gradeOnlyMaxDescentSpeedMs } from "../src/model/minetti.ts";
 import {
   buildThresholdPowerAnchorPoints,
   DEFAULT_HR_INERTIA_TAU_S,
@@ -206,7 +206,7 @@ async function main() {
     // PROXY -- every segment targets the flat/uphill max power instead of
     // whatever the descent-speed cap would otherwise allow, i.e. the
     // athlete doesn't ease off on downhills at all. (c) isn't a real
-    // solver change (that would need maxDescentSpeedMs itself reworked),
+    // solver change (that would need gradeOnlyMaxDescentSpeedMs itself reworked),
     // just a quick way to see how much of the gap each mechanism explains.
     let memorylessWeightedSum = 0;
     let holdEffortWeightedSum = 0;
@@ -229,7 +229,7 @@ async function main() {
   }
 
   // What if we skip the solver entirely and cost the athlete's ACTUAL
-  // recorded GPS speed (analyzeRun -- no maxDescentSpeedMs cap involved at
+  // recorded GPS speed (analyzeRun -- no gradeOnlyMaxDescentSpeedMs cap involved at
   // all, see analysis.ts: grossPower is derived straight from seg.dtS /
   // seg.distance3D) through the same locked calibration? This answers two
   // separate questions at once: (1) is the descent-speed cap itself just
@@ -266,7 +266,7 @@ async function main() {
     let maxActualOverCapGrade = 0;
     for (let i = 0; i < course.segments.length; i++) {
       const seg = course.segments[i];
-      const cap = maxDescentSpeedMs(seg.gradient);
+      const cap = gradeOnlyMaxDescentSpeedMs(seg.gradient);
       if (!Number.isFinite(cap)) continue; // not a steep-enough descent to be cap-eligible at all
       const predicted = result.segments[i];
       const actual = analysis.segments.find((a) => a.index === seg.index);
@@ -285,12 +285,12 @@ async function main() {
         }
       }
     }
-    console.log(`Descent-cap-eligible segments (gradient steep enough for maxDescentSpeedMs to potentially bind): ${descentSegCount}`);
+    console.log(`Descent-cap-eligible segments (gradient steep enough for gradeOnlyMaxDescentSpeedMs to potentially bind): ${descentSegCount}`);
     console.log(`  Of those, solver's predicted speed is AT the cap on: ${cappedCount} (${((100 * cappedCount) / descentSegCount).toFixed(0)}%)`);
     console.log(`  Avg solver-predicted speed on these:  ${(predictedDescentSpeedSum / descentSegCount).toFixed(2)} m/s`);
     console.log(`  Avg ACTUAL recorded speed on these:   ${(actualDescentSpeedSum / descentSegCount).toFixed(2)} m/s`);
     console.log(
-      `  Largest single case of actual speed exceeding the cap: +${maxActualOverCap.toFixed(2)} m/s at grade ${(maxActualOverCapGrade * 100).toFixed(1)}% (cap there: ${maxDescentSpeedMs(maxActualOverCapGrade).toFixed(2)} m/s)\n`,
+      `  Largest single case of actual speed exceeding the cap: +${maxActualOverCap.toFixed(2)} m/s at grade ${(maxActualOverCapGrade * 100).toFixed(1)}% (cap there: ${gradeOnlyMaxDescentSpeedMs(maxActualOverCapGrade).toFixed(2)} m/s)\n`,
     );
   }
 

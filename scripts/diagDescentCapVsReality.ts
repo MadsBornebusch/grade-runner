@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runPipeline, type GpxPoint } from "../src/gpx/pipeline.ts";
-import { maxDescentSpeedMs } from "../src/model/minetti.ts";
+import { gradeOnlyMaxDescentSpeedMs } from "../src/model/minetti.ts";
 
 const CACHE = fileURLToPath(new URL("../.strava-cache/", import.meta.url));
 const RACES = [
@@ -27,7 +27,7 @@ for (const race of RACES) {
       if (s.gradient < lo || s.gradient >= hi) continue;
       if (s.paused || !(s.dtS !== null && s.dtS > 0)) continue;
       m += s.distance3D; t += s.dtS as number;
-      const cap = maxDescentSpeedMs(s.gradient); // grade-only, no distance term
+      const cap = gradeOnlyMaxDescentSpeedMs(s.gradient); // grade-only, no distance term
       capWeighted += (Number.isFinite(cap) ? cap : 99) * s.distance3D;
     }
     if (m < 200) continue;

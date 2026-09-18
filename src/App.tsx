@@ -253,12 +253,7 @@ function App() {
       unpavedCostMultiplier: formInputs.unpavedCostMultiplier,
       surfaceCostMultipliers: formInputs.surfaceCostMultipliers ?? undefined,
       anaerobicCapacityMin: formInputs.anaerobicCapacityMin,
-      descentPacingCurve: formInputs.descentPacingCurve ?? undefined,
       descentCapCurve: formInputs.descentCapCurve ?? undefined,
-      // The aerobic ceiling is fitted from this athlete's own races, so it
-      // already accounts for how they descend (see
-      // SolverInputs.descentPacingInCeiling).
-      descentPacingInCeiling: true,
     };
     lastSolverInputsRef.current = built;
     return built;
@@ -293,7 +288,6 @@ function App() {
     formInputs.anaerobicCapacityMin,
     formInputs.unpavedCostMultiplier,
     formInputs.surfaceCostMultipliers,
-    formInputs.descentPacingCurve,
     formInputs.descentCapCurve,
   ]);
 
@@ -402,9 +396,8 @@ function App() {
 
   const planSummaryStats = useMemo(() => summarizeChartPoints(chartPoints), [chartPoints]);
   // The descent cap the histogram's "braking" flag compares against is
-  // scaled by the whole course's distance, so it needs that distance too.
   const planGradeBins = useMemo(
-    () => buildGradeHistogram(chartPoints, chartPoints.length > 0 ? chartPoints[chartPoints.length - 1].distanceKm : 0),
+    () => buildGradeHistogram(chartPoints),
     [chartPoints],
   );
 
@@ -483,10 +476,7 @@ function App() {
   const analysisSummaryStats = useMemo(() => summarizeChartPoints(analysisChartPoints), [analysisChartPoints]);
   const analysisGradeBins = useMemo(
     () =>
-      buildGradeHistogram(
-        analysisChartPoints,
-        analysisChartPoints.length > 0 ? analysisChartPoints[analysisChartPoints.length - 1].distanceKm : 0,
-      ),
+      buildGradeHistogram(analysisChartPoints),
     [analysisChartPoints],
   );
 
@@ -767,7 +757,6 @@ function App() {
         formInputs={formInputs}
         onChange={setFormInputs}
         onApplySurfaceCostMultipliers={(surfaceCostMultipliers) => setFormInputs((prev) => ({ ...prev, surfaceCostMultipliers }))}
-        onApplyDescentPacingCurve={(descentPacingCurve) => setFormInputs((prev) => ({ ...prev, descentPacingCurve }))}
         onApplyDescentCapCurve={(descentCapCurve) => setFormInputs((prev) => ({ ...prev, descentCapCurve }))}
         onApplyDurationCeiling={(powerLawFraction60Min, powerLawExponent) =>
           // Switching to powerLaw here is the point: the fit only runs on

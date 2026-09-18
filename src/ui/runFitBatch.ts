@@ -26,12 +26,8 @@ import {
 import {
   buildEffortTrendPoints,
   fitSurfaceCostMultipliersFromIntensity,
-  buildDescentPacingObservation,
-  type DescentPacingFitResult,
-  type DescentPacingObservation,
   fitAnaerobicCapacityMin,
   type AnaerobicCapacityFitResult,
-  fitDescentPacingCurveAcrossRaces,
   buildDescentCapObservations,
   fitDescentCapCurve,
   type DescentCapFitResult,
@@ -42,7 +38,7 @@ import {
   type SurfaceCostMultiplierFitResult,
 } from "../model/pacingFit";
 import { fitPacingMarginAcrossRaces, type PacingMarginFitResult } from "../model/pacingMarginFit";
-import type { DescentCapCurve, DescentPacingCurve } from "../model/minetti";
+import type { DescentCapCurve } from "../model/minetti";
 import { buildSegmentLibrary } from "../model/segmentLibrary";
 import { DURABILITY_MIN_DURATION_S } from "../model/suggestRuns";
 import { attachSurfaceData } from "../model/surfaceExposure";
@@ -165,7 +161,6 @@ export interface RunFitResult {
   surfaceFit: SurfaceCostMultiplierFitResult | null;
   hrCalibrationFit: HrPowerCalibration | null;
   marginFit: PacingMarginFitResult | null;
-  descentPacingFit: DescentPacingFitResult | null;
   descentCapFit: DescentCapFitResult | null;
   durationCeilingFit: DurationCeilingFitResult | null;
   anaerobicFit: AnaerobicCapacityFitResult | null;
@@ -259,7 +254,6 @@ export interface RunFitCallbacks {
   onApplySurfaceCostMultipliers: (multipliers: SurfaceCostMultiplierFitResult["surfaceCostMultipliers"]) => void;
   onApplyHrCalibration: (slope: number, intercept: number) => void;
   onApplyPacingMargin: (fit: PacingMarginFitResult) => void;
-  onApplyDescentPacingCurve: (curve: DescentPacingCurve) => void;
   onApplyDescentCapCurve: (curve: DescentCapCurve) => void;
   onApplyDurationCeiling: (fraction60Min: number, exponent: number) => void;
   onApplyAnaerobicCapacityMin: (anaerobicCapacityMin: number) => void;
@@ -305,7 +299,6 @@ export async function runFitBatch(
     // user-confirmed races (raceTag === "race"), never a name heuristic.
     const confirmedRaceTrendPoints: EffortTrendPoint[][] = [];
     const confirmedRaceNames: string[] = [];
-    const confirmedRaceDescentObservations: DescentPacingObservation[] = [];
     const confirmedRaceDurationObservations: DurationCeilingObservation[] = [];
     // Fixed sea-level reference for the duration-ceiling fit's denominator.
     const refMaxAerobicPower = maxAerobicPower(0, ceilingParams);
@@ -360,15 +353,6 @@ export async function runFitBatch(
         if (run.raceTag === "race") {
           confirmedRaceTrendPoints.push(buildEffortTrendPoints(segments, analysis.segments, formInputs.altitudeAdjustment));
           confirmedRaceNames.push(pointLegs.length > 1 ? `${run.name} (leg ${i + 1})` : run.name);
-          // Descent-pacing curve: confirmed races only, deliberately not the
-          // wider training-run pool the surface fit uses. This measures a
-          // deliberate race-day pacing CHOICE, and a training run's descents
-          // are run at whatever intent that session had -- pooling them in
-          // would fit the average of "racing" and "jogging", not racing.
-          // Returns null for a race with too little steep descent to say
-          // anything, which is the common flat-road-race case.
-          const descentObservation = buildDescentPacingObservation(segments);
-          if (descentObservation) confirmedRaceDescentObservations.push(descentObservation);
           // Duration-ceiling envelope: what fraction of VO2max this race
           // actually sustained, against a FIXED sea-level reference -- NOT
           // against the ceiling curve, which would make the fit circular.
@@ -505,20 +489,6 @@ export async function runFitBatch(
       : null;
     if (marginFit) callbacks.onApplyPacingMargin(marginFit);
 
-    // Descent-pacing curve: replaces minetti.ts's DEFAULT_DESCENT_PACING_CURVE
-    // (one specific athlete's real numbers) with this athlete's own. Tiered
-    // internally -- only applied when the race pool actually identifies a
-    // curve, since a 3-parameter exponential will otherwise return a
-    // confident-looking near-zero-SSE fit off races clustered at one
-    // distance (see fitDescentPacingCurveAcrossRaces's own doc).
-    const descentPacingFit = fitDescentPacingCurveAcrossRaces(
-      confirmedRaceDescentObservations,
-      formInputs.descentPacingCurve ?? undefined,
-    );
-    if (descentPacingFit.tier !== "defaults") {
-      callbacks.onApplyDescentPacingCurve(descentPacingFit.curve);
-    }
-
     // Descent-speed cap: how fast this athlete actually controls a given
     // gradient. Built from the WIDE run pool rather than confirmed races
     // (see buildDescentCapObservations) -- this is a capability, so a hard
@@ -556,7 +526,6 @@ export async function runFitBatch(
       surfaceFit,
       hrCalibrationFit,
       marginFit,
-      descentPacingFit,
       descentCapFit,
       durationCeilingFit,
       anaerobicFit,

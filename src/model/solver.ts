@@ -4,13 +4,7 @@
 // constraints) and §6 (walk/run transition).
 
 import type { CourseSegment, SurfaceCategory } from "../gpx/pipeline";
-import {
-  costOfRunning,
-  costOfWalking,
-  type DescentCapCurve,
-  type DescentPacingCurve,
-  maxDescentSpeedMs,
-} from "./minetti";
+import { costOfRunning, costOfWalking, type DescentCapCurve, gradeOnlyMaxDescentSpeedMs } from "./minetti";
 import { grossToNet, netToGross } from "./energetics";
 import { anaerobicCapacityMultiplier, type CeilingParams, ceilingPower, maxAerobicPower, sustainableFraction } from "./ceiling";
 import type { DescentExposureBasis } from "./pacingFit";
@@ -46,32 +40,6 @@ export interface SolverInputs {
    * contract.
    */
   descentExposureBasis?: DescentExposureBasis;
-  /**
-   * True when `ceilingParams` came from the duration-ceiling envelope fit
-   * (pacingFit.ts's fitDurationCeilingAcrossRaces) rather than from
-   * defaults, in which case the distance-scaled descent PACING multiplier
-   * must not be applied on top of it.
-   *
-   * The two would otherwise subtract the same behaviour twice. That fit's
-   * observations (runFitBatch.ts) are a time-weighted mean of
-   * grossPowerWPerKg over the athlete's ACTUAL GPS trace, descents included
-   * and costed at the speed they were really run -- so how conservatively
-   * this athlete descends a long race is already inside the fitted
-   * fraction. Applying descentPacingMultiplier as well held ~9km of
-   * Ecotrail 80's descent below the power target, so the solver realized
-   * only 49.4% of max aerobic power against the 55.1% its own ceiling had
-   * licensed, and the finish time stretched to compensate: a race the
-   * envelope is fitted to REST ON came back ~17% slow. See
-   * scripts/diagEcotrailCost.ts.
-   *
-   * Only the distance-scaled pacing term is dropped. The grade-only cap
-   * still applies: that one is a biomechanical limit on how fast anyone can
-   * control a given gradient (without it a large power budget divided by
-   * Minetti cost near its minimum implies absurd speeds -- maxDescentSpeedMs's
-   * own tests pin this), not a pacing choice the ceiling could have
-   * absorbed.
-   */
-  descentPacingInCeiling?: boolean;
   /**
    * This athlete's own grade-to-max-controllable-descent-speed curve
    * (pacingFit.ts's fitDescentCapCurve). Omitted = minetti.ts's default,
@@ -122,16 +90,6 @@ export interface SolverInputs {
    * simulation.
    */
   anaerobicCapacityMin?: number;
-  /**
-   * This athlete's own fitted descent-pacing curve (minetti.ts's
-   * DescentPacingCurve), scaling the descent-speed cap by the race's total
-   * distance. Undefined falls back to DEFAULT_DESCENT_PACING_CURVE, which
-   * is ONE athlete's real numbers -- see its own doc. Fit per-athlete by
-   * pacingFit.ts's fitDescentPacingCurveAcrossRaces. Not a CeilingParams
-   * field, for the same reason unpavedCostMultiplier isn't: it's a
-   * cost/speed-of-locomotion effect, not an aerobic-ceiling one.
-   */
-  descentPacingCurve?: DescentPacingCurve;
 }
 
 export interface SegmentResult {
@@ -264,13 +222,6 @@ export function simulate(theta: number, inputs: SolverInputs, opts: SimulateOpti
   let cumulativeDescentImpactSquared = 0;
   let previousElevation: number | null = null;
   const unpavedCostMultiplier = inputs.unpavedCostMultiplier ?? 1;
-  // Whole-course distance, known up front for every real caller (this is
-  // always the FULL target course being planned, never a partial/remaining
-  // slice -- see maxDescentSpeedMs's own doc on why total distance, not
-  // distance-so-far, is what should drive the descent-pacing scale).
-  const totalDistanceKm =
-    inputs.segments.length > 0 ? inputs.segments[inputs.segments.length - 1].cumulativeDistance3D / 1000 : 0;
-
   for (const seg of inputs.segments) {
     const elapsedMin = cumulativeTimeS / 60;
     const elapsedHours = cumulativeTimeS / 3600;
@@ -306,14 +257,7 @@ export function simulate(theta: number, inputs: SolverInputs, opts: SimulateOpti
     const terrainMultiplier = perCategoryMultiplier ?? (seg.surfaceUnpaved ? unpavedCostMultiplier : 1);
     const costRun = costOfRunning(seg.gradient) * terrainMultiplier;
     const costWalk = costOfWalking(seg.gradient) * terrainMultiplier;
-    // Passing totalDistanceKm undefined is what selects the grade-only cap
-    // (maxDescentSpeedMs's own doc) -- note that passing a null/undefined
-    // CURVE does not, since that argument defaults.
-    const descentPacingDistanceKm = inputs.descentPacingInCeiling ? undefined : totalDistanceKm;
-    const vRun = Math.min(
-      targetNet / costRun,
-      maxDescentSpeedMs(seg.gradient, descentPacingDistanceKm, inputs.descentPacingCurve, inputs.descentCapCurve),
-    );
+    const vRun = Math.min(targetNet / costRun, gradeOnlyMaxDescentSpeedMs(seg.gradient, inputs.descentCapCurve));
     const vWalk = Math.min(walkMaxMs, targetNet / costWalk);
 
     const forceWalk =

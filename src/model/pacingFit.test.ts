@@ -6,23 +6,18 @@ import type { CourseSegment, SurfaceCategory } from "../gpx/pipeline";
 import type { TaggedMonotonicSegment } from "./segmentLibrary";
 import { findSustainableTheta } from "./solver";
 import {
-  buildDescentPacingObservation,
   buildEffortTrendPoints,
   computeEffortTrend,
   computeFadeTrend,
   type EffortTrendPoint,
   fitDurabilityDriftPerHour,
-  MIN_DESCENT_DISTANCE_SPAN_RATIO,
-  type DescentPacingObservation,
   fitAnaerobicCapacityMin,
-  fitDescentPacingCurveAcrossRaces,
   fitDurationCeilingAcrossRaces,
   type DurationCeilingObservation,
   fitSurfaceCostMultipliersFromIntensity,
   fitUnpavedCostMultiplierAcrossRaces,
   trimForPacingFit,
 } from "./pacingFit";
-import { type DescentPacingCurve, descentPacingMultiplier, gradeOnlyMaxDescentSpeedMs } from "./minetti";
 
 /** Builds points where actual power is a constant fraction of the ceiling
  * computed under `trueParams` -- i.e. a run that held perfectly even effort
@@ -504,124 +499,6 @@ describe("buildEffortTrendPoints -- heartRateBpm field", () => {
     const analysis = analyzeRun(segments, analysisInputs);
     const points = buildEffortTrendPoints(segments, analysis.segments, false);
     expect(points.every((p) => p.heartRateBpm === undefined)).toBe(true);
-  });
-});
-
-describe("fitDescentPacingCurveAcrossRaces", () => {
-  const KNOWN: DescentPacingCurve = { f0: 1.2, fInf: 0.6, tauKm: 40 };
-
-  /** Races synthesized from KNOWN, so a correct fit must recover it. */
-  function syntheticRaces(distancesKm: number[]): DescentPacingObservation[] {
-    return distancesKm.map((totalDistanceKm) => ({
-      totalDistanceKm,
-      ratio: descentPacingMultiplier(totalDistanceKm, KNOWN),
-    }));
-  }
-
-  it("recovers the generating curve from a well-spread race pool", () => {
-    const fit = fitDescentPacingCurveAcrossRaces(syntheticRaces([8, 17, 42, 80, 120, 170]));
-    expect(fit.tier).toBe("full");
-    expect(fit.curve.f0).toBeCloseTo(KNOWN.f0, 1);
-    expect(fit.curve.fInf).toBeCloseTo(KNOWN.fInf, 1);
-    expect(fit.curve.tauKm).toBeCloseTo(KNOWN.tauKm, 0);
-  });
-
-  it("refuses the full tier when every race sits at a similar distance", () => {
-    // The real failure this gate exists for: races clustered at 17/56/57km
-    // produced fInf=0.33 at SSE=0.0043 -- a near-perfect fit whose asymptote
-    // was pure extrapolation. Span, not residual, has to decide the tier.
-    const fit = fitDescentPacingCurveAcrossRaces(syntheticRaces([50, 55, 57, 60]));
-    expect(fit.tier).toBe("fInfTau");
-    expect(fit.distanceSpanRatio).toBeLessThan(MIN_DESCENT_DISTANCE_SPAN_RATIO);
-  });
-
-  it("holds f0 at the fallback in the narrow-span tier rather than inventing one", () => {
-    const fallback: DescentPacingCurve = { f0: 1.11, fInf: 0.5, tauKm: 30 };
-    const fit = fitDescentPacingCurveAcrossRaces(syntheticRaces([50, 55, 57, 60]), fallback);
-    expect(fit.tier).toBe("fInfTau");
-    expect(fit.curve.f0).toBe(fallback.f0);
-  });
-
-  it("falls back to defaults with too few races, without applying anything", () => {
-    const fallback: DescentPacingCurve = { f0: 1.11, fInf: 0.5, tauKm: 30 };
-    const fit = fitDescentPacingCurveAcrossRaces(syntheticRaces([12, 90]), fallback);
-    expect(fit.tier).toBe("defaults");
-    expect(fit.curve).toEqual(fallback);
-  });
-
-  it("demotes a boundary-hit f0 even when the distance span passes the gate", () => {
-    // Real case: this athlete's races under 60km span 5.5x (clearing the 4x
-    // gate) yet still rail f0 to its 1.3 search bound, because none of them
-    // is short enough to constrain the short-race end. A pinned parameter is
-    // not a fitted one -- same guard fitTauFInfWithSupportGate applies via
-    // its own hitSearchBoundary flags.
-    const railing: DescentPacingObservation[] = [
-      { totalDistanceKm: 11, ratio: 1.6 },
-      { totalDistanceKm: 20, ratio: 1.4 },
-      { totalDistanceKm: 45, ratio: 1.0 },
-      { totalDistanceKm: 60, ratio: 0.8 },
-    ];
-    const fallback: DescentPacingCurve = { f0: 1.11, fInf: 0.5, tauKm: 30 };
-    const fit = fitDescentPacingCurveAcrossRaces(railing, fallback);
-    expect(fit.distanceSpanRatio).toBeGreaterThanOrEqual(MIN_DESCENT_DISTANCE_SPAN_RATIO);
-    expect(fit.tier).toBe("fInfTau");
-    expect(fit.curve.f0).toBe(fallback.f0);
-  });
-
-  it("reports raceCount and distanceSpanRatio for the panel's support message", () => {
-    const fit = fitDescentPacingCurveAcrossRaces(syntheticRaces([10, 20, 100]));
-    expect(fit.raceCount).toBe(3);
-    expect(fit.distanceSpanRatio).toBeCloseTo(10, 6);
-  });
-});
-
-describe("buildDescentPacingObservation", () => {
-  /** A course of `n` segments at a fixed gradient, run at a fixed speed. */
-  function segmentsAt(n: number, gradient: number, speedMs: number, segLenM = 50): CourseSegment[] {
-    const out: CourseSegment[] = [];
-    let cumulative = 0;
-    for (let i = 0; i < n; i++) {
-      cumulative += segLenM;
-      out.push({
-        index: i,
-        cumulativeDistance3D: cumulative,
-        distanceHorizontal: segLenM,
-        distance3D: segLenM,
-        elevation: 0,
-        gradient,
-        time: null,
-        dtS: segLenM / speedMs,
-        paused: false,
-        heartRateBpm: null,
-        powerWatts: null,
-      });
-    }
-    return out;
-  }
-
-  it("measures actual speed against the UNSCALED grade-only cap, not the scaled one", () => {
-    // Critical anti-circularity property: if the denominator were the
-    // distance-scaled maxDescentSpeedMs, the fit would be chasing a target
-    // that already has a multiplier applied.
-    const gradient = -0.15;
-    const cap = gradeOnlyMaxDescentSpeedMs(gradient);
-    const observation = buildDescentPacingObservation(segmentsAt(40, gradient, cap * 0.8));
-    expect(observation).not.toBeNull();
-    expect(observation!.ratio).toBeCloseTo(0.8, 6);
-  });
-
-  it("returns null for a course with too little cap-eligible descent to be informative", () => {
-    expect(buildDescentPacingObservation(segmentsAt(200, 0.0, 3))).toBeNull();
-    // Two 50m steep segments is real descent, but far too little of it.
-    expect(buildDescentPacingObservation(segmentsAt(2, -0.2, 2))).toBeNull();
-  });
-
-  it("ignores paused and zero-duration segments", () => {
-    const gradient = -0.15;
-    const cap = gradeOnlyMaxDescentSpeedMs(gradient);
-    const segs = segmentsAt(40, gradient, cap * 0.8);
-    const withPause = segs.map((s, i) => (i % 4 === 0 ? { ...s, paused: true } : s));
-    expect(buildDescentPacingObservation(withPause)!.ratio).toBeCloseTo(0.8, 6);
   });
 });
 
