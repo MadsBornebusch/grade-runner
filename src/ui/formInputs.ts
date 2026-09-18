@@ -55,11 +55,6 @@ export interface FormInputs {
   powerLawFraction60Min: number;
   /** Power-law decay exponent b in f(t) = f60 * (t/60)^-b. */
   powerLawExponent: number;
-  /** Master on/off switch for the whole pacing/fade curve (the f0->fInf
-   * decay AND durability drift below, which layers on top of it) -- see
-   * CeilingParams.pacingCurveEnabled's own doc. Default true (on); off
-   * gives a flat ceiling at f0 for the whole event. */
-  pacingCurveEnabled: boolean;
   intakeGPerH: number;
   /** Glycogen store, expressed per kg body mass (not a raw gram total) --
    * see resolveGlycogenStoreG. */
@@ -148,7 +143,6 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
   lt2HeartRateBpm: null,
   powerLawFraction60Min: 0.81,
   powerLawExponent: 0.16,
-  pacingCurveEnabled: true,
   intakeGPerH: 60,
   // ~7-8 g/kg (liver + muscle glycogen) is a standard range for a fed,
   // trained endurance athlete -- see PLAN.md §5/§7. At the default 70kg body
@@ -357,7 +351,6 @@ export function resolveCeilingParams(inputs: FormInputs): CeilingParams {
     lt2Fraction,
     powerLawFraction60Min: inputs.powerLawFraction60Min,
     powerLawExponent: inputs.powerLawExponent,
-    pacingCurveEnabled: inputs.pacingCurveEnabled,
     durabilityDriftPerHour: inputs.durabilityDriftPerHour,
   };
 }

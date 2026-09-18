@@ -465,7 +465,7 @@ export function predictHeartRateFromPower(powerWPerKg: number, calibration: HrPo
  * component or on/off-asymmetric kinetics real physiology shows, just a
  * single symmetric exponential lag, which is enough to fix the specific
  * failure mode this exists for -- see applyHrInertia's own doc). */
-export const DEFAULT_HR_INERTIA_TAU_S = 30;
+const DEFAULT_HR_INERTIA_TAU_S = 30;
 
 /**
  * Smooths a sequence of instantaneous, power-implied HR estimates into a

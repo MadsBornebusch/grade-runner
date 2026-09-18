@@ -242,7 +242,7 @@ export interface GradeBin {
 }
 
 /** Width of each grade-histogram bin, as a gradient fraction (2%). */
-export const GRADE_BIN_WIDTH = 0.02;
+const GRADE_BIN_WIDTH = 0.02;
 
 /**
  * Distance/time distribution across gradient, flagging which bins involve

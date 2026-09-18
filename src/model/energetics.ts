@@ -7,15 +7,9 @@ export const RESTING_METABOLISM_W_PER_KG = 1.2;
 
 /** Energy yielded per liter of O2 consumed oxidizing carbohydrate (RER 0.96). */
 export const O2_ENERGY_EQUIVALENT_CARB_KJ_PER_L = 20.9;
-/** Energy yielded per liter of O2 consumed oxidizing fat. */
-export const O2_ENERGY_EQUIVALENT_FAT_KJ_PER_L = 19.6;
-
 /** Energy density of carbohydrate and fat, used for gram <-> Joule bookkeeping. */
 export const CARB_KJ_PER_G = 16.7;
 export const FAT_KJ_PER_G = 37.7;
-
-/** 1 MET, in ml O2 per kg body mass per minute. */
-export const MET_VO2_ML_PER_KG_PER_MIN = 3.5;
 
 /** Converts a VO2 rate (ml O2 · kg⁻¹ · min⁻¹) to metabolic power (W/kg). */
 export function vo2ToPower(

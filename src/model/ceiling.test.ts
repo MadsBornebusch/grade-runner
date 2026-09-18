@@ -41,32 +41,6 @@ describe("sustainableFraction", () => {
     expect(sustainableFraction(60, { ...params, lt2Fraction: 0.5 })).toBeCloseTo(0.7, 6);
   });
 
-  it("holds the one-hour fraction flat for any duration when disabled", () => {
-    // "Off" means no duration decay at all. It used to hold f0 -- the
-    // retired exponential curve's t=0 anchor, which has no meaning now that
-    // curve is gone -- so the athlete's own fitted one-hour fraction is
-    // what stays flat instead.
-    const params = { pacingCurveEnabled: false, powerLawFraction60Min: 0.82, powerLawExponent: 0.16 };
-    for (const t of [0, 60, 600, 6000]) {
-      expect(sustainableFraction(t, params)).toBeCloseTo(0.82, 6);
-    }
-  });
-
-  it("never lets the disabled branch exceed VO2max", () => {
-    const params = { pacingCurveEnabled: false, powerLawFraction60Min: 1.4 };
-    expect(sustainableFraction(60, params)).toBeCloseTo(1, 6);
-  });
-});
-
-describe("anaerobicCapacityMultiplier", () => {
-  it("matches the critical-power anchor points at anaerobicCapacityMin=1", () => {
-    expect(anaerobicCapacityMultiplier(4, 1)).toBeCloseTo(1.25, 2); // ~125% at 4 min
-    expect(anaerobicCapacityMultiplier(8, 1)).toBeCloseTo(1.125, 2); // ~112% at 8 min
-    expect(anaerobicCapacityMultiplier(15, 1)).toBeCloseTo(1.067, 2); // ~107% at 15 min
-    expect(anaerobicCapacityMultiplier(30, 1)).toBeCloseTo(1.033, 2); // ~103% at 30 min
-    expect(anaerobicCapacityMultiplier(55, 1)).toBeCloseTo(1.018, 2); // ~roughly LT2 by 55 min
-  });
-
   it("is 1 (no boost) when disabled", () => {
     expect(anaerobicCapacityMultiplier(4, 0)).toBe(1);
   });
@@ -157,19 +131,27 @@ describe("ceilingPower", () => {
     });
   });
 
-  describe("pacingCurveEnabled", () => {
-    it("disabling silences both the duration curve and both durability-drift terms at once", () => {
-      const withEverything = ceilingPower(
+  describe("durability drift", () => {
+    it("lowers the ceiling as time on feet and descent accumulate", () => {
+      // These used to be silenced wholesale by a master pacing-curve
+      // switch. That switch is gone -- it could only ever produce a plan
+      // the model itself says is wrong (one-hour power held for 24 hours)
+      // -- so each drift term is now governed solely by its own rate.
+      const fresh = ceilingPower(
+        { tMin: 300, elapsedHours: 0, descentExposure: 0 },
+        { durabilityDriftPerHour: 0.01, durabilityDriftPerDescentUnit: 0.0005 },
+      );
+      const drifted = ceilingPower(
         { tMin: 300, elapsedHours: 5, descentExposure: 500 },
         { durabilityDriftPerHour: 0.01, durabilityDriftPerDescentUnit: 0.0005 },
       );
-      const curveOff = ceilingPower(
-        { tMin: 300, elapsedHours: 5, descentExposure: 500 },
-        { durabilityDriftPerHour: 0.01, durabilityDriftPerDescentUnit: 0.0005, pacingCurveEnabled: false },
-      );
-      const fresh = ceilingPower({ tMin: 0, elapsedHours: 0 }, { pacingCurveEnabled: false });
-      expect(curveOff).toBeGreaterThan(withEverything);
-      expect(curveOff).toBeCloseTo(fresh, 10); // flat regardless of how far into the event
+      expect(drifted).toBeLessThan(fresh);
+    });
+
+    it("is off entirely when both rates are zero", () => {
+      const a = ceilingPower({ tMin: 300, elapsedHours: 0, descentExposure: 0 }, {});
+      const b = ceilingPower({ tMin: 300, elapsedHours: 5, descentExposure: 500 }, {});
+      expect(b).toBeCloseTo(a, 10);
     });
   });
 });

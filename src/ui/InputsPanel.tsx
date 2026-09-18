@@ -493,25 +493,10 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
       <fieldset>
         <legend>Aerobic ceiling</legend>
         <p className="field-group-help">Fit automatically from your confirmed races below.</p>
-        <label className="field field--checkbox">
-          <input
-            type="checkbox"
-            checked={values.pacingCurveEnabled}
-            onChange={(e) => set("pacingCurveEnabled", e.target.checked)}
-          />
-          <span>Let sustainable effort fall with race length</span>
-        </label>
-        {values.pacingCurveEnabled ? (
-          <p className="field-group-note">
-            <strong>{(values.powerLawFraction60Min * 100).toFixed(1)}%</strong> of VO2max sustainable for an hour,
-            falling with an exponent of <strong>{values.powerLawExponent.toFixed(3)}</strong>.
-          </p>
-        ) : (
-          <p className="field-group-note">
-            Off — your plan holds {(values.powerLawFraction60Min * 100).toFixed(1)}% of VO2max for the whole event,
-            however long it is. Realistic only for a short race.
-          </p>
-        )}
+        <p className="field-group-note">
+          <strong>{(values.powerLawFraction60Min * 100).toFixed(1)}%</strong> of VO2max sustainable for an hour,
+          falling with an exponent of <strong>{values.powerLawExponent.toFixed(3)}</strong>.
+        </p>
       </fieldset>
 
       <fieldset>

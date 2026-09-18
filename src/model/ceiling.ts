@@ -23,16 +23,6 @@ export interface CeilingParams {
    */
   durabilityDriftPerDescentUnit?: number;
   /**
-   * Master on/off switch for all time/exposure-based fade -- the f0->fInf
-   * duration curve below, AND both durabilityDrift terms in ceilingPower
-   * (they're a second fade mechanism layered on top of this one, so "no
-   * fade" has to silence both, not just the curve). Default true (on).
-   * False returns a flat ceiling at f0 (capped by LT2) regardless of
-   * elapsed time or descent exposure -- for an athlete who doesn't trust,
-   * or doesn't want, any fade modeling in their plan.
-   */
-  pacingCurveEnabled?: boolean;
-  /**
    * Sustainable fraction of VO2max at 60 minutes -- the power law's anchor.
    * Deliberately anchored at 60min rather than at t=1 (whose raw
    * coefficient is a meaningless extrapolation well above 1.0): LT2 is
@@ -56,7 +46,6 @@ export const CEILING_DEFAULTS: Required<CeilingParams> = {
   lt2Fraction: 0.85,
   durabilityDriftPerHour: 0,
   durabilityDriftPerDescentUnit: 0,
-  pacingCurveEnabled: true,
   powerLawFraction60Min: 0.81,
   powerLawExponent: 0.16,
 };
@@ -92,10 +81,7 @@ export function sustainableFraction(
   tMin: number,
   params: CeilingParams = {},
 ): number {
-  const { pacingCurveEnabled, powerLawFraction60Min, powerLawExponent } = { ...CEILING_DEFAULTS, ...params };
-  // "Off" means no duration decay at all: hold the one-hour fraction for
-  // the whole event, however long it is.
-  if (!pacingCurveEnabled) return Math.min(powerLawFraction60Min, MAX_AEROBIC_FRACTION);
+  const { powerLawFraction60Min, powerLawExponent } = { ...CEILING_DEFAULTS, ...params };
   // Guard t<=0 (and the t->0 blow-up generally) via the same VO2max cap
   // that bounds the short end -- see MAX_AEROBIC_FRACTION's own doc.
   if (!(tMin > 0)) return MAX_AEROBIC_FRACTION;
@@ -197,7 +183,7 @@ export function ceilingPower(
   const availableVo2 = fraction * altFraction * merged.vo2MaxMlPerKgPerMin;
   let power = vo2ToPower(availableVo2, O2_ENERGY_EQUIVALENT_CARB_KJ_PER_L);
 
-  if (merged.pacingCurveEnabled && merged.durabilityDriftPerHour > 0) {
+  if (merged.durabilityDriftPerHour > 0) {
     const driftFactor = Math.max(
       0,
       1 - merged.durabilityDriftPerHour * elapsedHours,
@@ -205,7 +191,7 @@ export function ceilingPower(
     power *= driftFactor;
   }
 
-  if (merged.pacingCurveEnabled && merged.durabilityDriftPerDescentUnit > 0 && input.descentExposure !== undefined) {
+  if (merged.durabilityDriftPerDescentUnit > 0 && input.descentExposure !== undefined) {
     const descentDriftFactor = Math.max(0, 1 - merged.durabilityDriftPerDescentUnit * input.descentExposure);
     power *= descentDriftFactor;
   }

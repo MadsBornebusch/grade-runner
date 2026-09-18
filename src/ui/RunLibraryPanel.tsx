@@ -476,7 +476,6 @@ export function RunLibraryPanel({
     formInputs.lt1PaceMinPerKm,
     formInputs.lt2PaceMinPerKm,
     formInputs.walkMaxMs,
-    formInputs.pacingCurveEnabled,
     formInputs.durabilityDriftPerHour,
     formInputs.intakeGPerH,
     formInputs.glycogenGPerKg,
@@ -641,13 +640,6 @@ export function RunLibraryPanel({
         ) : null}
       </p>
 
-      {!formInputs.pacingCurveEnabled && (
-        <p className="field-group-note">
-          The pacing curve is off (Settings -- Pacing curve). Fitting and applying tau/f_inf below still works, but
-          won't affect your plan until it's back on.
-        </p>
-      )}
-
       {raceCandidates.length > 0 && (
         <div className="run-library__experimental-fit">
           <p className="field-group-note">Confirm your races</p>
@@ -730,7 +722,38 @@ export function RunLibraryPanel({
                     .join(", ")
                 : "not fit yet"}
             </li>
-            <li>HR calibration: {formInputs.hrPowerCalibrationSlope !== null ? "fit" : "not fit yet"}</li>
+            {/* Slope and intercept mean nothing on their own, so show what
+                they predict at a power the athlete recognises: their own
+                one-hour ceiling. This line used to read just "fit". */}
+            <li>
+              HR calibration:{" "}
+              {formInputs.hrPowerCalibrationSlope !== null && formInputs.hrPowerCalibrationIntercept !== null
+                ? `~${Math.round(
+                    predictHeartRateFromPower(
+                      formInputs.powerLawFraction60Min * maxAerobicPower(0, ceilingParams),
+                      {
+                        slope: formInputs.hrPowerCalibrationSlope,
+                        intercept: formInputs.hrPowerCalibrationIntercept,
+                        rSquared: 1,
+                        pointCount: 0,
+                        raceCount: 0,
+                      },
+                    ),
+                  )} bpm at your one-hour ceiling`
+                : "not fit yet"}
+            </li>
+            {/* Applied to every prediction via anaerobicCapacityMultiplier
+                (ceiling.ts) and, until now, the one fitted value this list
+                didn't mention. */}
+            <li>
+              Short-race capacity:{" "}
+              {formInputs.anaerobicCapacityMin > 0
+                ? `${formInputs.anaerobicCapacityMin.toFixed(1)} min of W'/CP -- worth about ${(
+                    (1 / (1 + formInputs.anaerobicCapacityMin / 10) - 1) *
+                    -100
+                  ).toFixed(0)}% extra power over 10 minutes, negligible over an ultra`
+                : "not in use"}
+            </li>
             <li>
               Pacing margin:{" "}
               {formInputs.pacingMargin

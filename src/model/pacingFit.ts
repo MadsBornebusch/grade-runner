@@ -289,7 +289,7 @@ interface PreparedFadeRace {
 const preparedFadeRaces = new WeakMap<EffortTrendPoint[], PreparedFadeRace>();
 
 function prepareFadeRace(points: EffortTrendPoint[], merged: Required<CeilingParams>): PreparedFadeRace {
-  const signature = `${merged.vo2MaxMlPerKgPerMin}|${merged.durabilityDriftPerHour}|${merged.pacingCurveEnabled}`;
+  const signature = `${merged.vo2MaxMlPerKgPerMin}|${merged.durabilityDriftPerHour}`;
   const cached = preparedFadeRaces.get(points);
   if (cached && cached.signature === signature) return cached;
 
@@ -315,7 +315,7 @@ function prepareFadeRace(points: EffortTrendPoint[], merged: Required<CeilingPar
     prepared.tMin[i] = p.tHours * 60;
     prepared.binOffset[i] = Math.floor(p.tHours / binHours) - firstBin;
     prepared.driftFactor[i] =
-      merged.pacingCurveEnabled && merged.durabilityDriftPerHour > 0
+      merged.durabilityDriftPerHour > 0
         ? Math.max(0, 1 - merged.durabilityDriftPerHour * p.tHours)
         : 1;
   }
@@ -336,7 +336,7 @@ export function computeFadeTrend(points: EffortTrendPoint[], ceilingParams: Ceil
   const prep = prepareFadeRace(points, merged);
   // Every field sustainableFraction actually reads -- a key that missed one
   // would serve a stale trend for genuinely different params.
-  const cacheKey = `${merged.pacingCurveEnabled}|${merged.powerLawFraction60Min}|${merged.powerLawExponent}`;
+  const cacheKey = `${merged.powerLawFraction60Min}|${merged.powerLawExponent}`;
   const memo = prep.trendCache.get(cacheKey);
   if (memo !== undefined) return memo;
   const firstBin = prep.firstBin;
@@ -464,9 +464,6 @@ function daysAgo(date: Date, now: Date): number {
  * doesn't set one (mirrors DEFAULT_LT2_FRACTION's own doc just below). */
 export const DEFAULT_TAU_MIN_REFERENCE = 250;
 
-/** PLAN.md §11's "~2x+ duration range" precondition for a jointly-fit fInf
- * to mean anything more than an unconstrained absorbing parameter. */
-export const MIN_DURATION_DIVERSITY_RATIO = 2;
 /** Linear-interpolation percentile over an already-sorted array. Shared by
  * bootstrapTauConfidenceInterval below and finishTimeRange.ts's own
  * percentile call on bootstrap finish times. */
@@ -1001,7 +998,7 @@ export interface DescentCapObservation {
 }
 
 /** Band width for pooling descent segments by gradient. */
-export const DESCENT_CAP_BAND_WIDTH = 0.02;
+const DESCENT_CAP_BAND_WIDTH = 0.02;
 /**
  * A band below this much distance is dropped. At the pipeline's 25m
  * segments this is ~80 samples, so DESCENT_CAP_PERCENTILE sits a few
@@ -1022,7 +1019,7 @@ export const MIN_DESCENT_CAP_BAND_DISTANCE_M = 2000;
  * segments in any race are paced, not maximal, so a median would measure
  * pacing rather than capability), low enough to shed outliers.
  */
-export const DESCENT_CAP_PERCENTILE = 0.95;
+const DESCENT_CAP_PERCENTILE = 0.95;
 /** Anything faster than this on a descent is a GPS artifact, not a run --
  * 8 m/s is 2:05/km, quicker than a world-record marathon on the flat. */
 const DESCENT_CAP_IMPLAUSIBLE_SPEED_MS = 8;

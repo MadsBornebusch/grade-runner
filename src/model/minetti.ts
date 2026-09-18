@@ -13,7 +13,7 @@ export const GRADE_CLAMP = 0.45;
  * quintic fit diverges/flat-lines outside its validated range instead of
  * continuing to get more expensive as pitches steepen (PLAN.md §5, P1).
  */
-export const VERTICAL_COST_PER_M = 9.81 / 0.25;
+const VERTICAL_COST_PER_M = 9.81 / 0.25;
 
 function runningPolynomial(i: number): number {
   return (
@@ -201,11 +201,6 @@ export const DEFAULT_DESCENT_CAP_CURVE: DescentCapCurve = {
   onsetSpeedMs: DESCENT_LIMIT_SPEED_AT_ONSET_MS,
   clampSpeedMs: DESCENT_LIMIT_SPEED_AT_CLAMP_MS,
 };
-
-/** The grades the two fitted parameters are pinned to -- exported so the
- * fit states its own anchors rather than re-deriving them. */
-export const DESCENT_CAP_ONSET_GRADE = DESCENT_LIMIT_ONSET_GRADE;
-export const DESCENT_CAP_CLAMP_GRADE = -GRADE_CLAMP;
 
 /**
  * Max running speed on a descent, independent of metabolic cost -- reflects

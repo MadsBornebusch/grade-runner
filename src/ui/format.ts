@@ -23,10 +23,6 @@ export function formatMinPerKm(minPerKm: number | null): string {
   return minPerKm === null ? "--:--/km" : formatPace(1000 / (minPerKm * 60));
 }
 
-export function formatDistanceKm(meters: number): string {
-  return `${(meters / 1000).toFixed(2)} km`;
-}
-
 /** Inverse of formatDuration -- accepts "H:MM" or "H:MM:SS". Null for
  * empty/malformed input, so callers can distinguish "no target set" from
  * "user typed something invalid" if they need to. */
