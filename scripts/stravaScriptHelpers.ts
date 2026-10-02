@@ -20,6 +20,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { GpxPoint } from "../src/gpx/pipeline.ts";
+import type { ValhallaSurfaceEdge } from "../src/model/surfaceExposure.ts";
 import {
   filterRunsSinceDate,
   shouldFetchNextBackfillPage,
@@ -194,4 +195,56 @@ export async function backfill(
   }
 
   return [...cached.values()].filter((r) => r.date && new Date(r.date) >= sinceDate);
+}
+
+const SURFACE_CACHE_DIR = fileURLToPath(new URL("../.surface-cache/", import.meta.url));
+const VALHALLA_URL = "https://valhalla1.openstreetmap.de/trace_attributes";
+const MAX_SHAPE_POINTS = 800;
+
+function downsample(points: GpxPoint[], maxPoints: number): { lat: number; lon: number }[] {
+  const step = points.length <= maxPoints ? 1 : points.length / maxPoints;
+  const out: { lat: number; lon: number }[] = [];
+  for (let i = 0; i * step < points.length; i++) {
+    const p = points[Math.floor(i * step)];
+    out.push({ lat: p.lat, lon: p.lon });
+  }
+  return out;
+}
+
+/**
+ * OSM surface tags for a recorded route, from Valhalla's public map-matching
+ * endpoint (no auth; the same one api/surface.ts proxies for the app).
+ * Cached on disk forever -- a route's surface tags don't change run to run.
+ */
+export async function fetchSurfaceEdgesCached(activityId: string, points: GpxPoint[]): Promise<ValhallaSurfaceEdge[] | null> {
+  if (!existsSync(SURFACE_CACHE_DIR)) mkdirSync(SURFACE_CACHE_DIR, { recursive: true });
+  const cachePath = `${SURFACE_CACHE_DIR}${activityId}.json`;
+  if (existsSync(cachePath)) {
+    return JSON.parse(readFileSync(cachePath, "utf8")) as ValhallaSurfaceEdge[];
+  }
+  if (points.length < 2) return null;
+  const shape = downsample(points, MAX_SHAPE_POINTS);
+  try {
+    const res = await fetch(VALHALLA_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        shape,
+        costing: "pedestrian",
+        shape_match: "map_snap",
+        filters: { attributes: ["edge.surface", "edge.length"], action: "include" },
+      }),
+    });
+    if (!res.ok) {
+      console.log(`  surface lookup failed (${res.status}) for ${activityId}`);
+      return null;
+    }
+    const body = (await res.json()) as { edges?: ValhallaSurfaceEdge[] };
+    const edges = body.edges ?? [];
+    writeFileSync(cachePath, JSON.stringify(edges));
+    return edges;
+  } catch (err) {
+    console.log(`  surface lookup errored for ${activityId}: ${err instanceof Error ? err.message : err}`);
+    return null;
+  }
 }
