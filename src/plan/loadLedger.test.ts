@@ -56,6 +56,15 @@ describe("activityLoadFromSummary", () => {
     expect(hilly.metabolic).toBeGreaterThan(flat.metabolic);
     expect(flat.source).toBe("summary");
   });
+
+  it("estimates a larger steep share of descent on hillier-per-km runs, never above the descent", () => {
+    const base = { activityId: "a", date: "2026-04-01", movingS: 3600, thresholdGrossPowerWPerKg: 15 };
+    const road = activityLoadFromSummary({ ...base, distanceKm: 20, elevationGainM: 200 });
+    const trail = activityLoadFromSummary({ ...base, distanceKm: 10, elevationGainM: 800 });
+    expect(trail.steepDescentM / trail.descentM).toBeGreaterThan(road.steepDescentM / road.descentM);
+    const extreme = activityLoadFromSummary({ ...base, distanceKm: 1, elevationGainM: 500 });
+    expect(extreme.steepDescentM).toBe(500);
+  });
 });
 
 describe("dates", () => {
@@ -73,7 +82,7 @@ describe("dates", () => {
 describe("dailySeries", () => {
   it("fills empty days with zero and sums same-day activities", () => {
     const a = (date: string, mechanical: number): ActivityLoad => ({
-      activityId: date + mechanical, date, movingS: 0, mechanical, metabolic: 0, descentM: 0, source: "points",
+      activityId: date + mechanical, date, movingS: 0, mechanical, metabolic: 0, descentM: 0, steepDescentM: 0, source: "points",
     });
     const series = dailySeries([a("2026-01-01", 10), a("2026-01-03", 5), a("2026-01-03", 7)], "mechanical", "2026-01-01", "2026-01-04");
     expect(series.map((d) => d.value)).toEqual([10, 0, 12, 0]);

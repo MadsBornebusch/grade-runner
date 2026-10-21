@@ -12,7 +12,10 @@
 //     metabolic power (pace-derived via Minetti, from analysis.ts) over the
 //     athlete's threshold power. HR-free, so it works for any recorded run.
 // Descent metres are kept alongside as their own quantity for the eccentric
-// load, since §15's plan generator progresses descent as a separate target.
+// load, since §15's plan generator progresses descent as a separate target,
+// and so is steep descent (steeper than -17%), where most of the eccentric
+// damage is: total descent lumps a gentle road descent in with a steep
+// trail one.
 //
 // Activities without usable points (treadmill, manual entries, runs whose
 // points aren't fetched yet) go through activityLoadFromSummary, an
@@ -21,12 +24,12 @@
 
 import type { CourseSegment } from "../gpx/pipeline";
 import type { AnalysisResult } from "../model/analysis";
-import { descentMeters } from "../model/descentImpact";
+import { descentMeters, steepDescentMeters } from "../model/descentImpact";
 import { netToGross } from "../model/energetics";
 import { costOfRunning } from "../model/minetti";
 import { runningImpact } from "../model/runningImpact";
 
-export type LoadChannel = "mechanical" | "metabolic" | "descentM";
+export type LoadChannel = "mechanical" | "metabolic" | "descentM" | "steepDescentM";
 
 export interface ActivityLoad {
   activityId: string;
@@ -36,6 +39,7 @@ export interface ActivityLoad {
   mechanical: number;
   metabolic: number;
   descentM: number;
+  steepDescentM: number;
   source: "points" | "summary";
 }
 
@@ -95,6 +99,7 @@ export function activityLoadFromCourse(input: CourseLoadInput): ActivityLoad {
     mechanical: runningImpact(input.segments),
     metabolic: metabolicLoad(input.analysis, input.thresholdGrossPowerWPerKg),
     descentM: descentMeters(input.segments),
+    steepDescentM: steepDescentMeters(input.segments),
     source: "points",
   };
 }
@@ -107,19 +112,25 @@ export interface SummaryLoadCoefficients {
   /** Flat-equivalent metres added per metre of gain, for the speed that
    * sets the metabolic IF (a Naismith/GAP-style rule). */
   flatEquivalentMPerMGain: number;
+  /** Steep descent per (m gain x gain per km / 100): hillier-per-km runs
+   * descend a larger share of their gain steeply. */
+  steepDescentPerHillinessM: number;
 }
 
 /**
  * Least-squares fit against the points-based ledger on this athlete's 328
  * cached runs (2020-2026), at their own VO2max and LT2 for the metabolic term.
  * In-sample error against the points-based ledger on those runs: mechanical
- * about 4%, metabolic about 14%, descent about 10%. An approximation for
- * activities without points, not a validated constant.
+ * about 4%, metabolic about 14%, descent about 10%, steep descent about 47%
+ * (fitted on 357 runs; a summary can't tell a trail descent from a road
+ * one). An approximation for activities without points, not a validated
+ * constant.
  */
 export const DEFAULT_SUMMARY_LOAD_COEFFICIENTS: SummaryLoadCoefficients = {
   mechanicalPerKm: 6.43,
   mechanicalPer100mGain: 4.75,
   flatEquivalentMPerMGain: 2,
+  steepDescentPerHillinessM: 0.8,
 };
 
 export interface SummaryLoadInput {
@@ -133,7 +144,8 @@ export interface SummaryLoadInput {
 
 /** Summary-only approximation: mechanical from distance and gain; metabolic
  * from one IF for the whole activity, at its flat-equivalent average speed;
- * descent assumed equal to gain (a loop). */
+ * descent assumed equal to gain (a loop), steep descent from gain and gain
+ * per km, at most the descent. */
 export function activityLoadFromSummary(
   input: SummaryLoadInput,
   coefficients: SummaryLoadCoefficients = DEFAULT_SUMMARY_LOAD_COEFFICIENTS,
@@ -152,6 +164,7 @@ export function activityLoadFromSummary(
     mechanical: coefficients.mechanicalPerKm * input.distanceKm + (coefficients.mechanicalPer100mGain * gain) / 100,
     metabolic,
     descentM: gain,
+    steepDescentM: Math.min(gain, (coefficients.steepDescentPerHillinessM * gain * (gain / Math.max(input.distanceKm, 0.1))) / 100),
     source: "summary",
   };
 }

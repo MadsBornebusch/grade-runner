@@ -107,3 +107,26 @@ export function descentMeters(segments: CourseSegment[]): number {
 export function descentImpactSquared(segments: CourseSegment[]): number {
   return sumDescentWeightedBySpeed(segments, (v) => v * v);
 }
+
+/** Grade below which a descent counts as steep: where Minetti's cost curve
+ * bottoms out and braking, not metabolic cost, sets the speed, and where
+ * eccentric loading per metre is heaviest. */
+export const STEEP_DESCENT_GRADE = -0.17;
+
+/**
+ * Descent metres on segments steeper than `steeperThan` (by the segment's
+ * windowed gradient), with the same elevation-delta/pause logic as
+ * descentMeters. PLAN.md §15: the plan progresses and spike-guards steep
+ * descent on its own, since total descent lumps a gentle road descent in
+ * with a steep trail one.
+ */
+export function steepDescentMeters(segments: CourseSegment[], steeperThan: number = STEEP_DESCENT_GRADE): number {
+  let total = 0;
+  let previousElevation: number | null = null;
+  for (const seg of segments) {
+    const { descentM } = descentStepForSegment(seg, previousElevation);
+    previousElevation = seg.elevation;
+    if (seg.gradient < steeperThan) total += descentM;
+  }
+  return total;
+}

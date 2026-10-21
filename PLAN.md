@@ -3981,8 +3981,25 @@ goes in `src/plan/`.
        validated. It's the conservative choice.
      - No per-run or per-day rule caught the Pollença week in Oct 2025
        (steep trails, 40–64 m/km). A steep-downhill (< −17%) 7-day :
-       42-day load ratio would have been high for 11 days in a row. A steep-descent field in the ledger would make that check
-       possible here (see "Muscular durability").
+       42-day load ratio would have been high for 11 days in a row.
+       **Steep descent added to the ledger (2026-10-21):** `steepDescentM`,
+       descent on segments steeper than −17% (`steepDescentMeters` in
+       `descentImpact.ts`). Its main job is the dose: it is what design
+       point 1 of "Muscular durability" progresses, now that no measured
+       durability index steers it. On this history, since 2024:
+       - Its own 7-day : 42-day ratio was above 1.5 for 12 days running
+         from 10 Oct 2025, above 2 for 7 of them, ending the day of the
+         19 Oct injury run. But the ratio passed 1.5 in 26 episodes and 2
+         in 16, almost all without injury. One injury, so a warning sign at
+         best, not a validated guard.
+       - Against the day guard (each day vs the biggest of the previous
+         30), 43 days were above 1.3×, many of them 10–35× a reference of
+         about 10 m, from road-running months when one trail run is a
+         "spike". So the per-session steep-descent guard needs an absolute
+         floor (an allowance any athlete can take, e.g. 100–150 m) before
+         the multiple applies; the floor is a guess, to set in stage 4.
+       - Summary-only activities estimate it from gain and gain per km,
+         about 47% error: a summary can't tell trail from road.
    - *After a race*: recovery weeks, scaled to the race, before the build
      resumes: an easy week well below maintenance, then a week near
      maintenance (7 × chronic level), then the build. They scale off the

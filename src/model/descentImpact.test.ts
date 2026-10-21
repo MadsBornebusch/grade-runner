@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CourseSegment } from "../gpx/pipeline";
-import { descentImpact, descentImpactSquared, descentMeters, descentStepForSegment } from "./descentImpact";
+import { descentImpact, descentImpactSquared, descentMeters, descentStepForSegment, steepDescentMeters } from "./descentImpact";
 
 function segment(overrides: Partial<CourseSegment> = {}): CourseSegment {
   return {
@@ -138,6 +138,20 @@ describe("descentMeters", () => {
   it("excludes paused segments", () => {
     const segments = [segment({ elevation: 100 }), segment({ elevation: 50, distance3D: 50, dtS: 5, paused: true })];
     expect(descentMeters(segments)).toBe(0);
+  });
+});
+
+describe("steepDescentMeters", () => {
+  it("counts only descent on segments steeper than -17%", () => {
+    const segments = [
+      segment({ elevation: 100 }),
+      segment({ elevation: 90, gradient: -0.2 }),
+      segment({ elevation: 85, gradient: -0.1 }),
+      segment({ elevation: 95, gradient: 0.2 }),
+      segment({ elevation: 80, gradient: -0.3 }),
+    ];
+    expect(steepDescentMeters(segments)).toBeCloseTo(25, 6);
+    expect(descentMeters(segments)).toBeCloseTo(30, 6);
   });
 });
 
