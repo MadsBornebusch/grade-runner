@@ -4233,6 +4233,42 @@ work).
 2. Per-run fitness index (layer 2) and durability index (see "Muscular
    durability"), with their validation. *Go/no-go gate* for the adaptive
    part.
+   **Fitness index: built, promising but not validated (2026-10-21).**
+   `src/plan/fitnessIndex.ts` (+ tests), checked by
+   `scripts/diagFitnessIndex.ts --flatMaxGrade=0.08 --minSampleMin=8`.
+   Method, as frozen: power at a reference HR (the median run's mean HR,
+   144 bpm here). The HR-power slope is pooled from within-run variation.
+   Each run contributes only its level, from samples whose last 2 min
+   stayed within ±8% grade, with at least 8 min of them. Runs whose mean
+   HR is more than 15 bpm from the reference are dropped, and so are the 3
+   runs whose elevation data is bad (points-based mechanical load more
+   than 1.5× the summary estimate; they slightly inflate stage 1's numbers
+   too). Results, scored on 2026 runs only:
+   - *Noise*: pace-derived power 3.1% per run (pairs ≤ 3 days apart),
+     about 2.5% between two 28-day block means. Measured (device) power
+     2.7% and 2.2%. Without the terrain filter, all 256 runs with HR give
+     11% per run, because hilly runs read lower (rank correlation −0.75).
+   - *Coverage*: 117 of 256 runs qualify. Most 28-day blocks have only 2–7,
+     and the block figure comes from the 5 blocks with ≥ 4.
+   - *Remaining bias*: longer runs still read lower (rank correlation
+     about −0.5 with duration). A covariate correction (climb/km, log
+     duration, HR offset) fitted on 2020–2025 made 2026 noise worse
+     (4.9% → 8%), so it was dropped.
+   - *Slope*: power-on-HR gives 0.124 W/kg per bpm, HR-on-power inverted
+     0.296. Errors in both variables put the truth between them, and the
+     lab step test's 0.156 sits inside. The pooled fit is attenuated, so
+     the method isn't yet general for athletes without a lab test.
+   - *Validity, inconclusive*: same-course races. Oslo Trail Challenge
+     2020 → 2024 → 2026 got 9% then 13% faster, and the index 6 weeks
+     before rose 2.5% then 11%, the right direction. Askerspurten
+     2025 → 2026 and Saksumdal 2024 → 2025 differ by ≤ 2% in time, below
+     the index's resolution, and both point the wrong way. A check against
+     hard-effort VO2max estimates (n = 7) showed no relationship, but that
+     check is circular (same pace model, assumed VO2max).
+   - Verdict so far: quiet enough at block level (2–3% against 4–10%
+     effects) *where blocks have enough flat running*. Not yet shown to
+     track fitness. Next: the durability index, then a longer validity
+     check as more races accumulate.
 3. Response model and backtest (layer 3).
 4. Plan generator with the time budget as a hard constraint, fixed (prior)
    ramp first, then the fitted ramp

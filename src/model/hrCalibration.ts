@@ -255,7 +255,7 @@ function trailingMaxHr(race: EffortTrendPoint[], windowS: number): number[] {
   return out;
 }
 
-interface Sample {
+export interface Sample {
   hr: number;
   powerWPerKg: number;
   weight: number;
@@ -263,8 +263,15 @@ interface Sample {
 
 /** Builds the weighted (hr, power) sample pool for one race: start-trim +
  * early-window gated, GPS-spike-filtered, recency- and recovery-lag-
- * weighted. Shared by the pooled fit below. */
-function collectRaceSamples(race: EffortTrendPoint[], recencyWeightForRace: number): Sample[] {
+ * weighted. Shared by the pooled fit below and by src/plan/fitnessIndex.ts,
+ * which reads one run's level off the same samples. */
+export function collectRaceSamples(
+  race: EffortTrendPoint[],
+  recencyWeightForRace: number,
+  /** Optional per-point filter applied after smoothing, so dropped points
+   * still shape their neighbours' trailing power. */
+  include?: (index: number) => boolean,
+): Sample[] {
   if (race.length === 0) return [];
   const raceDurationHours = Math.max(...race.map((p) => p.tHours + p.dtS / 3600));
   if (!(raceDurationHours > 0)) return [];
@@ -280,6 +287,7 @@ function collectRaceSamples(race: EffortTrendPoint[], recencyWeightForRace: numb
   race.forEach((p, i) => {
     if (p.tHours < startCutoffHours || p.tHours >= earlyCutoffHours) return;
     if (p.heartRateBpm === undefined) return;
+    if (include && !include(i)) return;
     if (p.dtS < MIN_SEGMENT_DT_S || p.grossPowerWPerKg > MAX_PLAUSIBLE_POWER_W_PER_KG) return;
 
     const powerDecayRatio = recentMaxPower[i] > 0 ? smoothedPower[i] / recentMaxPower[i] : 1;
