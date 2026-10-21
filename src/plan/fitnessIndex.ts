@@ -98,3 +98,30 @@ export function powerAtReferenceHr(run: RunHrPowerSummary, powerPerBpm: number, 
   if (Math.abs(referenceHr - run.meanHr) > MAX_REFERENCE_HR_DISTANCE_BPM) return null;
   return run.meanPower + powerPerBpm * (referenceHr - run.meanHr);
 }
+
+/** The settings stage 2 froze (PLAN.md §15): samples whose trailing 2 min
+ * stayed within +-8% grade, at least 8 min of them. */
+export const FLAT_MAX_GRADE = 0.08;
+export const FLAT_WINDOW_S = 120;
+export const FROZEN_MIN_SAMPLE_MIN = 8;
+
+/**
+ * Per trend point: true if every segment in the trailing `windowS` stayed
+ * within +-maxGrade, so HR isn't still settling from a climb that just
+ * ended. `gradients[i]` is trend point i's segment gradient. maxGrade 0
+ * turns the filter off.
+ */
+export function flatSampleMask(
+  trend: EffortTrendPoint[],
+  gradients: number[],
+  maxGrade: number = FLAT_MAX_GRADE,
+  windowS: number = FLAT_WINDOW_S,
+): boolean[] {
+  return trend.map((p, i) => {
+    if (!(maxGrade > 0)) return true;
+    for (let j = i; j >= 0 && (p.tHours - trend[j].tHours) * 3600 <= windowS; j--) {
+      if (Math.abs(gradients[j] ?? 0) > maxGrade) return false;
+    }
+    return true;
+  });
+}

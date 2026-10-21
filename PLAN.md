@@ -4403,6 +4403,63 @@ work).
      long efforts on one course (e.g. a monthly loop test), which is a
      protocol to ask the athlete for, not something to mine.
 3. Response model and backtest (layer 3).
+   **Design and pass bar, fixed before fitting (2026-10-21).**
+   `src/plan/responseModel.ts`, checked by `scripts/backtestResponseModel.ts`
+   (data via `scripts/planRunData.ts`, which reuses stage 2's frozen
+   index). Blocks of 42 days with ≥ 3 index readings; a pair is two
+   adjacent blocks. Outcome: change in mean log index between them.
+   Predictor (the ramp): change in log mean chronic load between them.
+   Responsiveness is the elasticity (index % per load %), one per athlete.
+   - *Counted first:* 14 usable pairs (58 blocks, 2020 and 2024–2026);
+     9 with ≥ 4 readings. Ramp SD 0.26 (log), so at 3.5% noise per pair
+     the smallest detectable elasticity is about 0.10. Thin: 13
+     walk-forward predictions in all.
+   - *Ramp in hours, not mechanical load.* Mechanical load counts
+     distance, and a fitter athlete covers more distance in the same
+     hours, so a mechanical ramp partly *is* the fitness change. Primary
+     ramp: chronic moving hours (race-capped like the ledger). Mechanical
+     load is reported alongside.
+   - *Confounds reported, not fitted:* change in the readings' mean
+     duration (the index reads lower on long runs) and season (month).
+   - *Models, walk-forward* (each pair predicted only from pairs whose
+     later block ends before its later block starts): M0 no change; M1 a
+     fixed prior elasticity; M2 per-athlete elasticity, Gaussian prior ×
+     time-decayed (75-day half-life) weighted likelihood, pair variance
+     4.9%² × (1/n₁ + 1/n₂) (per-run spread from stage 2). No
+     lagged-index term: a noisy previous block mean would give a spurious
+     mean-reversion win.
+   - *Prior (own assumption, no published value in these units):*
+     elasticity 0.1 ± 0.1, i.e. 10% more chronic load → about 1% more
+     index.
+   - *Pass:* M2's walk-forward RMSE below both M0 and M1, the improvement
+     over M0 with a 95% bootstrap interval (over predicted pairs) above
+     zero, on the hours ramp. If it fails, stage 4 uses the fixed prior
+     ramp, which was the first step in the build order anyway.
+   **Result (2026-10-21): fails the bar; a dose-response is there, but a
+   per-athlete fit adds nothing over the prior yet.** 14 pairs, 117
+   readings.
+   - The index change tracks the hours ramp (r 0.70; mechanical 0.69, the
+     two ramps correlate 0.99 here, so the distance coupling didn't
+     matter on this history). The readings' duration mix barely moves
+     with the ramp (r 0.13).
+   - Walk-forward RMSE over 14 pairs: no change 7.95%, fixed prior 6.45%,
+     fitted 6.39% (mechanical ramp: 6.41% and 6.51%). The fitted model
+     beats no change by 1.6 points, 95% bootstrap −0.8 to +3.5, and is
+     closer than no change on 9 of 14 pairs. Fitted and prior are tied.
+   - Elasticity: 0.23 ± 0.03 over the whole history without time decay,
+     0.09 ± 0.06 with the 75-day half-life, because the 2026 pairs
+     responded less (+26% hours → +1%; −38% → +4%). The ± is too narrow:
+     residual errors (about 6%) are larger than the assumed pair noise.
+   - *Season confound, not separable here:* the big positive ramps are all
+     spring builds (Feb–May), when the index also rises after winter. Any
+     season effect is inside the 0.23.
+   - *Decision:* stage 4 starts with the fixed prior ramp (elasticity 0.1
+     for predicting what a build does to the index). The response model
+     stays as a monitor: re-run this backtest as pairs accumulate (about 8
+     a year at the current recording rate) and switch to the fitted value
+     only once it passes. A wider prior (0.1–0.25) is supported by the
+     whole-history fit, but the prior's centre was fixed before looking,
+     so it stays.
 4. Plan generator with the time budget as a hard constraint, fixed (prior)
    ramp first, then the fitted ramp
    (layer 4), plus UI: race selection, weekly plan, planned vs actual.

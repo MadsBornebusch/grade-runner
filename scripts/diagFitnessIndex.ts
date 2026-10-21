@@ -25,7 +25,7 @@ import { estimateVo2MaxFromRun } from "../src/model/vo2MaxEstimate.ts";
 import { runningImpact } from "../src/model/runningImpact.ts";
 import { activityLoadFromSummary, localDateKey } from "../src/plan/loadLedger.ts";
 import {
-  powerAtReferenceHr, pooledPowerPerBpm, pooledPowerPerBpmFromHrOnPower, summarizeRunSamples, type RunHrPowerSummary,
+  flatSampleMask, powerAtReferenceHr, pooledPowerPerBpm, pooledPowerPerBpmFromHrOnPower, summarizeRunSamples, type RunHrPowerSummary,
 } from "../src/plan/fitnessIndex.ts";
 import { arg } from "./stravaScriptHelpers.ts";
 import { athleteCeilingParams, loadAthleteProfile } from "./athleteProfile.ts";
@@ -65,15 +65,7 @@ for (const a of activities) {
   const analysis = analyzeRun(course.segments, { bodyMassKg: BODY_MASS, ceilingParams, fueling: { intakeGPerH: 0 }, glycogenStoreG: 1e9 });
   const trend = buildEffortTrendPoints(course.segments, analysis.segments, true);
   const trendSegments = analysis.segments.filter((s) => s.effortFraction !== null).map((s) => course.segments[s.index]);
-  // Trailing max |grade| over FLAT_WINDOW_S, so HR isn't still settling
-  // from a climb that just ended.
-  const flat = trend.map((p, i) => {
-    if (!(FLAT_MAX_GRADE > 0)) return true;
-    for (let j = i; j >= 0 && (p.tHours - trend[j].tHours) * 3600 <= FLAT_WINDOW_S; j--) {
-      if (Math.abs(trendSegments[j]?.gradient ?? 0) > FLAT_MAX_GRADE) return false;
-    }
-    return true;
-  });
+  const flat = flatSampleMask(trend, trendSegments.map((seg) => seg?.gradient ?? 0), FLAT_MAX_GRADE, FLAT_WINDOW_S);
   const measuredIdx: number[] = [];
   const measuredPoints: EffortTrendPoint[] = trend.flatMap((p, i) => {
     const w = trendSegments[i]?.powerWatts;
