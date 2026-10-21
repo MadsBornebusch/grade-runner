@@ -3897,9 +3897,13 @@ goes in `src/plan/`.
    **Threshold pace and HR, kept current from hard efforts** (user request,
    2026-10-21). The metabolic channel's IF, the plan's intensity zones and
    the fitness index's reference HR all hang off one threshold. Today it's
-   the lab value (LT2 0.814 of VO2max, from a step test that stopped at
-   15.5 km/h), and it goes stale: Askerspurten 10 km (17 Sep 2026, 42:28,
-   4:09/km) suggests LT2 is now faster than the lab's 12.5 km/h.
+   the scripts' LT2 0.814 of VO2max, which in the model's own pace units
+   (Minetti, VO2max 55) is about 14.5 km/h. The lab test (25 Mar 2026) was
+   a lactate profile stopped at LT2: 15.5 km/h, HR 170, 4.32 L/min (50.9
+   ml/kg/min at 85 kg), which is 0.87 in the same units. Not a VO2max
+   test, so 55 stays as a conservative guess for the max (user,
+   2026-10-21). The value goes stale either way: Askerspurten 10 km (17 Sep
+   2026, 42:28, 4:09/km) is one recent anchor.
    Proposal: every race or workout with a 20–60 min near-maximal stretch
    (`vo2MaxEstimate.ts`'s 20–90 min window already finds these) gives a
    threshold estimate. Grade-adjusted power over the stretch, scaled to a
@@ -4258,15 +4262,11 @@ work).
      0.296. Errors in both variables put the truth between them, and the
      lab step test's 0.156 sits inside (treadmill step test, 25 Mar 2026,
      85 kg, 8.5 → 15.5 km/h).
-   - *Absolute check against the lab test (one point, rough):* linear
-     between the first and last stage, the lab's 144 bpm falls at about
-     11.5 km/h, i.e. 12.7 W/kg flat or 13.3 W/kg at a 1% treadmill
-     incline. The index read 13.9 (March 2026, n = 4) and 13.7 (April,
+   - *Absolute check against the lab test (one point, rough):* the lab's
+     11.5 km/h stage ran at 143 bpm, so 144 bpm is about 11.5 km/h, i.e.
+     12.7 W/kg flat or 13.3 W/kg at a 1% treadmill incline. The index read 13.9 (March 2026, n = 4) and 13.7 (April,
      n = 5): 4–9% above the lab value. In the expected direction (indoor
-     HR runs warmer), but the per-stage HRs weren't at hand, so this is a
-     sanity check, not a calibration. The lab's last-stage VO2 is 4.323
-     L/min, 50.9 ml/kg/min at 85 kg, below the 55 the scripts assume;
-     with RER 1.01 at the end it may not have been a maximal test. The pooled fit is attenuated, so
+     HR runs warmer). One point, so a sanity check, not a calibration. The pooled fit is attenuated, so
      the method isn't yet general for athletes without a lab test.
    - *Validity, inconclusive*: same-course races. Oslo Trail Challenge
      2020 → 2024 → 2026 got 9% then 13% faster, and the index 6 weeks
