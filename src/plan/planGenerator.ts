@@ -70,6 +70,14 @@ export interface PlanOptions {
   strengthSessions?: number;
   strengthMinutes?: number;
   strengthCountsInBudget?: boolean;
+  /** Long-run weeks (user idea, 2026-10-21): every `longRunWeekEvery`-th
+   * build week the long run may take up to this many minutes on its day,
+   * beyond its usual slot, and the week's other runs shrink so the week
+   * still fits the budget. The long run is the most race-specific session
+   * (time on feet, fuelling practice), and under a small budget its normal
+   * slot caps it well below the race. Off when undefined. */
+  longRunWeekMinutes?: number;
+  longRunWeekEvery?: number;
 }
 
 export type Phase = "recovery" | "maintenance" | "base" | "specific" | "deload" | "taper" | "race";
@@ -97,6 +105,8 @@ export interface PlanWeek {
   budgetMinutes: number;
   /** True when the target needed more than the budget at max density. */
   budgetBinds: boolean;
+  /** A long-run week: longer long run, shorter other runs. */
+  longRunWeek: boolean;
   sessions: PlannedSession[];
   notes: string[];
 }
@@ -193,6 +203,8 @@ export function generatePlan(
   const budgetPerWeek = availability.reduce((s, a) => s + a.minutes, 0);
   const weeks: PlanWeek[] = [];
   let buildCount = 0;
+  let longRunCount = 0;
+  const longRunWeekEvery = options.longRunWeekEvery ?? 2;
   let lastFullWeekMech = 0;
   let lastWeekDescent: number | null = null;
   let lastWeekSteep: number | null = null;
@@ -212,6 +224,9 @@ export function generatePlan(
       phase = buildCount % deloadEvery === 0 ? "deload" : weeksToRace < taper.length + specificWeeks ? "specific" : "base";
     }
     const notes: string[] = [];
+    const longRunWeek =
+      options.longRunWeekMinutes !== undefined && (phase === "base" || phase === "specific") && ++longRunCount % longRunWeekEvery === 0;
+    if (longRunWeek) notes.push("long-run week");
     let target: number;
     if (phase === "recovery") target = 0.5 * 7 * chronic;
     else if (phase === "maintenance") target = 7 * chronic;
@@ -232,6 +247,7 @@ export function generatePlan(
     const allowOn = (day: number) => sessionAllowance(referenceAt(runsSoFar, day));
     const sessions = planWeek(start, phase, target, referenceAt(runsSoFar, start), allowOn, availability, longRunWeekday, race, options, {
       lastWeekDescent, lastWeekSteep, strengthSessions, strengthMinutes,
+      longRunMinutes: longRunWeek ? options.longRunWeekMinutes! : null,
     });
     const plannedMech = sessions.reduce((s, x) => s + x.mechanical, 0);
     const plannedMin = sessions
@@ -253,7 +269,7 @@ export function generatePlan(
     lastWeekSteep = runs.reduce((s, x) => s + x.steepDescentM, 0);
     weeks.push({
       start, phase, chronicAtStart: chronic, targetMechanical: target, plannedMechanical: plannedMech, plannedMinutes: plannedMin,
-      budgetMinutes: budgetPerWeek, budgetBinds: binds, sessions, notes,
+      budgetMinutes: budgetPerWeek, budgetBinds: binds, longRunWeek, sessions, notes,
     });
   }
 
@@ -289,6 +305,8 @@ interface WeekState {
   lastWeekSteep: number | null;
   strengthSessions: number;
   strengthMinutes: number;
+  /** In a long-run week, the most the long-run day can take; else null. */
+  longRunMinutes: number | null;
 }
 
 /** Assumption: weekly descent and steep descent grow at most 10% a week
@@ -341,14 +359,19 @@ function planWeek(
   const runs: PlannedSession[] = [];
   const longSlot = slots.find((s) => s.weekday === longRunWeekday);
   let remaining = target;
+  // The week's running minutes never exceed the budget, even when a
+  // long-run week lets the long run past its own slot.
+  let weekLeft = [...free.values()].reduce((a, b) => a + b, 0);
   if (longSlot) {
     const allow = allowOn(start + longRunWeekday);
     const maxByDistance = (allow.distanceKm / o.speedKmh) * 60;
-    const minutes = Math.floor(Math.min(free.get(longRunWeekday)!, allow.movingMin, maxByDistance) * lighter);
+    const slotMinutes = Math.max(free.get(longRunWeekday)!, state.longRunMinutes ?? 0);
+    const minutes = Math.floor(Math.min(slotMinutes, weekLeft, allow.movingMin, maxByDistance) * lighter);
     if (minutes >= MIN_RUN_MINUTES) {
       const s = session(start + longRunWeekday, "long", minutes, o.easyDensity);
       runs.push(s);
       remaining -= s.mechanical;
+      weekLeft -= minutes;
       free.set(longRunWeekday, 0);
     }
   }
@@ -358,12 +381,13 @@ function planWeek(
   for (const slot of slots) {
     if (remaining <= 0) break;
     const allow = allowOn(start + slot.weekday);
-    const avail = Math.min(free.get(slot.weekday) ?? 0, allow.movingMin, (allow.distanceKm / o.speedKmh) * 60);
+    const avail = Math.min(free.get(slot.weekday) ?? 0, weekLeft, allow.movingMin, (allow.distanceKm / o.speedKmh) * 60);
     const minutes = Math.floor(Math.min(avail, (remaining / o.easyDensity) * 60));
     if (minutes < MIN_RUN_MINUTES) continue;
     const s = session(start + slot.weekday, "easy", minutes, o.easyDensity);
     runs.push(s);
     remaining -= s.mechanical;
+    weekLeft -= minutes;
     free.set(slot.weekday, (free.get(slot.weekday) ?? 0) - minutes);
   }
   if (phase === "base" || phase === "specific") {

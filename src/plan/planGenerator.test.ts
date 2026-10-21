@@ -32,21 +32,26 @@ function randomCase(seed: number) {
   for (let wd = 0; wd < 7; wd++) if (r() < 0.6 || wd === 5) slots.push({ weekday: wd, minutes: wd === 5 ? 90 + Math.floor(150 * r()) : 30 + Math.floor(50 * r()) });
   const hist = history(r, 10 + Math.floor(20 * r()), 1 + Math.floor(4 * r()), 30 + 30 * r(), 60 + 90 * r(), r() < 0.5 ? Math.floor(5 + 30 * r()) : undefined);
   const race = { name: "test", day: TODAY + 30 + Math.floor(200 * r()), expectedHours: 1 + 10 * r() };
-  return { slots, hist, race };
+  const longRunWeekMinutes = r() < 0.5 ? 150 + Math.floor(150 * r()) : undefined;
+  return { slots, hist, race, longRunWeekMinutes };
 }
 
 describe("generatePlan invariants (random cases)", () => {
   for (let seed = 1; seed <= 40; seed++) {
     it(`case ${seed}: budget, slots, guards, taper`, () => {
-      const { slots, hist, race } = randomCase(seed);
-      const plan = generatePlan(hist, slots, 5, race, TODAY, OPTIONS);
+      const { slots, hist, race, longRunWeekMinutes } = randomCase(seed);
+      const plan = generatePlan(hist, slots, 5, race, TODAY, { ...OPTIONS, longRunWeekMinutes });
       const budget = slots.reduce((s, x) => s + x.minutes, 0);
       const slotOf = new Map(slots.map((s) => [s.weekday, s.minutes]));
       for (const w of plan.weeks) {
         expect(w.plannedMinutes).toBeLessThanOrEqual(budget + 1e-6);
         const perDay = new Map<number, number>();
         for (const s of w.sessions) if (s.kind !== "race" && s.kind !== "strength") perDay.set(s.day, (perDay.get(s.day) ?? 0) + s.minutes);
-        for (const [day, m] of perDay) expect(m).toBeLessThanOrEqual((slotOf.get(day - w.start) ?? 0) + 1e-6);
+        for (const [day, m] of perDay) {
+          const wd = day - w.start;
+          const cap = w.longRunWeek && wd === 5 ? Math.max(slotOf.get(wd) ?? 0, longRunWeekMinutes ?? 0) : (slotOf.get(wd) ?? 0);
+          expect(m).toBeLessThanOrEqual(cap + 1e-6);
+        }
       }
       // Every planned run within the guard of everything before it.
       const { isRace } = runReferences(hist);
@@ -90,6 +95,16 @@ describe("strengthDaysOf", () => {
 
 describe("generatePlan structure", () => {
   const slots: AvailabilitySlot[] = [{ weekday: 1, minutes: 50 }, { weekday: 3, minutes: 50 }, { weekday: 5, minutes: 150 }, { weekday: 6, minutes: 50 }];
+
+  it("alternates long-run weeks, which lengthen the long run within the same weekly budget", () => {
+    const plan = generatePlan(history(rng(8), 20, 3, 45, 140), slots, 5, { name: "r", day: TODAY + 200, expectedHours: 6 }, TODAY, { ...OPTIONS, longRunWeekMinutes: 240 });
+    const builds = plan.weeks.filter((w) => w.phase === "base" || w.phase === "specific");
+    builds.forEach((w, k) => expect(w.longRunWeek).toBe((k + 1) % 2 === 0));
+    const long = (w: (typeof builds)[number]) => w.sessions.find((x) => x.kind === "long")?.minutes ?? 0;
+    expect(Math.max(...builds.map(long))).toBeGreaterThan(150);
+    for (const w of builds) expect(w.plannedMinutes).toBeLessThanOrEqual(300 + 1e-6);
+    expect(plan.weeks.some((w) => w.longRunWeek && (w.phase === "deload" || w.phase === "taper"))).toBe(false);
+  });
 
   it("deloads every 4th build week", () => {
     const plan = generatePlan(history(rng(3), 20, 3, 45, 90), slots, 5, { name: "r", day: TODAY + 200, expectedHours: 5 }, TODAY, OPTIONS);

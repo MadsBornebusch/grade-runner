@@ -4511,6 +4511,18 @@ work).
      flags the 19 Oct 2025 run (distance 1.53×, time 1.15×) and the 13 Oct
      Pollença run on all four, and keeps Oslo Trail Challenge (26 Sep 2026)
      out of today's reference (long run 73 min).
+   - *Long-run weeks* (user idea, 2026-10-21): every other build week
+     (`longRunWeekEvery`, default 2) the long run may go past its usual
+     slot up to `longRunWeekMinutes`, and the week's other runs shrink so
+     the week still fits the budget. The guard still holds it to 1.1× the
+     biggest run of the previous 30 days, so it grows from one long-run
+     week to the next. Not in deload, taper or recovery weeks. Example
+     (5 h/week, 240 min allowed on long-run weeks): the long run grows 150 →
+     163 → 179 → 196 → 215 → 236 → 240 min by late March, alternating
+     with 150 min weeks; projected chronic level 44 (vs 45 without), and
+     the "long run under 40% of the race" warning goes away. Whether
+     alternating beats a steady weekly long run isn't known from the
+     literature read so far; it's the budget that forces the choice.
    - *Strength* (user decision, 2026-10-21): outside the hour budget but
      always in the plan. Two 25 min sessions every week except race week,
      never on the long-run day or the day before it, spread through the
@@ -4527,7 +4539,7 @@ work).
      from mid-January), long run 72 → 150 min (the weekend slot), projected
      chronic level 45 against 38–40 before Ecotrail and this year's Oslo
      Trail Challenge, and no guard breach in 115 planned runs. The long run
-     stays at 2.5 h, so it warns. The comparable-race list also includes
+     stays at 2.5 h, so it warns (see long-run weeks below). The comparable-race list also includes
      about ten pre-2024 runs flagged as races by size alone (summary-only
      years); the comparison uses the best of them, so they don't change it.
    - *UI note:* a session shown in minutes alone repeats the 19 Oct 2025

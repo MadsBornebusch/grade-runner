@@ -6,7 +6,8 @@
 // optional "plan" section:
 //   "plan": { "race": { "name", "date", "expectedHours", "descentM"?, "steepDescentM"? },
 //             "availability": [{ "weekday": 0-6 (Mon=0), "minutes" }], "longRunWeekday": 5,
-//             "strengthCountsInBudget": false }
+//             "strengthCountsInBudget": false,
+//             "longRunWeekMinutes"?: 240, "longRunWeekEvery"?: 2 }
 // Without it, a clearly labelled example (a 5 h week, a 50 km trail race in
 // spring) is used.
 import { generatePlan, type AvailabilitySlot, type GoalRace, type HistoryRun } from "../src/plan/planGenerator.ts";
@@ -20,11 +21,14 @@ interface PlanSection {
   availability: AvailabilitySlot[];
   longRunWeekday: number;
   strengthCountsInBudget?: boolean;
+  longRunWeekMinutes?: number;
+  longRunWeekEvery?: number;
 }
 const EXAMPLE: PlanSection = {
   race: { name: "EXAMPLE 50 km trail race", date: "2027-05-29", expectedHours: 6.5, descentM: 2000, steepDescentM: 500 },
   availability: [{ weekday: 1, minutes: 50 }, { weekday: 3, minutes: 50 }, { weekday: 5, minutes: 150 }, { weekday: 6, minutes: 50 }],
   longRunWeekday: 5,
+  longRunWeekMinutes: Number(arg("longRunWeekMinutes", "240")) || undefined,
 };
 const section = (loadAthleteProfile() as unknown as { plan?: PlanSection }).plan;
 const cfg = section ?? EXAMPLE;
@@ -47,6 +51,8 @@ const options = {
   maxDescentPerHour: q(perHour((r) => r.load.descentM), 0.9),
   maxSteepDescentPerHour: q(perHour((r) => r.load.steepDescentM), 0.9),
   strengthCountsInBudget: cfg.strengthCountsInBudget ?? false,
+  longRunWeekMinutes: cfg.longRunWeekMinutes,
+  longRunWeekEvery: cfg.longRunWeekEvery,
 };
 console.log(`From ${pts.length} runs: load/h easy ${options.easyDensity.toFixed(0)}, dense ${options.maxDensity.toFixed(0)}; ${options.speedKmh.toFixed(1)} km/h; descent/h up to ${options.maxDescentPerHour.toFixed(0)} m, steep ${options.maxSteepDescentPerHour.toFixed(0)} m`);
 
