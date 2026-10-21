@@ -2665,7 +2665,7 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    cleanly. See `intensityConditionedSlowdownFit.test.ts`.
 
    **Real-data run (203 cached activities, 8824 monotonic segments, this
-   athlete's bodyMassKg=85) surfaced something the synthetic test didn't
+   athlete's own body mass) surfaced something the synthetic test didn't
    predict: real modelledPower is NOT anywhere near the point-level
    circularity signature.** Restricted to the 6400 running/known-surface
    segments (which, in this athlete's data, ALL carry both HR and device
