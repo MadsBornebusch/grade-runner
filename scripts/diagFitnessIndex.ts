@@ -223,7 +223,7 @@ for (const variant of ["pace", "measured"] as const) {
   if (!adj) continue;
   console.log(`  covariates fitted on ${adj.nTrain} training runs: climb/km ${adj.beta[0].toFixed(4)} [${adj.lo[0].toFixed(0)}-${adj.hi[0].toFixed(0)}], log duration ${adj.beta[1].toFixed(3)}, meanHr-ref ${adj.beta[2].toFixed(4)}`);
   reportNoise("adjusted, test runs", have, adj.adjusted, summaries, refHr, isTest);
-  const final = adj.adjusted;
+  const final = index;
 
   const byMonth = new Map<string, number[]>();
   have.forEach((x, i) => { const m = x.date.slice(0, 7); byMonth.set(m, [...(byMonth.get(m) ?? []), final[i]]); });

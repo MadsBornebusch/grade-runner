@@ -4280,15 +4280,19 @@ work).
      (`--slopeMode=lab`). The pooled fit is attenuated, so the method
      isn't yet general for athletes without a lab test.
    - *Absolute check against the lab test (one point, rough):* the lab
-     stage nearest the reference HR, converted to flat Minetti power,
-     reads 8–9% below the index in the two months around the test (3–5%
-     with a 1% treadmill incline). In the expected direction (indoor HR
-     runs warmer). One point, so a sanity check, not a calibration.
-   - *Validity, inconclusive*: same-course races. Oslo Trail Challenge
-     2020 → 2024 → 2026 got 9% then 13% faster, and the index 6 weeks
-     before rose 2.5% then 11%, the right direction. Askerspurten
-     2025 → 2026 and Saksumdal 2024 → 2025 differ by ≤ 2% in time, below
-     the index's resolution, and both point the wrong way. A check against
+     stage nearest the reference HR, converted to flat Minetti power, is
+     within 0–3% of the index in the two months around the test (the
+     index reads at or slightly above a flat treadmill, slightly below a
+     1% incline). One point, so a sanity check, not a calibration.
+   - *Validity, inconclusive, and corrected (2026-10-21)*: the first
+     version of this check read the covariate-adjusted index, which the
+     method had dropped; on the frozen (raw) index: Oslo Trail Challenge
+     2020 → 2024 → 2026 got 9% then 13% faster, but the index over the 6
+     weeks before moved only +0.9% then −0.7%, so it missed the biggest
+     improvement in the data. Askerspurten 2025 → 2026 (1% slower, index
+     −0.7%) and Saksumdal 2024 → 2025 (2% faster, index +5%, but n = 2
+     runs before 2024) point the right way, at differences near the
+     index's resolution. A check against
      hard-effort VO2max estimates (n = 7) showed no relationship, but that
      check is circular (same pace model, assumed VO2max).
    - Verdict so far: quiet enough at block level (2–3% against 4–10%

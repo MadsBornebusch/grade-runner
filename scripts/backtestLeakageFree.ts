@@ -31,11 +31,12 @@ import {
   DEFAULT_FORM_INPUTS, resolveCeilingParams, resolveGlycogenStoreG,
   resolveLt1Lt2Fractions, resolveSubstrateAnchors, type FormInputs,
 } from "../src/ui/formInputs.ts";
+import { athleteCeilingParams } from "./athleteProfile.ts";
 
 const CACHE = fileURLToPath(new URL("../.strava-cache/", import.meta.url));
 const SURFACE = fileURLToPath(new URL("../.surface-cache/", import.meta.url));
 const arg = (k: string) => process.argv.find((a) => a.startsWith(`--${k}=`))?.split("=")[1];
-const VO2 = Number(arg("vo2max") ?? 55);
+const VO2 = Number(arg("vo2max") ?? athleteCeilingParams().vo2MaxMlPerKgPerMin);
 
 /** The athlete's confirmed races (Settings -> Confirm your races). Backyard
  * ultra is deliberately absent: a stop-start loop format is not a
