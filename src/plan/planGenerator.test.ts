@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generatePlan, recoveryWeeks, type AvailabilitySlot, type HistoryRun, type PlanOptions } from "./planGenerator";
+import { generatePlan, recoveryWeeks, strengthDaysOf, type AvailabilitySlot, type HistoryRun, type PlanOptions } from "./planGenerator";
 import { guardBreaches, referenceAt, runReferences } from "./sessionGuard";
 
 const OPTIONS: PlanOptions = { easyDensity: 70, maxDensity: 85, speedKmh: 9.5, maxDescentPerHour: 350, maxSteepDescentPerHour: 120 };
@@ -63,6 +63,13 @@ describe("generatePlan invariants (random cases)", () => {
       const longDays = new Set(all.filter((x) => x.kind === "long").map((x) => x.day));
       for (const w of plan.weeks) expect(w.sessions.filter((x) => x.kind === "quality").length).toBeLessThanOrEqual(1);
       for (const q of all.filter((x) => x.kind === "quality")) expect(longDays.has(q.day - 1)).toBe(false);
+      // Two strength sessions every week but race week, outside the budget,
+      // never on or the day before a long run.
+      for (const w of plan.weeks) {
+        const strength = w.sessions.filter((x) => x.kind === "strength");
+        expect(strength.length).toBe(w.phase === "race" ? 0 : 2);
+        for (const x of strength) expect(longDays.has(x.day) || longDays.has(x.day + 1)).toBe(false);
+      }
       // Taper and race week lighter than the last build week.
       const lastBuild = [...plan.weeks].reverse().find((w) => w.phase === "base" || w.phase === "specific");
       for (const w of plan.weeks.filter((x) => x.phase === "taper" || x.phase === "race")) {
@@ -70,6 +77,15 @@ describe("generatePlan invariants (random cases)", () => {
       }
     });
   }
+});
+
+describe("strengthDaysOf", () => {
+  it("spreads sessions and avoids the long run and the day before it", () => {
+    expect(strengthDaysOf([{ weekday: 5, minutes: 150 }], 5, 2, false)).toEqual([0, 3]);
+    expect(strengthDaysOf([{ weekday: 1, minutes: 50 }, { weekday: 3, minutes: 50 }, { weekday: 5, minutes: 150 }], 5, 2, false)).toEqual([1, 3]);
+    // Inside the budget only slot days qualify.
+    expect(strengthDaysOf([{ weekday: 1, minutes: 50 }, { weekday: 5, minutes: 150 }], 5, 2, true)).toEqual([1]);
+  });
 });
 
 describe("generatePlan structure", () => {

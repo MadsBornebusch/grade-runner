@@ -4511,6 +4511,10 @@ work).
      flags the 19 Oct 2025 run (distance 1.53×, time 1.15×) and the 13 Oct
      Pollença run on all four, and keeps Oslo Trail Challenge (26 Sep 2026)
      out of today's reference (long run 73 min).
+   - *Strength* (user decision, 2026-10-21): outside the hour budget but
+     always in the plan. Two 25 min sessions every week except race week,
+     never on the long-run day or the day before it, spread through the
+     week and preferably after an easy or quality run.
    - *Descent:* weekly descent and steep descent each grow at most 10% a
      week; in the specific phase (the last 6 weeks before the taper) one
      run a week is a descent session.

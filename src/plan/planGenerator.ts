@@ -325,13 +325,15 @@ function planWeek(
     .filter((s) => phase !== "race" || start + s.weekday < race.day - 1)
     .sort((a, b) => (a.weekday === longRunWeekday ? -1 : b.weekday === longRunWeekday ? 1 : b.minutes - a.minutes));
 
-  // Strength first (it takes slot time if it counts in the budget), on
-  // days other than the long run.
-  const strengthDays = slots.filter((s) => s.weekday !== longRunWeekday).slice(-state.strengthSessions);
-  for (const s of phase === "race" ? [] : strengthDays) {
-    out.push({ day: start + s.weekday, kind: "strength", minutes: state.strengthMinutes, distanceKm: 0, mechanical: 0, descentM: 0, steepDescentM: 0 });
+  // Strength first: every week but race week, never on the long-run day
+  // or the day before it, spread through the week. Outside the budget (the
+  // default) it can go on any such day; inside it, only on slot days, and
+  // it takes slot time.
+  const strengthWeekdays = phase === "race" ? [] : strengthDaysOf(slots, longRunWeekday, state.strengthSessions, !!o.strengthCountsInBudget);
+  for (const wd of strengthWeekdays) {
+    out.push({ day: start + wd, kind: "strength", minutes: state.strengthMinutes, distanceKm: 0, mechanical: 0, descentM: 0, steepDescentM: 0 });
   }
-  const free = new Map(slots.map((s) => [s.weekday, s.minutes - (o.strengthCountsInBudget && strengthDays.includes(s) ? state.strengthMinutes : 0)]));
+  const free = new Map(slots.map((s) => [s.weekday, s.minutes - (o.strengthCountsInBudget && strengthWeekdays.includes(s.weekday) ? state.strengthMinutes : 0)]));
 
   // Long run: as long as the guard and its slot allow, shorter in lighter
   // weeks.
@@ -398,6 +400,24 @@ function planWeek(
     steepLeft -= r.steepDescentM;
   }
   return [...out, ...runs].sort((a, b) => a.day - b.day);
+}
+
+/** `count` weekdays for strength, avoiding the long-run day and the day
+ * before it, as far apart as possible (preferring days with a run slot,
+ * so strength can follow an easy run). */
+export function strengthDaysOf(slots: AvailabilitySlot[], longRunWeekday: number, count: number, slotDaysOnly: boolean): number[] {
+  const blocked = new Set([longRunWeekday, (longRunWeekday + 6) % 7]);
+  const slotDays = new Set(slots.map((x) => x.weekday));
+  const candidates = [0, 1, 2, 3, 4, 5, 6].filter((d) => !blocked.has(d) && (!slotDaysOnly || slotDays.has(d)));
+  const chosen: number[] = [];
+  const gap = (d: number) => (chosen.length ? Math.min(...chosen.map((c) => Math.min((d - c + 7) % 7, (c - d + 7) % 7))) : 0);
+  while (chosen.length < count && chosen.length < candidates.length) {
+    const next = candidates
+      .filter((d) => !chosen.includes(d))
+      .sort((a, b) => gap(b) - gap(a) || Number(slotDays.has(b)) - Number(slotDays.has(a)) || a - b)[0];
+    chosen.push(next);
+  }
+  return chosen.sort((a, b) => a - b);
 }
 
 const rank = (k: SessionKind) => (k === "descent" ? 0 : k === "long" ? 1 : 2);
