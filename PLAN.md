@@ -3953,7 +3953,7 @@ goes in `src/plan/`.
    - *Guard reference after a race* (from a spike analysis of the user's
      Strava history and a variant test on this cache, 2026-10-21). Recovering from a race doesn't make it the new long-run
      reference. With the race in the 30-day window, the raw Frandsen rule
-     was blind to the autumn 2025 calf-injury lead-up. The 28.5 km road run
+     was blind to the lead-up to the one injury in the data (autumn 2025). The 28.5 km road run
      on 19 Oct 2025 was +53% by distance over the longest non-race run of
      the previous 30 days, but −75% against the 113 km ultra.
      Design for the guard:
@@ -3979,7 +3979,7 @@ goes in `src/plan/`.
        is only the first few easy days. `spikeReferences` exposes each day's
        reference for the guard. With one injury in the data, this isn't
        validated. It's the conservative choice.
-     - No per-run or per-day rule caught the Pollença week in Oct 2025
+     - No per-run or per-day rule caught a week of steep trails in Oct 2025
        (steep trails, 40–64 m/km). A steep-downhill (< −17%) 7-day :
        42-day load ratio would have been high for 11 days in a row.
        **Steep descent added to the ledger (2026-10-21):** `steepDescentM`,
@@ -3989,7 +3989,7 @@ goes in `src/plan/`.
        durability index steers it. On this history, since 2024:
        - Its own 7-day : 42-day ratio was above 1.5 for 12 days running
          from 10 Oct 2025, above 2 for 7 of them, ending the day of the
-         19 Oct injury run. But the ratio passed 1.5 in 26 episodes and 2
+         19 Oct run. But the ratio passed 1.5 in 26 episodes and 2
          in 16, almost all without injury. One injury, so a warning sign at
          best, not a validated guard.
        - Against the day guard (each day vs the biggest of the previous
@@ -4509,7 +4509,7 @@ work).
      on duration or distance. Floors any athlete can take (guesses): 45
      min, 8 km, 300 m descent, 150 m steep descent. On the real history it
      flags the 19 Oct 2025 run (distance 1.53×, time 1.15×) and the 13 Oct
-     Pollença run on all four, and keeps Oslo Trail Challenge (26 Sep 2026)
+     steep-trail run on all four, and keeps Oslo Trail Challenge (26 Sep 2026)
      out of today's reference (long run 73 min).
    - *Schedule input* (user design, 2026-10-21): a weekly running volume,
      a preferred long-run day that any given week can move, and a maximum
