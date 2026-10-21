@@ -4321,12 +4321,11 @@ work).
      points, so even with the same mix of fresh and tired legs, per-run
      terrain sampling alone is about the size of the effect to resolve.
    Kept as code: the module and diagnostic document what was tried.
-   *Is there anything to find?* On identical terrain, yes. In the 2020
-   hourly 2.5 km loop, descent speed was already 11–16% down on laps 2–3
-   and 20–30% down by laps 10–17, while flat speed fell 0–15%. In the 2025
-   backyard ultra, descents were 6–14% slower by laps 2–3 and 15–20% slower
-   from lap 8, with flat speed about unchanged. Self-paced formats, so
-   partly choice, but descent-specific and starting within 1–3 h.
+   *Is there anything to find?* A first per-lap look at the 2020 hourly
+   2.5 km loop and the 2025 backyard ultra seemed to show descents 6–16%
+   slower within 1–3 h, with flat speed unchanged. That was a composition
+   artifact: which segments counted as descent varied from lap to lap (4.5
+   to 9.2 min per lap). See the v2 result for the matched version.
 
    **Durability index v2: terrain matched across runs. Pass bar fixed
    before fitting (2026-10-21).** Descent passages: every visit to a ~55 m
@@ -4353,9 +4352,18 @@ work).
      −1.4%/h ± 1.0, difference +0.5%/h (95% −3.0 to +4.1). With dose
      ≤ 3 h, descent +0.3 ± 1.8; with no cap, −1.0 ± 1.4. The same descent
      run late in a training run is not measurably slower than run fresh.
-     Laps on identical terrain lost 5–15% in 1–3 h, so either training
-     runs and self-paced lap races differ (finishing the run home, effort
-     chosen per descent), or what the laps show isn't leg fade.
+   - *Positive control:* on tiles matched lap to lap, the backyard ultra's
+     descents read +6% on lap 1, stay within about ±5% through lap 8, and
+     reach −8 to −10% by laps 13–16. A slow fade, mostly beyond the 5 h
+     dose cap, so it is consistent with the training-run null rather than
+     a sign the estimator misses it. Its fitted slope within 5 h is
+     +0.2%/h.
+   - *Matching is lossy:* on the 2.5 km loop run 17 times, only 3 of 82
+     descent tiles were hit ≥ 5 times (tile edges, heading sectors and the
+     −5% grade cut all cut repeats with GPS jitter). That costs precision,
+     not bias; even 3× the matches would leave block SEs far above 1%/h.
+   - *Convergence:* 50, 500 and 2000 rounds of alternating demeaning agree
+     to 0.01%/h.
    - *Resolution:* 12-week block SEs are 3–20%/h, against the 1%/h bar.
      By year: 2025 −3.0 ± 2.4, 2026 +1.4 ± 2.0.
 
