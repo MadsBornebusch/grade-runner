@@ -4447,16 +4447,30 @@ work).
      beats no change by 1.6 points, 95% bootstrap −0.8 to +3.5, and is
      closer than no change on 9 of 14 pairs. Fitted and prior are tied.
    - Elasticity: 0.23 ± 0.03 over the whole history without time decay,
-     0.09 ± 0.06 with the 75-day half-life, because the 2026 pairs
-     responded less (+26% hours → +1%; −38% → +4%). The ± is too narrow:
-     residual errors (about 6%) are larger than the assumed pair noise.
+     0.09 ± 0.06 with the 75-day half-life. The drop comes mostly from two
+     2026 pairs around Soria Moria: the 24 h race is one of three readings
+     in its block, and the index reads lower on long runs, so that block
+     reads low and the next one looks like a rise (−38% hours → +4%). The
+     ± is too narrow: residual errors (about 6%) are larger than the
+     assumed pair noise.
+   - *Sensitivity (after the fact, so it can't change the verdict):*
+     dropping readings from runs over 5 h (which removes those two pairs;
+     11 left) gives r 0.87, RMSE no change 9.7%, prior 7.8%, fitted 7.3%,
+     fitted beating no change by 2.4 points (95% 0.4 to 3.9): that would
+     have passed. Also dropping the 2020 pair (its ramp is partly the
+     chronic EWMA warming up from zero at the start of the Strava history;
+     10 pairs left): 95% −0.2 to 4.2, just short. Elasticity in these
+     variants: 0.14 decayed, 0.25–0.30 undecayed. The pre-registered set
+     included ultras; a future re-run should exclude readings over 5 h
+     from the start, which is now fixed as the next version's rule.
    - *Season confound, not separable here:* the big positive ramps are all
      spring builds (Feb–May), when the index also rises after winter. Any
      season effect is inside the 0.23.
    - *Decision:* stage 4 starts with the fixed prior ramp (elasticity 0.1
      for predicting what a build does to the index). The response model
-     stays as a monitor: re-run this backtest as pairs accumulate (about 8
-     a year at the current recording rate) and switch to the fitted value
+     stays as a monitor: re-run this backtest as pairs accumulate (about
+     5–6 a year at the current recording rate, since many blocks have
+     fewer than 3 readings) and switch to the fitted value
      only once it passes. A wider prior (0.1–0.25) is supported by the
      whole-history fit, but the prior's centre was fixed before looking,
      so it stays.

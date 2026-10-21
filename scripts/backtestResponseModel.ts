@@ -4,6 +4,13 @@
 // Pass bar fixed in PLAN.md before running this.
 //
 //   npx tsx scripts/backtestResponseModel.ts [--blockDays=42] [--minReadings=3]
+//     [--pairsFrom=YYYY-MM-DD] [--maxReadingMin=]
+// The last two are sensitivity checks, not the pre-registered set: drop
+// pairs whose later block starts before a date (the chronic EWMA starts at
+// zero with the Strava history, so the first months' ramps are partly
+// warm-up), and drop readings from runs longer than a duration (one ultra
+// in a 3-reading block moves its mean, since the index reads lower on long
+// runs).
 import { capSpikes, dailySeries, ewma } from "../src/plan/loadLedger.ts";
 import { adjacentPairs, blocksOf, posteriorElasticity, walkForward, type BlockPair, type WalkForwardPrediction } from "../src/plan/responseModel.ts";
 import { arg } from "./stravaScriptHelpers.ts";
@@ -14,6 +21,8 @@ const MIN_READINGS = Number(arg("minReadings", "3"));
 const PER_READING_SD = 0.049;
 const PRIOR = { mean: 0.1, sd: 0.1 };
 const HALF_LIFE_DAYS = 75;
+const PAIRS_FROM = arg("pairsFrom", "");
+const MAX_READING_MIN = Number(arg("maxReadingMin", "Infinity"));
 
 const runs = loadPlanRuns();
 const { readings, slope, referenceHr } = fitnessReadings(runs);
@@ -34,14 +43,16 @@ const chronicOf = (daily: number[]) => {
 const hoursChronic = chronicOf(hoursDaily);
 const mechChronic = chronicOf(mechDaily);
 
-const reads = readings.map((r) => ({ day: r.run.day, value: r.value }));
+const kept = readings.filter((r) => r.run.movingMin <= MAX_READING_MIN);
+const reads = kept.map((r) => ({ day: r.run.day, value: r.value }));
 const blocks = blocksOf(reads, reads[0].day, reads.at(-1)!.day, BLOCK_DAYS);
-const hoursPairs = adjacentPairs(blocks, hoursChronic, MIN_READINGS, PER_READING_SD);
-const mechPairs = adjacentPairs(blocks, mechChronic, MIN_READINGS, PER_READING_SD);
+const fromDay = PAIRS_FROM ? Date.parse(`${PAIRS_FROM}T00:00:00Z`) / 864e5 : -Infinity;
+const hoursPairs = adjacentPairs(blocks, hoursChronic, MIN_READINGS, PER_READING_SD).filter((p) => p.later.start >= fromDay);
+const mechPairs = adjacentPairs(blocks, mechChronic, MIN_READINGS, PER_READING_SD).filter((p) => p.later.start >= fromDay);
 
 const iso = (day: number) => new Date(day * 864e5).toISOString().slice(0, 10);
 const meanDuration = (start: number, end: number) => {
-  const xs = readings.filter((r) => r.run.day >= start && r.run.day < end).map((r) => r.run.movingMin);
+  const xs = kept.filter((r) => r.run.day >= start && r.run.day < end).map((r) => r.run.movingMin);
   return xs.reduce((s, v) => s + v, 0) / xs.length;
 };
 const pearson = (a: number[], b: number[]) => {
