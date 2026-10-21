@@ -111,7 +111,7 @@ export interface SummaryLoadCoefficients {
 
 /**
  * Least-squares fit against the points-based ledger on this athlete's 328
- * cached runs (2020-2026), at VO2max 55 / LT2 0.814 for the metabolic term.
+ * cached runs (2020-2026), at their own VO2max and LT2 for the metabolic term.
  * In-sample error against the points-based ledger on those runs: mechanical
  * about 4%, metabolic about 14%, descent about 10%. An approximation for
  * activities without points, not a validated constant.

@@ -2548,7 +2548,7 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    confounded win) — just pointed the other direction.
 
    **Tested the uncalibrated-baseline hypothesis directly, with this
-   athlete's real numbers (VO2max=54, bodyMassKg=85) instead of
+   athlete's real VO2max and body mass instead of
    `DEFAULT_FORM_INPUTS`'s generic 50/70 — and it didn't fix the bias. If
    anything, it got worse.** Also fixed a real gap the swap surfaced:
    `--bodyMassKg` had only ever been wired into `buildSegmentLibrary`'s
@@ -2559,7 +2559,7 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
 
    | candidate | mean \|err%\| | median \|err%\| | mean signed err% |
    |---|---|---|---|
-   | baseline (VO2max=54, mass=85kg) | 25.66% | 29.31% | −25.66% |
+   | baseline (athlete's VO2max and mass) | 25.66% | 29.31% | −25.66% |
    | baseline + fitted per-category surface | 23.66% | 26.82% | −23.66% |
    | baseline + surface-blind uniform multiplier (control) | 23.64% | 26.63% | −23.64% |
 
@@ -2793,7 +2793,7 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    `backtestSurfaceMultiplier.ts` (same k-fold harness, same coefficient-
    to-multiplier conversion — this only changes which upstream fit
    generates the per-category numbers). Full run, calibrated physiology
-   (VO2max=54, bodyMassKg=85), default 20-fold k-fold across the whole
+   (the athlete's VO2max and body mass), default 20-fold k-fold across the whole
    203-activity pool:
 
    | candidate | mean signed err% |
@@ -2928,7 +2928,7 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    `fitTauFInfWithSupportGate` on the training pool (target held out), run
    both models against the SAME fitted params, compare each to the
    target's own actual finish time. Two runs, calibrated physiology
-   (VO2max=54, bodyMassKg=85):
+   (the athlete's VO2max and body mass):
 
    - **Default (evenly-spaced-by-index) target selection, 17/17 folds
      completed** — all folds happened to land under 2.4h (this sampling
@@ -3065,8 +3065,8 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    **Why is the fixed fit's fInf (~0.70-0.74) still so much higher than
    the 0.38 default?** Investigated three candidates:
    1. *VO2max too low, fInf absorbing the error* — ruled out, and not
-      just empirically: refit at VO2max=54/58/62/66 gave the exact same
-      fInf=0.737 every time. This fitting method minimizes the SLOPE of
+      just empirically: refit at four VO2max values 12 ml/kg/min apart
+      gave the exact same fInf every time. This fitting method minimizes the SLOPE of
       (power/ceiling) over time, and VO2max only ever rescales that
       whole series by one constant, identically for every candidate
       (fInf, tau) — a uniform rescaling can't change which candidate
@@ -3417,7 +3417,7 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    into the race-pooled fit, instead of the two only ever competing as an
    either/or fallback.** Prompted by a real user report: predicting a 10k
    (Askerspurten, actual 42min) gave 47min at an estimated 157bpm, well
-   below the user's own entered LT2 (4:10/km @ 165bpm) — while a longer
+   below the user's own entered LT2 HR — while a longer
    race (Saksumdal) predicted believably. Root cause: by this point
    `runFitBatch.ts` had evolved (undocumented here at the time) from the
    "two separate calibrations, athlete picks which" UI described above
@@ -3554,7 +3554,7 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
    the anchor into the SAME regression as the pooled race data rather than
    forcing the line through it, so the fit doesn't reproduce the athlete's
    own entered LT2 HR at effortFraction=1.0. Measured: production predicts
-   159.7bpm at ef=1.0 vs. the entered 165bpm -- a real ~5bpm calibration
+   about 5bpm below the entered LT2 HR at ef=1.0 -- a real calibration
    gap that (since Askerspurten runs close to LT2 effort throughout) shows
    up as a near-uniform ~10bpm bias across the whole race (bias≈MAE≈
    -10.06bpm on Askerspurten's own splits, leave-one-out).
@@ -3646,8 +3646,8 @@ number like "1.8x on unpaved" gets described anywhere user-facing.
       fit-eligible weight comes from points already past their race's own
       local tau-decay crossover, where `lt2Fraction` isn't even part of
       `ceilingPower`'s calculation (the `Math.min` cap doesn't bind there).
-      VO2max, by contrast, moved predHR@LT2 a lot (132-165bpm across a
-      46-62 sweep) -- but that's a measured physiological input, not a
+      VO2max, by contrast, moved predHR@LT2 a lot (over 30 bpm across a
+      16 ml/kg/min sweep) -- but that's a measured physiological input, not a
       free knob to reverse-engineer from HR residuals (same objection as
       the LT2-cap-during-prediction question below), and the sweep wasn't
       even self-consistent (varied VO2max while holding a pace-derived
@@ -3897,13 +3897,11 @@ goes in `src/plan/`.
    **Threshold pace and HR, kept current from hard efforts** (user request,
    2026-10-21). The metabolic channel's IF, the plan's intensity zones and
    the fitness index's reference HR all hang off one threshold. Today it's
-   the scripts' LT2 0.814 of VO2max, which in the model's own pace units
-   (Minetti, VO2max 55) is about 14.5 km/h. The lab test (25 Mar 2026) was
-   a lactate profile stopped at LT2: 15.5 km/h, HR 170, 4.32 L/min (50.9
-   ml/kg/min at 85 kg), which is 0.87 in the same units. Not a VO2max
-   test, so 55 stays as a conservative guess for the max (user,
-   2026-10-21). The value goes stale either way: Askerspurten 10 km (17 Sep
-   2026, 42:28, 4:09/km) is one recent anchor.
+   the athlete's lab LT2 (a lactate profile, LT2 taken at RER 1.00 by
+   interpolating between stages), entered as pace and HR. The athlete's
+   own values live in the gitignored `athlete.local.json`
+   (`scripts/athleteProfile.ts`), not in this repo. A lab value goes stale:
+   a recent 10 km race is one newer anchor.
    Proposal: every race or workout with a 20–60 min near-maximal stretch
    (`vo2MaxEstimate.ts`'s 20–90 min window already finds these) gives a
    threshold estimate. Grade-adjusted power over the stretch, scaled to a
@@ -4204,7 +4202,8 @@ work).
 1. Load ledger (layer 1). **Built (2026-10-20):** `src/plan/loadLedger.ts`
    (+ tests). Validated privately against an existing app's weekly scores
    for the same training; that script and its detailed results are kept
-   outside this repo. Summary, at VO2max 55 / LT2 0.814, on 20 complete
+   outside this repo. Summary, at the athlete's VO2max and an earlier, lower
+   LT2 setting, on 20 complete
    weeks: weekly mechanical error 2.9% as is (1.0% after one scale factor),
    against 5.2% for km × constant and 5.3% for hours × constant. The
    42-day chronic level stays within about 1 point of the app's over 126
@@ -4240,8 +4239,8 @@ work).
    **Fitness index: built, promising but not validated (2026-10-21).**
    `src/plan/fitnessIndex.ts` (+ tests), checked by
    `scripts/diagFitnessIndex.ts --flatMaxGrade=0.08 --minSampleMin=8`.
-   Method, as frozen: power at a reference HR (the median run's mean HR,
-   144 bpm here). The HR-power slope is pooled from within-run variation.
+   Method, as frozen: power at a reference HR (the median run's mean
+   HR). The HR-power slope is pooled from within-run variation.
    Each run contributes only its level, from samples whose last 2 min
    stayed within ±8% grade, with at least 8 min of them. Runs whose mean
    HR is more than 15 bpm from the reference are dropped, and so are the 3
@@ -4260,14 +4259,14 @@ work).
      (4.9% → 8%), so it was dropped.
    - *Slope*: power-on-HR gives 0.124 W/kg per bpm, HR-on-power inverted
      0.296. Errors in both variables put the truth between them, and the
-     lab step test's 0.156 sits inside (treadmill step test, 25 Mar 2026,
-     85 kg, 8.5 → 15.5 km/h).
-   - *Absolute check against the lab test (one point, rough):* the lab's
-     11.5 km/h stage ran at 143 bpm, so 144 bpm is about 11.5 km/h, i.e.
-     12.7 W/kg flat or 13.3 W/kg at a 1% treadmill incline. The index read 13.9 (March 2026, n = 4) and 13.7 (April,
-     n = 5): 4–9% above the lab value. In the expected direction (indoor
-     HR runs warmer). One point, so a sanity check, not a calibration. The pooled fit is attenuated, so
-     the method isn't yet general for athletes without a lab test.
+     slope across the athlete's lab step test sits inside
+     (`--slopeMode=lab`). The pooled fit is attenuated, so the method
+     isn't yet general for athletes without a lab test.
+   - *Absolute check against the lab test (one point, rough):* the lab
+     stage nearest the reference HR, converted to flat Minetti power,
+     reads 8–9% below the index in the two months around the test (3–5%
+     with a 1% treadmill incline). In the expected direction (indoor HR
+     runs warmer). One point, so a sanity check, not a calibration.
    - *Validity, inconclusive*: same-course races. Oslo Trail Challenge
      2020 → 2024 → 2026 got 9% then 13% faster, and the index 6 weeks
      before rose 2.5% then 11%, the right direction. Askerspurten

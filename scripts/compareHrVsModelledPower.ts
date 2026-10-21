@@ -11,7 +11,7 @@
 // race: does HR show a rising trend (classic cardiac drift / fatigue)
 // while modelled power/effort-fraction stays flat?
 //
-// Usage: npx tsx scripts/compareHrVsModelledPower.ts [--bodyMassKg=85] [--vo2Max=54]
+// Usage: npx tsx scripts/compareHrVsModelledPower.ts [--bodyMassKg=] [--vo2Max=]
 
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -22,13 +22,14 @@ import { attachSurfaceData, type ValhallaSurfaceEdge } from "../src/model/surfac
 import { buildEffortTrendPoints, trimForPacingFit, type EffortTrendPoint } from "../src/model/pacingFit.ts";
 import { DEFAULT_FORM_INPUTS, resolveCeilingParams, resolveGlycogenStoreG } from "../src/ui/formInputs.ts";
 import { arg } from "./stravaScriptHelpers.ts";
+import { fittedValue, loadAthleteProfile } from "./athleteProfile.ts";
 
-const BODY_MASS_KG = parseFloat(arg("bodyMassKg", "85"));
-const VO2_MAX = parseFloat(arg("vo2Max", "54"));
+const BODY_MASS_KG = parseFloat(arg("bodyMassKg", String(loadAthleteProfile().form.bodyMassKg)));
+const VO2_MAX = parseFloat(arg("vo2Max", String(fittedValue("hrDiagnostics", "vo2Max", 50))));
 // The joint fit's own answer on this athlete's data (2-race informative
 // set, Soria Moria excluded) -- see PLAN.md §14.
-const FITTED_TAU_MIN = parseFloat(arg("tauMin", "317"));
-const FITTED_FINF = parseFloat(arg("fInf", "0.737"));
+const FITTED_TAU_MIN = parseFloat(arg("tauMin", String(fittedValue("hrDiagnostics", "tauMin", 300))));
+const FITTED_FINF = parseFloat(arg("fInf", String(fittedValue("hrDiagnostics", "fInf", 0.75))));
 const BIN_MINUTES = parseFloat(arg("binMinutes", "30"));
 
 const CACHE_DIR = fileURLToPath(new URL("../.strava-cache/", import.meta.url));

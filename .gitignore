@@ -27,3 +27,6 @@ dist-ssr
 *.sw?
 .vercel
 .env*
+
+# Personal athlete data (body mass, lab test, fitted values) for the scripts
+athlete.local.json

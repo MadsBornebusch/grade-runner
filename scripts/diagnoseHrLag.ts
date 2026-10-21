@@ -16,7 +16,7 @@
 //    while long races reach much higher ones, that's the range-coverage
 //    problem no lag correction can manufacture around.
 //
-// Usage: npx tsx scripts/diagnoseHrLag.ts [--bodyMassKg=85] [--vo2Max=54] [--fInf=0.737] [--tauMin=317]
+// Usage: npx tsx scripts/diagnoseHrLag.ts [--bodyMassKg=] [--vo2Max=] [--fInf=] [--tauMin=] (defaults from athlete.local.json)
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -27,12 +27,13 @@ import { attachSurfaceData, type ValhallaSurfaceEdge } from "../src/model/surfac
 import { buildEffortTrendPoints, trimForPacingFit, type EffortTrendPoint } from "../src/model/pacingFit.ts";
 import { DEFAULT_FORM_INPUTS, resolveCeilingParams, resolveGlycogenStoreG } from "../src/ui/formInputs.ts";
 import { arg } from "./stravaScriptHelpers.ts";
+import { fittedValue, loadAthleteProfile } from "./athleteProfile.ts";
 
-const BODY_MASS_KG = parseFloat(arg("bodyMassKg", "85"));
-const VO2_MAX = parseFloat(arg("vo2Max", "54"));
+const BODY_MASS_KG = parseFloat(arg("bodyMassKg", String(loadAthleteProfile().form.bodyMassKg)));
+const VO2_MAX = parseFloat(arg("vo2Max", String(fittedValue("hrDiagnostics", "vo2Max", 50))));
 const MAX_ACTIVITIES = parseInt(arg("maxActivities", "250"), 10);
-const FINF = parseFloat(arg("fInf", "0.737"));
-const TAU_MIN = parseFloat(arg("tauMin", "317"));
+const FINF = parseFloat(arg("fInf", String(fittedValue("hrDiagnostics", "fInf", 0.75))));
+const TAU_MIN = parseFloat(arg("tauMin", String(fittedValue("hrDiagnostics", "tauMin", 300))));
 
 const CACHE_DIR = fileURLToPath(new URL("../.strava-cache/", import.meta.url));
 const SURFACE_CACHE_DIR = fileURLToPath(new URL("../.surface-cache/", import.meta.url));

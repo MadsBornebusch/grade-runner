@@ -12,13 +12,14 @@ import { runPipeline, type GpxPoint } from "../src/gpx/pipeline.ts";
 import { attachSurfaceData, type ValhallaSurfaceEdge } from "../src/model/surfaceExposure.ts";
 import { findSustainableTheta, type SolverInputs } from "../src/model/solver.ts";
 import { DEFAULT_FORM_INPUTS, resolveCeilingParams, resolveGlycogenStoreG } from "../src/ui/formInputs.ts";
+import { fittedValue, loadAthleteProfile } from "./athleteProfile.ts";
 
 const OSLO_2024_ID = "12524841443";
-const REAL_VO2_MAX = 54;
-const REAL_BODY_MASS_KG = 85;
+const REAL_VO2_MAX = fittedValue("paceSwings", "vo2Max", 50);
+const REAL_BODY_MASS_KG = loadAthleteProfile().form.bodyMassKg;
 // This session's real applied values, per the user's own "Currently applied" report.
-const REAL_TAU_MIN = 321;
-const REAL_F_INF = 0.69;
+const REAL_TAU_MIN = fittedValue("paceSwings", "tauMin", 300);
+const REAL_F_INF = fittedValue("paceSwings", "fInf", 0.75);
 const SURFACE_COST_MULTIPLIERS = { gravel: 1.03, dirt: 1.03, compacted: 1.05, path: 1.12 };
 
 const CACHE_DIR = fileURLToPath(new URL("../.strava-cache/", import.meta.url));

@@ -1,8 +1,8 @@
 // Ad hoc diagnostic: why does the live app's "Theoretical ceiling" for
-// Askerspurten (46:39, avg HR 162) read BELOW the athlete's stated LT2
-// (165bpm)? Uses the athlete's own reported fitted values (f0=0.94,
-// fInf=0.66, tau=220min) directly rather than re-fitting, so this
-// reproduces exactly the curve their app is using.
+// Askerspurten read BELOW the athlete's stated LT2 HR? Uses the athlete's
+// own reported fitted values (athlete.local.json, "fitted.askerspurten")
+// directly rather than re-fitting, so this reproduces exactly the curve
+// their app is using.
 //
 // FINDING (confirmed 2026-08-29): the ceiling/boost/HR-calibration chain
 // itself is correct -- on flat or uphill segments the model targets ~15.63
@@ -47,6 +47,7 @@ import {
 import { buildChartPoints, summarizeChartPoints } from "../src/ui/chartData.ts";
 import { fetchActivityPoints, loadCookie } from "./stravaScriptHelpers.ts";
 import { fileURLToPath } from "node:url";
+import { fittedValue, labFatOxPoints, loadAthleteProfile } from "./athleteProfile.ts";
 
 const BASE_URL = "http://localhost:3000";
 const SESSION_FILE = fileURLToPath(new URL("../.strava-session.local", import.meta.url));
@@ -77,35 +78,27 @@ async function main() {
     /* cache-only is fine, this activity is already cached */
   }
 
-  const fatOxPoints: FatOxPoint[] = [
-    { paceMinPerKm: 60 / 8.5, heartRateBpm: 125, fatGPerMin: 0.4342, carbGPerMin: 2.301 },
-    { paceMinPerKm: 60 / 10, heartRateBpm: 134, fatGPerMin: 0.481127, carbGPerMin: 2.549685 },
-    { paceMinPerKm: 60 / 11.5, heartRateBpm: 143, fatGPerMin: 0.4693869, carbGPerMin: 2.9059515 },
-    { paceMinPerKm: 60 / 12.5, heartRateBpm: 153, fatGPerMin: 0.352203, carbGPerMin: 3.750505 },
-    { paceMinPerKm: 60 / 13.5, heartRateBpm: 160, fatGPerMin: 0.2586496, carbGPerMin: 4.483776 },
-    { paceMinPerKm: 60 / 14.5, heartRateBpm: 165, fatGPerMin: 0.1355706, carbGPerMin: 5.069691 },
-    { paceMinPerKm: 60 / 15.5, heartRateBpm: 170, fatGPerMin: 0, carbGPerMin: 5.9895165 },
-  ];
+  const fatOxPoints: FatOxPoint[] = labFatOxPoints();
   const foPeakGPerMin = Math.max(...fatOxPoints.map((p) => p.fatGPerMin));
 
   const formInputs = {
     ...DEFAULT_FORM_INPUTS,
-    bodyMassKg: 85,
-    vo2MaxHistory: [{ date: "2026-06-01", value: 54, source: "manual" as const }],
-    lt2PaceMinPerKm: 4.25,
-    lt2HeartRateBpm: 165,
+    bodyMassKg: loadAthleteProfile().form.bodyMassKg,
+    vo2MaxHistory: [{ date: "2026-06-01", value: fittedValue("askerspurten", "vo2Max", 50), source: "manual" as const }],
+    lt2PaceMinPerKm: fittedValue("askerspurten", "lt2PaceMinPerKm", 4.5),
+    lt2HeartRateBpm: fittedValue("askerspurten", "lt2HeartRateBpm", 165),
     fatOxPoints,
     foPeakGPerMin,
     // The athlete's OWN reported fitted values -- not re-derived here, so
     // this reproduces exactly what their app is using.
-    f0: 0.94,
-    fInf: 0.66,
-    tauMin: 220,
+    f0: fittedValue("askerspurten", "f0", 0.94),
+    fInf: fittedValue("askerspurten", "fInf", 0.75),
+    tauMin: fittedValue("askerspurten", "tauMin", 300),
   };
 
   const baseCeilingParams: CeilingParams = resolveCeilingParams(formInputs);
   const { lt1Fraction, lt2Fraction } = resolveLt1Lt2Fractions(formInputs);
-  console.log(`Resolved LT2 fraction from 4:15/km pace @ VO2max 54: ${lt2Fraction.toFixed(4)} (default assumption is 0.85)`);
+  console.log(`Resolved LT2 fraction from the reported LT2 pace: ${lt2Fraction.toFixed(4)} (default assumption is 0.85)`);
   console.log(`Ceiling params: f0=${baseCeilingParams.f0}, fInf=${baseCeilingParams.fInf}, tauMin=${baseCeilingParams.tauMin}, lt2Fraction=${baseCeilingParams.lt2Fraction?.toFixed(4)}, anaerobicCapacityMin=${formInputs.anaerobicCapacityMin}\n`);
 
   // Threshold-only HR calibration (LT1 + LT2 + fat-ox anchors) -- the

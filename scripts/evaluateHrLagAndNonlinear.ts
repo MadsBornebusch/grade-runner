@@ -12,7 +12,7 @@
 // Both measured on the same held-out MAE metric as every other check in
 // this investigation (Ecotrail 80, Soria Moria, leave-one-out), not R^2.
 //
-// Usage: npx tsx scripts/evaluateHrLagAndNonlinear.ts [--bodyMassKg=85] [--vo2Max=54] [--fInf=0.737] [--tauMin=317]
+// Usage: npx tsx scripts/evaluateHrLagAndNonlinear.ts [--bodyMassKg=] [--vo2Max=] [--fInf=] [--tauMin=] (defaults from athlete.local.json)
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -24,12 +24,13 @@ import { buildEffortTrendPoints, trimForPacingFit, type EffortTrendPoint } from 
 import { weightedLeastSquares } from "../src/model/linearSolve.ts";
 import { DEFAULT_FORM_INPUTS, resolveCeilingParams, resolveGlycogenStoreG } from "../src/ui/formInputs.ts";
 import { arg } from "./stravaScriptHelpers.ts";
+import { fittedValue, loadAthleteProfile } from "./athleteProfile.ts";
 
-const BODY_MASS_KG = parseFloat(arg("bodyMassKg", "85"));
-const VO2_MAX = parseFloat(arg("vo2Max", "54"));
+const BODY_MASS_KG = parseFloat(arg("bodyMassKg", String(loadAthleteProfile().form.bodyMassKg)));
+const VO2_MAX = parseFloat(arg("vo2Max", String(fittedValue("hrDiagnostics", "vo2Max", 50))));
 const MAX_ACTIVITIES = parseInt(arg("maxActivities", "250"), 10);
-const FINF = parseFloat(arg("fInf", "0.737"));
-const TAU_MIN = parseFloat(arg("tauMin", "317"));
+const FINF = parseFloat(arg("fInf", String(fittedValue("hrDiagnostics", "fInf", 0.75))));
+const TAU_MIN = parseFloat(arg("tauMin", String(fittedValue("hrDiagnostics", "tauMin", 300))));
 const BIN_MINUTES = 30;
 const EARLY_WINDOW_FRACTION = 0.65;
 const POWER_SMOOTHING_WINDOW_S = 75;

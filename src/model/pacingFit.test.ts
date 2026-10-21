@@ -530,7 +530,8 @@ describe("fitDurationCeilingAcrossRaces", () => {
 
   it("reproduces the hand-derived envelope, anchored near the athlete's measured LT2", () => {
     // Independent check, not a fitted constraint: LT2 is conventionally
-    // ~60-minute power, and this athlete's lab-measured lt2Fraction is 0.814.
+    // ~60-minute power, so fraction60Min should land near the athlete's
+    // lt2Fraction.
     const fit = fitDurationCeilingAcrossRaces(REAL, FALLBACK);
     expect(fit.fraction60Min).toBeCloseTo(0.813, 2);
     expect(fit.exponent).toBeCloseTo(0.16, 2);

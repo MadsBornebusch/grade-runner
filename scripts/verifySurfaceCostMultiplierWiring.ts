@@ -14,8 +14,9 @@ import { runPipeline, type GpxPoint } from "../src/gpx/pipeline.ts";
 import { attachSurfaceData, type ValhallaSurfaceEdge } from "../src/model/surfaceExposure.ts";
 import { buildSegmentLibrary } from "../src/model/segmentLibrary.ts";
 import { fitSurfaceCostMultipliersFromIntensity } from "../src/model/pacingFit.ts";
+import { loadAthleteProfile } from "./athleteProfile.ts";
 
-const BODY_MASS_KG = 85;
+const BODY_MASS_KG = loadAthleteProfile().form.bodyMassKg;
 const CACHE_DIR = fileURLToPath(new URL("../.strava-cache/", import.meta.url));
 const SURFACE_CACHE_DIR = fileURLToPath(new URL("../.surface-cache/", import.meta.url));
 

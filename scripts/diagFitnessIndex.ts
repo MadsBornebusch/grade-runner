@@ -4,7 +4,7 @@
 // with pace-derived power (Minetti, what the app has for any GPS run) and
 // with the device's measured power (Stryd-style, where recorded).
 //
-//   npx tsx scripts/diagFitnessIndex.ts [--bodyMassKg=85] [--minMovingMin=30]
+//   npx tsx scripts/diagFitnessIndex.ts [--bodyMassKg=] [--minMovingMin=30]
 //
 // Reports:
 //   - noise: each run's index against the median of the *other* runs within
@@ -28,18 +28,21 @@ import {
   powerAtReferenceHr, pooledPowerPerBpm, pooledPowerPerBpmFromHrOnPower, summarizeRunSamples, type RunHrPowerSummary,
 } from "../src/plan/fitnessIndex.ts";
 import { arg } from "./stravaScriptHelpers.ts";
+import { athleteCeilingParams, loadAthleteProfile } from "./athleteProfile.ts";
 import { pearson, rank } from "./powerRunHelpers.ts";
 import { solveLinearSystem } from "../src/model/linearSolve.ts";
+import { costOfRunning } from "../src/model/minetti.ts";
+import { netToGross } from "../src/model/energetics.ts";
 
 const CACHE = fileURLToPath(new URL("../.strava-cache/", import.meta.url));
-const BODY_MASS = Number(arg("bodyMassKg", "85"));
+const BODY_MASS = Number(arg("bodyMassKg", String(loadAthleteProfile().form.bodyMassKg)));
 const MIN_MOVING_MIN = Number(arg("minMovingMin", "30"));
 /** Keep only samples whose trailing FLAT_WINDOW_S of terrain stayed within
  * +-FLAT_MAX_GRADE (0 = no terrain filter). */
 const FLAT_MAX_GRADE = Number(arg("flatMaxGrade", "0"));
 const FLAT_WINDOW_S = Number(arg("flatWindowS", "120"));
 const MIN_SAMPLE_MIN = Number(arg("minSampleMin", "15"));
-const ceilingParams = { vo2MaxMlPerKgPerMin: 55, lt2Fraction: 0.814 };
+const ceilingParams = athleteCeilingParams();
 
 interface Activity { stravaId: number; name: string; date: string; distanceKm: number; durationS: number; elevationGainM: number }
 const activities = JSON.parse(readFileSync(`${CACHE}activities.json`, "utf8")) as Activity[];
@@ -182,10 +185,17 @@ function adjustForCovariates(have: Run[], index: number[], summaries: RunHrPower
 }
 
 const TRAIN_UNTIL = arg("trainUntil", "2025-12-31");
-/** pooled | inverse | a fixed number. 0.156 W/kg per bpm is the athlete's
- * lab step test (25 Mar 2026, 85 kg, treadmill 8.5 -> 15.5 km/h, HR
- * 125 -> 170), for the pace variant. */
+/** pooled | inverse | lab | a fixed number (W/kg per bpm). "lab" fits
+ * flat Minetti power on HR across athlete.local.json's lab stages, for the
+ * pace variant. */
 const SLOPE_MODE = arg("slopeMode", "pooled");
+function labSlope(): number {
+  const pts = loadAthleteProfile().labStages.map((st) => ({ hr: st.heartRateBpm, p: netToGross(costOfRunning(0) * (st.speedKmh / 3.6)) }));
+  if (pts.length < 2) throw new Error("--slopeMode=lab needs labTest.stages in athlete.local.json");
+  const mh = pts.reduce((a, x) => a + x.hr, 0) / pts.length;
+  const mp = pts.reduce((a, x) => a + x.p, 0) / pts.length;
+  return pts.reduce((a, x) => a + (x.hr - mh) * (x.p - mp), 0) / pts.reduce((a, x) => a + (x.hr - mh) ** 2, 0);
+}
 const isTrain = (r: Run) => r.date <= TRAIN_UNTIL;
 const isTest = (r: Run) => r.date > TRAIN_UNTIL;
 const usable = runs.filter((r) => r.mechRatio <= 1.5);
@@ -199,7 +209,7 @@ for (const variant of ["pace", "measured"] as const) {
   const pooled = pooledPowerPerBpm(allSummaries);
   const inverse = pooledPowerPerBpmFromHrOnPower(allSummaries);
   if (!pooled || !inverse || all.length < 10) { console.log(`\n[${variant}] too few runs (${all.length})`); continue; }
-  const slope = SLOPE_MODE === "pooled" ? pooled : SLOPE_MODE === "inverse" ? inverse : Number(SLOPE_MODE);
+  const slope = SLOPE_MODE === "pooled" ? pooled : SLOPE_MODE === "inverse" ? inverse : SLOPE_MODE === "lab" ? labSlope() : Number(SLOPE_MODE);
   const refHr = Math.round(median(allSummaries.map((s) => s.meanHr)));
   const raw = allSummaries.map((s) => powerAtReferenceHr(s, slope, refHr));
   const keep = raw.map((v, i) => (v === null ? -1 : i)).filter((i) => i >= 0);

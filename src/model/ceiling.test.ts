@@ -207,9 +207,8 @@ describe("power-law duration curve", () => {
   });
 
   it("lands on lt2Fraction at 60 minutes, the conventional LT2 anchor", () => {
-    // Independent check, not a fitted constraint: LT2 is conventionally
-    // ~60-minute power, and the envelope fit from race GPS data alone landed
-    // within 0.1% of this athlete's lab-measured lt2Fraction.
+    // LT2 is conventionally ~60-minute power, so the envelope's 60 min
+    // fraction is what gets compared against an athlete's lt2Fraction.
     expect(sustainableFraction(60, POWER_LAW)).toBeCloseTo(0.813, 3);
   });
 

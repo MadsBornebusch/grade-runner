@@ -27,9 +27,8 @@ export interface CeilingParams {
    * Deliberately anchored at 60min rather than at t=1 (whose raw
    * coefficient is a meaningless extrapolation well above 1.0): LT2 is
    * conventionally about an athlete's 60-minute power, so this should land
-   * near lt2Fraction and is directly checkable against it. For the athlete
-   * this was developed against, the envelope fit gave 0.813 versus a
-   * lab-measured lt2Fraction of 0.814.
+   * near lt2Fraction and is directly checkable against it (e.g. a lab
+   * value).
    */
   powerLawFraction60Min?: number;
   /** Decay exponent b in f(t) = f60 * (t/60)^-b. Positive; larger means a
