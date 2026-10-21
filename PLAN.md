@@ -4257,7 +4257,16 @@ work).
    - *Slope*: power-on-HR gives 0.124 W/kg per bpm, HR-on-power inverted
      0.296. Errors in both variables put the truth between them, and the
      lab step test's 0.156 sits inside (treadmill step test, 25 Mar 2026,
-     85 kg, 8.5 → 15.5 km/h). The pooled fit is attenuated, so
+     85 kg, 8.5 → 15.5 km/h).
+   - *Absolute check against the lab test (one point, rough):* linear
+     between the first and last stage, the lab's 144 bpm falls at about
+     11.5 km/h, i.e. 12.7 W/kg flat or 13.3 W/kg at a 1% treadmill
+     incline. The index read 13.9 (March 2026, n = 4) and 13.7 (April,
+     n = 5): 4–9% above the lab value. In the expected direction (indoor
+     HR runs warmer), but the per-stage HRs weren't at hand, so this is a
+     sanity check, not a calibration. The lab's last-stage VO2 is 4.323
+     L/min, 50.9 ml/kg/min at 85 kg, below the 55 the scripts assume;
+     with RER 1.01 at the end it may not have been a maximal test. The pooled fit is attenuated, so
      the method isn't yet general for athletes without a lab test.
    - *Validity, inconclusive*: same-course races. Oslo Trail Challenge
      2020 → 2024 → 2026 got 9% then 13% faster, and the index 6 weeks
@@ -4292,9 +4301,10 @@ work).
      12-week mean of 2026 runs has SE ≤ 2 points. With only about one long
      run a week, a 28-day block isn't expected to pass.
    **Result (v1, 2026-10-21): fails.** 46 runs have descent in both
-   thirds (29 up to 2025, 17 in 2026). Grade matching worked: within each
-   band, early and late mean grades differ by ≤ 1 point. Terrain within a
-   band did not:
+   thirds (29 up to 2025, 17 in 2026). Grade matching worked: in the two
+   shallower bands, early and late mean grades differ by ≤ 1 point; in the
+   steepest by up to 5 (Soria Moria −26% vs −21%), which the in-band grade
+   covariate absorbs. Terrain within a band did not:
    - *Noise:* duration-adjusted fade spreads 14–17 points per run, and
      the median per-run bootstrap SE is 8–12. A 12-week block of about 5
      runs gives an SE of about 5–9 points, against the 2-point bar.
@@ -4311,6 +4321,59 @@ work).
      points, so even with the same mix of fresh and tired legs, per-run
      terrain sampling alone is about the size of the effect to resolve.
    Kept as code: the module and diagnostic document what was tried.
+   *Is there anything to find?* On identical terrain, yes. In the 2020
+   hourly 2.5 km loop, descent speed was already 11–16% down on laps 2–3
+   and 20–30% down by laps 10–17, while flat speed fell 0–15%. In the 2025
+   backyard ultra, descents were 6–14% slower by laps 2–3 and 15–20% slower
+   from lap 8, with flat speed about unchanged. Self-paced formats, so
+   partly choice, but descent-specific and starting within 1–3 h.
+
+   **Durability index v2: terrain matched across runs. Pass bar fixed
+   before fitting (2026-10-21).** Descent passages: every visit to a ~55 m
+   map tile in one direction (8 headings) at grade < −5%, from all runs
+   with points (short runs give the fresh speed on the same descents). A
+   tile counts if it recurs in ≥ 3 runs. Visits less than 10 min after a
+   previous visit to the same tile in the same run, and the first 10 min of
+   each run (warm-up), are dropped. Fit: log speed = tile effect + run
+   effect + β × hours into the run (moving time, up to 5 h; races beyond
+   that contribute their first 5 h, so ultras don't set the slope). The
+   run effect absorbs the day's fitness and choice of effort, and the tile
+   effect the terrain, so β only comes from the same descent being run at
+   different times into different runs. The same fit on flat tiles (|grade|
+   < 3%, running gait) gives a flat β. SE from a bootstrap over runs.
+   Not a clean holdout: v1's 2026 numbers were seen first. To pass:
+   - *Signal:* the pooled descent β is negative, and descent β minus flat β
+     is negative with a 95% interval excluding zero.
+   - *Resolution:* the same 5-point bar as v1, on loss at 2 h (2β): a
+     12-week block's β needs SE ≤ 1% per hour.
+   **Result (v2, 2026-10-21): fails both bars.**
+   `scripts/diagDurabilityTiles.ts`: 343 runs, 21,244 descent and 36,912
+   flat passages.
+   - *Signal:* pooled descent β −0.9%/h ± 1.5 (dose ≤ 5 h), flat
+     −1.4%/h ± 1.0, difference +0.5%/h (95% −3.0 to +4.1). With dose
+     ≤ 3 h, descent +0.3 ± 1.8; with no cap, −1.0 ± 1.4. The same descent
+     run late in a training run is not measurably slower than run fresh.
+     Laps on identical terrain lost 5–15% in 1–3 h, so either training
+     runs and self-paced lap races differ (finishing the run home, effort
+     chosen per descent), or what the laps show isn't leg fade.
+   - *Resolution:* 12-week block SEs are 3–20%/h, against the 1%/h bar.
+     By year: 2025 −3.0 ± 2.4, 2026 +1.4 ± 2.0.
+
+   **Gate decision (2026-10-21): durability index no-go at block level.**
+   Neither version can track durability across a build from this
+   history. What remains usable:
+   - Per long race or lap event, descriptively: the late-descent loss on a
+     course where terrain is identical or repeated (laps, the same race
+     in different years). Season scale at best, and only when such events
+     exist.
+   - Design point 4's "durability stalls → shift to descent and strength"
+     branch can't be driven by a measured index. It falls back to design
+     point 1: descent metres and steep descent progress as exposure
+     targets on their own, with no feedback from a durability reading.
+     Stage 3 doesn't wait on this.
+   - Worth retrying only with data the history lacks: repeated, recorded
+     long efforts on one course (e.g. a monthly loop test), which is a
+     protocol to ask the athlete for, not something to mine.
 3. Response model and backtest (layer 3).
 4. Plan generator with the time budget as a hard constraint, fixed (prior)
    ramp first, then the fitted ramp
@@ -4328,6 +4391,9 @@ work).
 
 - Is the per-run fitness index noise low enough (stage 2's gate)? This decides
   whether the plan can be adaptive at all or stays a fixed-ramp plan.
+  *Status (2026-10-21):* fitness quiet enough at block level where blocks
+  have flat running, validity not yet shown; durability no-go, so only the
+  fitness side can adapt the plan.
 - Strava terms: does per-athlete fitting count as an "AI model"? Can
   population priors use other athletes' Strava data?
 - How should cross-training count toward the mechanical channel (zero, as

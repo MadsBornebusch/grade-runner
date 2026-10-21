@@ -18,9 +18,11 @@
 //
 // "Late is slower" is near-certain on any long run and means nothing on its
 // own: routes put their descents in particular places, and people go out
-// hard. The checks that make this usable live in
-// scripts/diagDurabilityIndex.ts (a placebo split, dose-response with
-// duration and early descent, block bootstrap noise).
+// hard. The checks live in scripts/diagDurabilityIndex.ts (a placebo
+// split, dose-response with duration and early descent, block bootstrap
+// noise) and, for v2 below, scripts/diagDurabilityTiles.ts. Neither version
+// passed stage 2's gate on this athlete's history (PLAN.md §15, "Gate
+// decision"): the plan doesn't act on either reading.
 
 import type { CourseSegment } from "../gpx/pipeline";
 import { gradeAdjustedSpeedMs } from "../model/minetti";
@@ -157,4 +159,148 @@ export function movingWindow(samples: PaceSample[], fromFraction: number, toFrac
   const lo = skipStartS + fromFraction * span;
   const hi = skipStartS + toFraction * span;
   return samples.filter((s) => s.tS > lo && s.tS <= hi);
+}
+
+// ---- v2: the same descent at different times into different runs ---------
+//
+// v1 above compares a run's early descents with its own late ones, which are
+// different descents (PLAN.md §15 stage 2: route terrain swamps the fade).
+// v2 matches terrain across runs instead: a descent passage is one visit to
+// a small map tile in one direction, and the fit is
+//   log speed = tile effect + run effect + beta x hours into the run,
+// so the tile effect absorbs the terrain, the run effect the day's fitness
+// and chosen effort, and beta comes only from the same descent being run
+// at different times into different runs.
+
+export interface Passage {
+  /** Map tile and heading, e.g. "1199123,107001,3". */
+  tile: string;
+  /** Moving hours into the run at this visit. */
+  hours: number;
+  logSpeed: number;
+}
+
+export interface PassageOptions {
+  /** [lo, hi) grade range a segment must fall in. */
+  grade: [number, number];
+  /** Keep only running-gait segments (above WALK_MAX_MS). */
+  runningOnly?: boolean;
+  /** Tile edge in degrees of latitude; longitude uses twice this, about
+   * square at 60 N. */
+  tileDeg?: number;
+  /** Drop visits in the first this-many moving seconds (warm-up). */
+  skipStartS?: number;
+  /** A repeat visit to the same tile in the same run counts only after this
+   * many moving seconds (laps on a loop count; one tile split across two
+   * consecutive segments doesn't). */
+  revisitS?: number;
+}
+
+export const DESCENT_PASSAGE_GRADE: [number, number] = [-0.45, -0.05];
+export const FLAT_PASSAGE_GRADE: [number, number] = [-0.03, 0.03];
+const DEFAULT_TILE_DEG = 0.0005;
+
+/**
+ * One run's passages. `routePoints` is the pipeline's own (index i + 1 is
+ * segments[i]'s endpoint); the heading is taken from the segment's own
+ * start and end, in 8 sectors, so a descent and the same path climbed the
+ * other way are different tiles.
+ */
+export function runPassages(
+  segments: CourseSegment[],
+  routePoints: { lat: number; lon: number }[],
+  options: PassageOptions,
+): Passage[] {
+  const tileDeg = options.tileDeg ?? DEFAULT_TILE_DEG;
+  const skipStartS = options.skipStartS ?? 600;
+  const revisitS = options.revisitS ?? 600;
+  const lastVisit = new Map<string, number>();
+  const out: Passage[] = [];
+  let t = 0;
+  segments.forEach((seg, i) => {
+    if (seg.paused || seg.dtS === null || !(seg.dtS > 0)) return;
+    t += seg.dtS;
+    if (seg.gradient < options.grade[0] || seg.gradient >= options.grade[1] || t < skipStartS) return;
+    const speedMs = seg.distance3D / seg.dtS;
+    if (speedMs < MIN_SPEED_MS || speedMs > MAX_SPEED_MS) return;
+    if (options.runningOnly && speedMs <= WALK_MAX_MS) return;
+    const a = routePoints[i];
+    const b = routePoints[i + 1];
+    if (!a || !b) return;
+    const heading = Math.round(Math.atan2(b.lat - a.lat, (b.lon - a.lon) * 0.5) / (Math.PI / 4)) & 7;
+    const tile = `${Math.round(b.lat / tileDeg)},${Math.round(b.lon / (2 * tileDeg))},${heading}`;
+    const prev = lastVisit.get(tile);
+    lastVisit.set(tile, t);
+    if (prev !== undefined && t - prev < revisitS) return;
+    out.push({ tile, hours: t / 3600, logSpeed: Math.log(speedMs) });
+  });
+  return out;
+}
+
+export interface FadeObservation extends Passage {
+  run: string;
+  /** Which beta this passage informs (e.g. a 12-week block). */
+  group: string;
+}
+
+/**
+ * Least squares of logSpeed on one hours slope per group, with tile and run
+ * fixed effects, by alternating projections (Frisch-Waugh: demean y and
+ * each regressor by tile and run in turn until stable, then plain OLS).
+ * `maxHours` caps the dose, so the longest races don't set the slope.
+ * Tiles that recur in fewer than `minRuns` runs carry no terrain match and
+ * are dropped first. Returns log-speed change per hour for each group.
+ */
+export function fitTileFade(
+  observations: FadeObservation[],
+  options: { maxHours?: number; minRuns?: number; iterations?: number } = {},
+): Map<string, number> {
+  const maxHours = options.maxHours ?? 5;
+  const minRuns = options.minRuns ?? 3;
+  const iterations = options.iterations ?? 50;
+  const runsPerTile = new Map<string, Set<string>>();
+  for (const o of observations) {
+    if (o.hours > maxHours) continue;
+    (runsPerTile.get(o.tile) ?? runsPerTile.set(o.tile, new Set()).get(o.tile)!).add(o.run);
+  }
+  const obs = observations.filter((o) => o.hours <= maxHours && (runsPerTile.get(o.tile)?.size ?? 0) >= minRuns);
+  const groups = [...new Set(obs.map((o) => o.group))].sort();
+  const g = new Map(groups.map((x, k) => [x, k]));
+  const columns = [obs.map((o) => o.logSpeed), ...groups.map((grp) => obs.map((o) => (o.group === grp ? o.hours : 0)))];
+  const tileIdx = indexBy(obs.map((o) => o.tile));
+  const runIdx = indexBy(obs.map((o) => o.run));
+  for (const col of columns) {
+    for (let it = 0; it < iterations; it++) {
+      demean(col, tileIdx);
+      demean(col, runIdx);
+    }
+  }
+  const k = groups.length;
+  const A = Array.from({ length: k }, () => new Array<number>(k).fill(0));
+  const rhs = new Array<number>(k).fill(0);
+  for (let n = 0; n < obs.length; n++) {
+    for (let p = 0; p < k; p++) {
+      rhs[p] += columns[1 + p][n] * columns[0][n];
+      for (let q = 0; q < k; q++) A[p][q] += columns[1 + p][n] * columns[1 + q][n];
+    }
+  }
+  const out = new Map<string, number>();
+  // A group whose runs all visit tiles at one time only has no column left.
+  const identified = groups.filter((_, p) => A[p][p] > 1e-9);
+  const keep = identified.map((grp) => g.get(grp)!);
+  const beta = solveLinearSystem(keep.map((p) => keep.map((q) => A[p][q])), keep.map((p) => rhs[p]));
+  if (beta) identified.forEach((grp, j) => out.set(grp, beta[j]));
+  return out;
+}
+
+function indexBy(keys: string[]): { of: number[]; count: number } {
+  const ids = new Map<string, number>();
+  return { of: keys.map((x) => ids.get(x) ?? ids.set(x, ids.size).get(x)!), count: ids.size };
+}
+
+function demean(col: number[], idx: { of: number[]; count: number }): void {
+  const sum = new Array<number>(idx.count).fill(0);
+  const n = new Array<number>(idx.count).fill(0);
+  for (let i = 0; i < col.length; i++) { sum[idx.of[i]] += col[i]; n[idx.of[i]]++; }
+  for (let i = 0; i < col.length; i++) col[i] -= sum[idx.of[i]] / n[idx.of[i]];
 }

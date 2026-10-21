@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { descentFade, flatFade, movingWindow, type PaceSample } from "./durabilityIndex";
+import { descentFade, fitTileFade, flatFade, movingWindow, type PaceSample } from "./durabilityIndex";
 
 /** 10 s samples over `hours`, cycling through flat, -7% and -13%, with
  * descent speed falling linearly by `lateLoss` (a fraction) over the run
@@ -55,5 +55,43 @@ describe("flatFade", () => {
     const [early, late] = split(syntheticRun(3, 0.2));
     // FLAT_BAND reaches down to -5%, so only the flat phase counts here.
     expect(Math.abs(flatFade(early, late)!)).toBeLessThan(1e-9);
+  });
+});
+
+describe("fitTileFade", () => {
+  it("recovers each group's slope through tile and run effects", () => {
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const tileEffect = Array.from({ length: 40 }, () => rnd() - 0.5);
+    const slope: Record<string, number> = { a: -0.05, b: -0.01 };
+    const obs = [];
+    for (let run = 0; run < 60; run++) {
+      const group = run % 2 ? "a" : "b";
+      const runEffect = 0.3 * (rnd() - 0.5);
+      // Each run visits a random subset of tiles, in a random order, so a
+      // tile is fresh in one run and late in another.
+      for (let visit = 0; visit < 25; visit++) {
+        const tile = Math.floor(rnd() * 40);
+        const hours = 4 * rnd();
+        obs.push({ tile: String(tile), hours, run: String(run), group, logSpeed: tileEffect[tile] + runEffect + slope[group] * hours + 0.01 * (rnd() - 0.5) });
+      }
+    }
+    const fit = fitTileFade(obs);
+    expect(fit.get("a")!).toBeCloseTo(-0.05, 2);
+    expect(fit.get("b")!).toBeCloseTo(-0.01, 2);
+  });
+
+  it("isn't fooled by late tiles being faster terrain", () => {
+    // Two thirds of the runs take the loop the way that reaches the fast
+    // tiles late, and there is no fatigue: a raw early-vs-late comparison
+    // would read late as faster.
+    const obs = [];
+    for (let run = 0; run < 30; run++) {
+      for (let tile = 0; tile < 10; tile++) {
+        const hours = (run % 3 ? tile : 9 - tile) / 3 + (run % 5) * 0.2;
+        obs.push({ tile: String(tile), hours, run: String(run), group: "g", logSpeed: 0.05 * tile + 0.01 * (run % 3) });
+      }
+    }
+    expect(Math.abs(fitTileFade(obs).get("g")!)).toBeLessThan(1e-4);
   });
 });
