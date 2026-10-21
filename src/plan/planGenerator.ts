@@ -7,9 +7,12 @@
 //     would reach with everything planned so far (same capSpikes + ewma as
 //     the ledger), ramped by a fixed % per week, with deloads, recovery
 //     weeks after a recent race, and a taper;
-//   - hours are a hard cap: every session fits its availability slot, and
-//     when the target needs more hours than the budget, density (load per
-//     hour, up to the athlete's own 90th percentile) makes up what it can;
+//   - hours are a hard cap: every session fits its availability slot. On
+//     this athlete's runs load per hour tracks speed (rank correlation
+//     0.73), not terrain (-0.19), so the only density lever is intensity:
+//     one quality session per build week, never the day after the long run.
+//     What that can't make up shows as "budget binds" rather than more
+//     intensity (the intensity default leans polarized);
 //   - every session is checked against sessionGuard.ts's per-run reference,
 //     which includes the sessions planned in earlier weeks;
 //   - descent and steep descent progress as their own weekly targets.
@@ -52,8 +55,8 @@ export interface PlanOptions {
    * before. */
   deloadEvery?: number;
   deloadFactor?: number;
-  /** Load per hour on easy and on dense (hilly / threshold) running. Take
-   * them from the athlete's own runs (median and 90th percentile). */
+  /** Load per hour on easy and on quality (threshold) running. Take them
+   * from the athlete's own runs (median and 90th percentile). */
   easyDensity: number;
   maxDensity: number;
   /** Typical km per hour, to turn session minutes into distance. */
@@ -222,9 +225,12 @@ export function generatePlan(
       target = 7 * chronic * (1 + (ramp * CHRONIC_TAU_DAYS) / 7);
     }
 
-    const ref = referenceAt(nonRace(), start);
-    const allow = sessionAllowance(ref);
-    const sessions = planWeek(start, phase, target, ref, allow, availability, longRunWeekday, race, options, {
+    // Each session's allowance on its own day: a big run can age out of the
+    // 30-day window between Monday and Saturday. Earlier sessions of the
+    // same week aren't counted, which can only make it stricter.
+    const runsSoFar = nonRace();
+    const allowOn = (day: number) => sessionAllowance(referenceAt(runsSoFar, day));
+    const sessions = planWeek(start, phase, target, referenceAt(runsSoFar, start), allowOn, availability, longRunWeekday, race, options, {
       lastWeekDescent, lastWeekSteep, strengthSessions, strengthMinutes,
     });
     const plannedMech = sessions.reduce((s, x) => s + x.mechanical, 0);
@@ -300,7 +306,7 @@ function planWeek(
   phase: Phase,
   target: number,
   ref: RunReference,
-  allow: RunReference,
+  allowOn: (day: number) => RunReference,
   availability: AvailabilitySlot[],
   longRunWeekday: number,
   race: GoalRace,
@@ -309,7 +315,7 @@ function planWeek(
 ): PlannedSession[] {
   const out: PlannedSession[] = [];
   const session = (day: number, kind: SessionKind, minutes: number, density: number): PlannedSession => ({
-    day, kind, minutes, distanceKm: Math.min((minutes / 60) * o.speedKmh, allow.distanceKm), mechanical: (minutes / 60) * density, descentM: 0, steepDescentM: 0,
+    day, kind, minutes, distanceKm: Math.min((minutes / 60) * o.speedKmh, allowOn(day).distanceKm), mechanical: (minutes / 60) * density, descentM: 0, steepDescentM: 0,
   });
 
   if (phase === "race") {
@@ -334,6 +340,7 @@ function planWeek(
   const longSlot = slots.find((s) => s.weekday === longRunWeekday);
   let remaining = target;
   if (longSlot) {
+    const allow = allowOn(start + longRunWeekday);
     const maxByDistance = (allow.distanceKm / o.speedKmh) * 60;
     const minutes = Math.floor(Math.min(free.get(longRunWeekday)!, allow.movingMin, maxByDistance) * lighter);
     if (minutes >= MIN_RUN_MINUTES) {
@@ -348,6 +355,7 @@ function planWeek(
   // density (the budget binds).
   for (const slot of slots) {
     if (remaining <= 0) break;
+    const allow = allowOn(start + slot.weekday);
     const avail = Math.min(free.get(slot.weekday) ?? 0, allow.movingMin, (allow.distanceKm / o.speedKmh) * 60);
     const minutes = Math.floor(Math.min(avail, (remaining / o.easyDensity) * 60));
     if (minutes < MIN_RUN_MINUTES) continue;
@@ -356,29 +364,33 @@ function planWeek(
     remaining -= s.mechanical;
     free.set(slot.weekday, (free.get(slot.weekday) ?? 0) - minutes);
   }
-  const buildPhase = phase === "base" || phase === "specific";
-  if (buildPhase) {
-    // One quality session per build week regardless (intensity holds
-    // fitness when volume is capped), more when the budget binds.
-    const candidates = runs.filter((r) => r.kind === "easy").sort((a, b) => b.minutes - a.minutes);
-    for (const [k, r] of candidates.entries()) {
-      if (k > 0 && remaining <= 0) break;
-      const before = r.mechanical;
-      r.kind = phase === "specific" && k === 1 ? "descent" : "quality";
-      r.mechanical = (r.minutes / 60) * o.maxDensity;
-      remaining -= r.mechanical - before;
+  if (phase === "base" || phase === "specific") {
+    // One quality session per build week (intensity holds fitness when
+    // volume is capped), not the day after the long run; in the specific
+    // phase one other easy run becomes a descent session (hillier route,
+    // easy effort, so easy density).
+    const dayAfterLong = start + ((longRunWeekday + 1) % 7);
+    const easy = runs.filter((r) => r.kind === "easy").sort((a, b) => b.minutes - a.minutes);
+    const quality = easy.find((r) => r.day !== dayAfterLong);
+    if (quality) {
+      quality.kind = "quality";
+      quality.mechanical = (quality.minutes / 60) * o.maxDensity;
     }
+    const descent = phase === "specific" ? easy.find((r) => r !== quality) : undefined;
+    if (descent) descent.kind = "descent";
   }
 
   // Descent: progress the week's total from last week's (or the reference)
   // by at most 10%, each session within its own allowance.
-  const weekDescentCap = state.lastWeekDescent === null ? 2 * ref.descentM : DESCENT_WEEKLY_STEP * Math.max(state.lastWeekDescent, allow.descentM);
-  const weekSteepCap = state.lastWeekSteep === null ? 2 * ref.steepDescentM : DESCENT_WEEKLY_STEP * Math.max(state.lastWeekSteep, allow.steepDescentM);
+  const weekAllow = allowOn(start);
+  const weekDescentCap = state.lastWeekDescent === null ? 2 * ref.descentM : DESCENT_WEEKLY_STEP * Math.max(state.lastWeekDescent, weekAllow.descentM);
+  const weekSteepCap = state.lastWeekSteep === null ? 2 * ref.steepDescentM : DESCENT_WEEKLY_STEP * Math.max(state.lastWeekSteep, weekAllow.steepDescentM);
   let descentLeft = phase === "recovery" ? 0 : weekDescentCap * lighter;
   let steepLeft = phase === "recovery" ? 0 : weekSteepCap * lighter;
   const order = [...runs].sort((a, b) => rank(a.kind) - rank(b.kind));
   for (const r of order) {
     const hours = r.minutes / 60;
+    const allow = allowOn(r.day);
     const perHour = r.kind === "descent" ? 1 : r.kind === "long" ? 0.6 : 0.3;
     r.descentM = Math.min(descentLeft, allow.descentM, perHour * o.maxDescentPerHour * hours);
     r.steepDescentM = Math.min(steepLeft, allow.steepDescentM, r.descentM, perHour * o.maxSteepDescentPerHour * hours);

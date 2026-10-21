@@ -58,6 +58,11 @@ describe("generatePlan invariants (random cases)", () => {
         const ref = referenceAt([...before, ...planned.slice(0, i)], s.day);
         expect(guardBreaches(s, ref)).toEqual([]);
       });
+      // At most one quality session a week, never the day after a long run.
+      const all = plan.weeks.flatMap((w) => w.sessions);
+      const longDays = new Set(all.filter((x) => x.kind === "long").map((x) => x.day));
+      for (const w of plan.weeks) expect(w.sessions.filter((x) => x.kind === "quality").length).toBeLessThanOrEqual(1);
+      for (const q of all.filter((x) => x.kind === "quality")) expect(longDays.has(q.day - 1)).toBe(false);
       // Taper and race week lighter than the last build week.
       const lastBuild = [...plan.weeks].reverse().find((w) => w.phase === "base" || w.phase === "specific");
       for (const w of plan.weeks.filter((x) => x.phase === "taper" || x.phase === "race")) {

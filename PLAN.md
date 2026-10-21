@@ -4493,14 +4493,19 @@ work).
      50% for races ≥ 3 h, one at 60% otherwise. Bosquet et al. 2007's
      meta-analysis found 8–14 days with a 41–60% volume cut, intensity
      and frequency kept, best; the split is this design's.
-   - *Hours are a hard cap:* every session fits its slot. When a build
-     week's target needs more than the budget, sessions become quality or
-     descent sessions at up to the athlete's 90th-percentile load per hour,
-     and the week is marked "budget binds".
+   - *Hours are a hard cap:* every session fits its slot. On this
+     athlete's points runs, load per hour tracks speed (rank correlation
+     0.73), not terrain (−0.19, since hills slow you down), so the only
+     density lever is intensity. One quality session per build week (at the
+     90th-percentile load per hour), never the day after the long run;
+     what that can't cover shows as "budget binds" rather than more
+     intensity. This revises design consequence 1 of "Time budget": climb
+     and descent add eccentric load (tracked separately), not mechanical
+     load per hour.
    - *Session guard, per run:* duration, distance, descent and steep
      descent each within 1.1× the biggest *non-race* run of the previous
      30 days (half the 90-day biggest after a break), including runs
-     planned in earlier weeks. A race is a run more than 2× its reference
+     planned in earlier weeks, evaluated on the session's own day. A race is a run more than 2× its reference
      on duration or distance. Floors any athlete can take (guesses): 45
      min, 8 km, 300 m descent, 150 m steep descent. On the real history it
      flags the 19 Oct 2025 run (distance 1.53×, time 1.15×) and the 13 Oct
@@ -4514,11 +4519,16 @@ work).
      duration, the first week the budget binds, and a warning when the
      longest planned run is under 40% of the race's expected duration.
    - *Example on the real history* (5 h/week, a 6.5 h race on 29 May
-     2027): 3.5 h in the first week, the 5 h budget binds from mid-January,
-     long run 72 → 150 min (the weekend slot), projected chronic level 47
-     against 38–40 before Ecotrail and this year's Oslo Trail Challenge, and
-     no guard breach in 115 planned runs. The long run stays at 2.5 h, so
-     it warns.
+     2027): 3.5 h in the first week, the budget binds from December (fully
+     from mid-January), long run 72 → 150 min (the weekend slot), projected
+     chronic level 45 against 38–40 before Ecotrail and this year's Oslo
+     Trail Challenge, and no guard breach in 115 planned runs. The long run
+     stays at 2.5 h, so it warns. The comparable-race list also includes
+     about ten pre-2024 runs flagged as races by size alone (summary-only
+     years); the comparison uses the best of them, so they don't change it.
+   - *UI note:* a session shown in minutes alone repeats the 19 Oct 2025
+     failure (within time, 1.53× on distance). Show sessions near their
+     allowance as "150 min or 23 km, whichever comes first".
    - *Not built yet:* the UI (race selection, weekly plan), stored plans
      and planned-vs-actual with the "below plan for two weeks" message
      (weakness 5), budget borrowing between weeks, converting sessions to
