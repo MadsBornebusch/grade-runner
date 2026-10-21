@@ -28,6 +28,8 @@ export interface AthleteProfile {
   form: FormInputs;
   fitted: Record<string, Record<string, number>>;
   labStages: LabStage[];
+  /** The optional "plan" section (goal race and schedule), unparsed. */
+  plan?: unknown;
   fromFile: boolean;
 }
 
@@ -41,10 +43,10 @@ export function loadAthleteProfile(): AthleteProfile {
     return cached;
   }
   const raw = JSON.parse(readFileSync(PROFILE_PATH, "utf8")) as {
-    form?: Partial<FormInputs>; fitted?: Record<string, Record<string, number>>; labTest?: { stages?: LabStage[] };
+    form?: Partial<FormInputs>; fitted?: Record<string, Record<string, number>>; labTest?: { stages?: LabStage[] }; plan?: unknown;
   };
   const fitted = Object.fromEntries(Object.entries(raw.fitted ?? {}).filter(([, v]) => typeof v === "object"));
-  cached = { form: { ...DEFAULT_FORM_INPUTS, ...raw.form }, fitted, labStages: raw.labTest?.stages ?? [], fromFile: true };
+  cached = { form: { ...DEFAULT_FORM_INPUTS, ...raw.form }, fitted, labStages: raw.labTest?.stages ?? [], plan: raw.plan, fromFile: true };
   return cached;
 }
 

@@ -4511,6 +4511,14 @@ work).
      flags the 19 Oct 2025 run (distance 1.53×, time 1.15×) and the 13 Oct
      Pollença run on all four, and keeps Oslo Trail Challenge (26 Sep 2026)
      out of today's reference (long run 73 min).
+   - *Schedule input* (user design, 2026-10-21): a weekly running volume,
+     a preferred long-run day that any given week can move, and a maximum
+     long run (`suggestLongRunMaxMinutes` proposes about 35% of the race's
+     expected duration, 2–5 h, at most 75% of the week: an assumption).
+     The other runs are spread around the long run (for a Saturday long
+     run: Tue and Thu, plus Sunday at 4 runs a week), each at most 75 min,
+     the week's remaining minutes split evenly. Strength days and the
+     quality day respect the neighbouring weeks' long runs too.
    - *Long-run weeks* (user idea, 2026-10-21): every other build week
      (`longRunWeekEvery`, default 2) the long run may go past its usual
      slot up to `longRunWeekMinutes`, and the week's other runs shrink so

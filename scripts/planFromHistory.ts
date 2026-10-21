@@ -2,15 +2,16 @@
 //
 //   npx tsx scripts/planFromHistory.ts [--today=YYYY-MM-DD]
 //
-// The goal race and weekly availability come from athlete.local.json's
-// optional "plan" section:
+// The goal race and weekly schedule come from athlete.local.json's optional
+// "plan" section:
 //   "plan": { "race": { "name", "date", "expectedHours", "descentM"?, "steepDescentM"? },
-//             "availability": [{ "weekday": 0-6 (Mon=0), "minutes" }], "longRunWeekday": 5,
-//             "strengthCountsInBudget": false,
-//             "longRunWeekMinutes"?: 240, "longRunWeekEvery"?: 2 }
-// Without it, a clearly labelled example (a 5 h week, a 50 km trail race in
-// spring) is used.
-import { generatePlan, type AvailabilitySlot, type GoalRace, type HistoryRun } from "../src/plan/planGenerator.ts";
+//             "weeklyMinutes": 300, "longRunWeekday": 5 (Mon=0), "longRunMaxMinutes"?: 210,
+//             "longRunWeekEvery"?: 2, "runsPerWeek"?: 4,
+//             "longRunWeekdayByWeek"?: { "YYYY-MM-DD" (a Monday): weekday },
+//             "strengthCountsInBudget"?: false }
+// Without it, a clearly labelled example is used. Without longRunMaxMinutes,
+// the suggestion from the race is used.
+import { generatePlan, suggestLongRunMaxMinutes, type GoalRace, type HistoryRun, type WeeklySchedule } from "../src/plan/planGenerator.ts";
 import { runReferences, guardBreaches, referenceAt } from "../src/plan/sessionGuard.ts";
 import { arg } from "./stravaScriptHelpers.ts";
 import { dayNumber, loadPlanRuns } from "./planRunData.ts";
@@ -18,21 +19,22 @@ import { loadAthleteProfile } from "./athleteProfile.ts";
 
 interface PlanSection {
   race: { name: string; date: string; expectedHours: number; descentM?: number; steepDescentM?: number };
-  availability: AvailabilitySlot[];
+  weeklyMinutes: number;
   longRunWeekday: number;
-  strengthCountsInBudget?: boolean;
-  longRunWeekMinutes?: number;
+  longRunMaxMinutes?: number;
   longRunWeekEvery?: number;
+  runsPerWeek?: number;
+  longRunWeekdayByWeek?: Record<string, number>;
+  strengthCountsInBudget?: boolean;
 }
 const EXAMPLE: PlanSection = {
   race: { name: "EXAMPLE 50 km trail race", date: "2027-05-29", expectedHours: 6.5, descentM: 2000, steepDescentM: 500 },
-  availability: [{ weekday: 1, minutes: 50 }, { weekday: 3, minutes: 50 }, { weekday: 5, minutes: 150 }, { weekday: 6, minutes: 50 }],
+  weeklyMinutes: 300,
   longRunWeekday: 5,
-  longRunWeekMinutes: Number(arg("longRunWeekMinutes", "240")) || undefined,
 };
-const section = (loadAthleteProfile() as unknown as { plan?: PlanSection }).plan;
+const section = loadAthleteProfile().plan as PlanSection | undefined;
 const cfg = section ?? EXAMPLE;
-if (!section) console.log("No \"plan\" section in athlete.local.json: using the EXAMPLE race and availability.\n");
+if (!section) console.log("No \"plan\" section in athlete.local.json: using the EXAMPLE race and schedule.\n");
 
 const today = dayNumber(arg("today", new Date().toISOString().slice(0, 10)));
 const runs = loadPlanRuns().filter((r) => r.day < today);
@@ -51,17 +53,25 @@ const options = {
   maxDescentPerHour: q(perHour((r) => r.load.descentM), 0.9),
   maxSteepDescentPerHour: q(perHour((r) => r.load.steepDescentM), 0.9),
   strengthCountsInBudget: cfg.strengthCountsInBudget ?? false,
-  longRunWeekMinutes: cfg.longRunWeekMinutes,
-  longRunWeekEvery: cfg.longRunWeekEvery,
 };
 console.log(`From ${pts.length} runs: load/h easy ${options.easyDensity.toFixed(0)}, dense ${options.maxDensity.toFixed(0)}; ${options.speedKmh.toFixed(1)} km/h; descent/h up to ${options.maxDescentPerHour.toFixed(0)} m, steep ${options.maxSteepDescentPerHour.toFixed(0)} m`);
 
 const race: GoalRace = { name: cfg.race.name, day: dayNumber(cfg.race.date), expectedHours: cfg.race.expectedHours, descentM: cfg.race.descentM, steepDescentM: cfg.race.steepDescentM };
-const plan = generatePlan(history, cfg.availability, cfg.longRunWeekday, race, today, options);
+const suggested = suggestLongRunMaxMinutes(race.expectedHours, cfg.weeklyMinutes);
+const schedule: WeeklySchedule = {
+  weeklyMinutes: cfg.weeklyMinutes,
+  longRunWeekday: cfg.longRunWeekday,
+  longRunMaxMinutes: cfg.longRunMaxMinutes ?? suggested,
+  longRunWeekEvery: cfg.longRunWeekEvery,
+  runsPerWeek: cfg.runsPerWeek,
+  longRunWeekdayByWeek: new Map(Object.entries(cfg.longRunWeekdayByWeek ?? {}).map(([d, wd]) => [dayNumber(d), wd])),
+};
+console.log(`Long run max ${schedule.longRunMaxMinutes} min${cfg.longRunMaxMinutes ? ` (suggested from the race: ${suggested})` : " (suggested from the race)"}`);
+const plan = generatePlan(history, schedule, race, today, options);
 
 const iso = (d: number) => new Date(d * 864e5).toISOString().slice(0, 10);
 const days = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
-console.log(`\n${race.name}, ${cfg.race.date}, ~${race.expectedHours} h. Budget ${(cfg.availability.reduce((s, a) => s + a.minutes, 0) / 60).toFixed(1)} h/week.`);
+console.log(`\n${race.name}, ${cfg.race.date}, ~${race.expectedHours} h. Budget ${(cfg.weeklyMinutes / 60).toFixed(1)} h/week.`);
 console.log("week        phase        chronic  target  planned   hours  sessions (min, descent/steep m)");
 for (const w of plan.weeks) {
   const ss = w.sessions.map((s) => `${days[(s.day - w.start + 7) % 7]} ${s.kind}${s.kind === "strength" ? "" : ` ${Math.round(s.minutes)}${s.descentM ? ` ${Math.round(s.descentM)}/${Math.round(s.steepDescentM)}` : ""}`}`).join(", ");

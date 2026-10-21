@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { generatePlan, recoveryWeeks, strengthDaysOf, type AvailabilitySlot, type HistoryRun, type PlanOptions } from "./planGenerator";
+import {
+  generatePlan, recoveryWeeks, slotsForWeek, strengthDaysOf, suggestLongRunMaxMinutes, type HistoryRun, type PlanOptions, type WeeklySchedule,
+} from "./planGenerator";
 import { guardBreaches, referenceAt, runReferences } from "./sessionGuard";
 
 const OPTIONS: PlanOptions = { easyDensity: 70, maxDensity: 85, speedKmh: 9.5, maxDescentPerHour: 350, maxSteepDescentPerHour: 120 };
@@ -28,30 +30,30 @@ function history(r: () => number, weeks: number, perWeek: number, minutes: numbe
 
 function randomCase(seed: number) {
   const r = rng(seed);
-  const slots: AvailabilitySlot[] = [];
-  for (let wd = 0; wd < 7; wd++) if (r() < 0.6 || wd === 5) slots.push({ weekday: wd, minutes: wd === 5 ? 90 + Math.floor(150 * r()) : 30 + Math.floor(50 * r()) });
+  const weeklyMinutes = 120 + Math.floor(360 * r());
+  const schedule: WeeklySchedule = {
+    weeklyMinutes, longRunWeekday: Math.floor(7 * r()), longRunMaxMinutes: 60 + Math.floor(240 * r()),
+    longRunWeekEvery: r() < 0.5 ? 1 : 2, runsPerWeek: 2 + Math.floor(4 * r()),
+  };
   const hist = history(r, 10 + Math.floor(20 * r()), 1 + Math.floor(4 * r()), 30 + 30 * r(), 60 + 90 * r(), r() < 0.5 ? Math.floor(5 + 30 * r()) : undefined);
   const race = { name: "test", day: TODAY + 30 + Math.floor(200 * r()), expectedHours: 1 + 10 * r() };
-  const longRunWeekMinutes = r() < 0.5 ? 150 + Math.floor(150 * r()) : undefined;
-  return { slots, hist, race, longRunWeekMinutes };
+  // Move the long run in one random week.
+  schedule.longRunWeekdayByWeek = new Map([[TODAY - ((((TODAY + 3) % 7) + 7) % 7) + 7 * (2 + Math.floor(6 * r())), Math.floor(7 * r())]]);
+  return { schedule, hist, race };
 }
 
 describe("generatePlan invariants (random cases)", () => {
   for (let seed = 1; seed <= 40; seed++) {
     it(`case ${seed}: budget, slots, guards, taper`, () => {
-      const { slots, hist, race, longRunWeekMinutes } = randomCase(seed);
-      const plan = generatePlan(hist, slots, 5, race, TODAY, { ...OPTIONS, longRunWeekMinutes });
-      const budget = slots.reduce((s, x) => s + x.minutes, 0);
-      const slotOf = new Map(slots.map((s) => [s.weekday, s.minutes]));
+      const { schedule, hist, race } = randomCase(seed);
+      const plan = generatePlan(hist, schedule, race, TODAY, OPTIONS);
       for (const w of plan.weeks) {
-        expect(w.plannedMinutes).toBeLessThanOrEqual(budget + 1e-6);
-        const perDay = new Map<number, number>();
-        for (const s of w.sessions) if (s.kind !== "race" && s.kind !== "strength") perDay.set(s.day, (perDay.get(s.day) ?? 0) + s.minutes);
-        for (const [day, m] of perDay) {
-          const wd = day - w.start;
-          const cap = w.longRunWeek && wd === 5 ? Math.max(slotOf.get(wd) ?? 0, longRunWeekMinutes ?? 0) : (slotOf.get(wd) ?? 0);
-          expect(m).toBeLessThanOrEqual(cap + 1e-6);
-        }
+        expect(w.plannedMinutes).toBeLessThanOrEqual(schedule.weeklyMinutes + 1e-6);
+        const runs = w.sessions.filter((s) => s.kind !== "race" && s.kind !== "strength");
+        expect(new Set(runs.map((s) => s.day)).size).toBe(runs.length); // one run a day
+        for (const s of runs) expect(s.minutes).toBeLessThanOrEqual((s.kind === "long" ? schedule.longRunMaxMinutes : 75) + 1e-6);
+        const longDay = schedule.longRunWeekdayByWeek?.get(w.start) ?? schedule.longRunWeekday;
+        for (const s of runs.filter((x) => x.kind === "long")) expect(s.day - w.start).toBe(longDay);
       }
       // Every planned run within the guard of everything before it.
       const { isRace } = runReferences(hist);
@@ -93,11 +95,29 @@ describe("strengthDaysOf", () => {
   });
 });
 
+describe("schedule", () => {
+  it("spreads the other runs around the long run and moves it in a given week", () => {
+    const schedule: WeeklySchedule = { weeklyMinutes: 300, longRunWeekday: 5, longRunMaxMinutes: 210, runsPerWeek: 4 };
+    const normal = slotsForWeek(schedule, 0, false);
+    expect(normal.slots.map((s) => s.weekday)).toEqual([5, 1, 3, 6]); // Tue, Thu, Sun
+    expect(normal.slots[0].minutes).toBe(150); // half the week outside long-run weeks
+    expect(slotsForWeek(schedule, 0, true).slots[0].minutes).toBe(210);
+    const moved = slotsForWeek({ ...schedule, longRunWeekdayByWeek: new Map([[7, 6]]) }, 7, false);
+    expect(moved.longRunWeekday).toBe(6);
+  });
+
+  it("suggests a long-run max from the race, held below the weekly volume", () => {
+    expect(suggestLongRunMaxMinutes(14, 600)).toBe(300);
+    expect(suggestLongRunMaxMinutes(14, 300)).toBe(225);
+    expect(suggestLongRunMaxMinutes(3, 600)).toBe(120);
+  });
+});
+
 describe("generatePlan structure", () => {
-  const slots: AvailabilitySlot[] = [{ weekday: 1, minutes: 50 }, { weekday: 3, minutes: 50 }, { weekday: 5, minutes: 150 }, { weekday: 6, minutes: 50 }];
+  const schedule: WeeklySchedule = { weeklyMinutes: 300, longRunWeekday: 5, longRunMaxMinutes: 240 };
 
   it("alternates long-run weeks, which lengthen the long run within the same weekly budget", () => {
-    const plan = generatePlan(history(rng(8), 20, 3, 45, 140), slots, 5, { name: "r", day: TODAY + 200, expectedHours: 6 }, TODAY, { ...OPTIONS, longRunWeekMinutes: 240 });
+    const plan = generatePlan(history(rng(8), 20, 3, 45, 140), schedule, { name: "r", day: TODAY + 200, expectedHours: 6 }, TODAY, OPTIONS);
     const builds = plan.weeks.filter((w) => w.phase === "base" || w.phase === "specific");
     builds.forEach((w, k) => expect(w.longRunWeek).toBe((k + 1) % 2 === 0));
     const long = (w: (typeof builds)[number]) => w.sessions.find((x) => x.kind === "long")?.minutes ?? 0;
@@ -107,22 +127,22 @@ describe("generatePlan structure", () => {
   });
 
   it("deloads every 4th build week", () => {
-    const plan = generatePlan(history(rng(3), 20, 3, 45, 90), slots, 5, { name: "r", day: TODAY + 200, expectedHours: 5 }, TODAY, OPTIONS);
+    const plan = generatePlan(history(rng(3), 20, 3, 45, 90), schedule, { name: "r", day: TODAY + 200, expectedHours: 5 }, TODAY, OPTIONS);
     const builds = plan.weeks.filter((w) => ["base", "specific", "deload"].includes(w.phase));
     builds.forEach((w, k) => expect(w.phase === "deload").toBe((k + 1) % 4 === 0));
   });
 
   it("starts with recovery weeks after a recent long race, none after an old one", () => {
-    const recent = generatePlan(history(rng(4), 20, 3, 45, 90, 3, 900), slots, 5, { name: "r", day: TODAY + 150, expectedHours: 5 }, TODAY, OPTIONS);
+    const recent = generatePlan(history(rng(4), 20, 3, 45, 90, 3, 900), schedule, { name: "r", day: TODAY + 150, expectedHours: 5 }, TODAY, OPTIONS);
     const rec = recoveryWeeks(900);
     expect(recent.weeks.slice(0, rec.easy).map((w) => w.phase)).toEqual(new Array(rec.easy).fill("recovery"));
     expect(recent.weeks[rec.easy].phase).toBe("maintenance");
-    const old = generatePlan(history(rng(4), 20, 3, 45, 90, 60, 900), slots, 5, { name: "r", day: TODAY + 150, expectedHours: 5 }, TODAY, OPTIONS);
+    const old = generatePlan(history(rng(4), 20, 3, 45, 90, 60, 900), schedule, { name: "r", day: TODAY + 150, expectedHours: 5 }, TODAY, OPTIONS);
     expect(old.weeks[0].phase).toBe("base");
   });
 
   it("doesn't let a recent race raise the long-run allowance", () => {
-    const plan = generatePlan(history(rng(5), 20, 3, 45, 90, 10, 600), slots, 5, { name: "r", day: TODAY + 150, expectedHours: 5 }, TODAY, OPTIONS);
+    const plan = generatePlan(history(rng(5), 20, 3, 45, 90, 10, 600), schedule, { name: "r", day: TODAY + 150, expectedHours: 5 }, TODAY, OPTIONS);
     const firstLong = plan.weeks.flatMap((w) => w.sessions).find((s) => s.kind === "long")!;
     expect(firstLong.minutes).toBeLessThanOrEqual(1.1 * 90 + 1e-6);
   });
@@ -133,8 +153,8 @@ describe("generatePlan structure", () => {
     const hist = [...history(rng(6), 30, 6, 80, 180).map((r) => ({ ...r, day: r.day - 200 })), ...history(rng(7), 25, 2, 40, 60)];
     hist.push({ day: TODAY - 200, movingMin: 480, distanceKm: 55, descentM: 2000, steepDescentM: 500, mechanical: 450 });
     hist.sort((a, b) => a.day - b.day);
-    const small: AvailabilitySlot[] = [{ weekday: 2, minutes: 40 }, { weekday: 5, minutes: 80 }];
-    const plan = generatePlan(hist, small, 5, { name: "r", day: TODAY + 120, expectedHours: 6 }, TODAY, OPTIONS);
+    const small: WeeklySchedule = { weeklyMinutes: 120, longRunWeekday: 5, longRunMaxMinutes: 80, runsPerWeek: 2 };
+    const plan = generatePlan(hist, small, { name: "r", day: TODAY + 120, expectedHours: 6 }, TODAY, OPTIONS);
     expect(plan.warnings.some((w) => w.includes("below the level before comparable past races"))).toBe(true);
     expect(plan.budgetBindsFrom).not.toBeNull();
   });
