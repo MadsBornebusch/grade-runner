@@ -4256,7 +4256,8 @@ work).
      (4.9% → 8%), so it was dropped.
    - *Slope*: power-on-HR gives 0.124 W/kg per bpm, HR-on-power inverted
      0.296. Errors in both variables put the truth between them, and the
-     lab step test's 0.156 sits inside. The pooled fit is attenuated, so
+     lab step test's 0.156 sits inside (treadmill step test, 25 Mar 2026,
+     85 kg, 8.5 → 15.5 km/h). The pooled fit is attenuated, so
      the method isn't yet general for athletes without a lab test.
    - *Validity, inconclusive*: same-course races. Oslo Trail Challenge
      2020 → 2024 → 2026 got 9% then 13% faster, and the index 6 weeks
@@ -4269,6 +4270,47 @@ work).
      effects) *where blocks have enough flat running*. Not yet shown to
      track fitness. Next: the durability index, then a longer validity
      check as more races accumulate.
+   **Durability index: pass bar, fixed before looking at results
+   (2026-10-21).** `src/plan/durabilityIndex.ts`, checked by
+   `scripts/diagDurabilityIndex.ts`. Per run ≥ 90 min moving: skip the
+   first 15 min, then compare the early third of the remaining moving time
+   with the late third. *Descent fade* = log(late/early) speed within three
+   grade bands (−5…−10%, −10…−17%, < −17%), each needing ≥ 3 min in both
+   thirds, with grade as a covariate inside the band, combined by
+   information weight. *Flat fade* is the same for grade-adjusted speed,
+   −5…+8%, running gait only. Method choices are made on runs up to 2025,
+   then scored on 2026. To pass:
+   - *Dose-response:* descent fade grows with duration (rank correlation
+     ≤ −0.3 on runs up to 2025) and holds after subtracting flat fade.
+     A 90 min run losing as much as a 5 h run would mean pacing, not legs.
+   - *Placebo:* the first third against the middle third should read much
+     less than early against late. Its spread across runs is the noise
+     floor; a block bootstrap within each run gives each run's own SE.
+   - *Resolution:* the effect to resolve is a 5-point change in
+     duration-adjusted late-descent loss across a build (e.g. 12% → 7%),
+     an assumption, since no study gives a training effect size. Pass if a
+     12-week mean of 2026 runs has SE ≤ 2 points. With only about one long
+     run a week, a 28-day block isn't expected to pass.
+   **Result (v1, 2026-10-21): fails.** 46 runs have descent in both
+   thirds (29 up to 2025, 17 in 2026). Grade matching worked: within each
+   band, early and late mean grades differ by ≤ 1 point. Terrain within a
+   band did not:
+   - *Noise:* duration-adjusted fade spreads 14–17 points per run, and
+     the median per-run bootstrap SE is 8–12. A 12-week block of about 5
+     runs gives an SE of about 5–9 points, against the 2-point bar.
+   - *Route effect:* on many 2 h trail runs, the late descents are *faster*
+     (+20 to +48%). The fade rises with descent per km (rank correlation
+     +0.55 up to 2025), consistent with technical trail early and an easy
+     road or gravel descent home late. Grade bands can't see surface.
+   - *Dose-response:* weak. Rank correlation with duration −0.32 (the bar
+     is −0.3), but −0.20 after subtracting flat fade, and none with early
+     descent. Only the ultras show clear loss: Soria Moria −28% (24 h),
+     Ecotrail −21%; but the backyard ultra (a 2.5 km loop, so the terrain
+     is identical) shows only −5%.
+   - The interleaved placebo (alternate 10 min blocks) spreads 7–10
+     points, so even with the same mix of fresh and tired legs, per-run
+     terrain sampling alone is about the size of the effect to resolve.
+   Kept as code: the module and diagnostic document what was tried.
 3. Response model and backtest (layer 3).
 4. Plan generator with the time budget as a hard constraint, fixed (prior)
    ramp first, then the fitted ramp

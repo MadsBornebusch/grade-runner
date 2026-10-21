@@ -183,7 +183,8 @@ function adjustForCovariates(have: Run[], index: number[], summaries: RunHrPower
 
 const TRAIN_UNTIL = arg("trainUntil", "2025-12-31");
 /** pooled | inverse | a fixed number. 0.156 W/kg per bpm is the athlete's
- * lab step test (8.5 -> 15.5 km/h, HR 125 -> 170), for the pace variant. */
+ * lab step test (25 Mar 2026, 85 kg, treadmill 8.5 -> 15.5 km/h, HR
+ * 125 -> 170), for the pace variant. */
 const SLOPE_MODE = arg("slopeMode", "pooled");
 const isTrain = (r: Run) => r.date <= TRAIN_UNTIL;
 const isTest = (r: Run) => r.date > TRAIN_UNTIL;
