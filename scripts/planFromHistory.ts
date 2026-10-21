@@ -8,7 +8,8 @@
 //             "weeklyMinutes": 300, "longRunWeekday": 5 (Mon=0), "longRunMaxMinutes"?: 210,
 //             "longRunWeekEvery"?: 2, "runsPerWeek"?: 4,
 //             "longRunWeekdayByWeek"?: { "YYYY-MM-DD" (a Monday): weekday },
-//             "strengthCountsInBudget"?: false }
+//             "strengthCountsInBudget"?: false,
+//             "carbsStartGPerH"?: 40 }   (race intake: form.intakeGPerH)
 // Without it, a clearly labelled example is used. Without longRunMaxMinutes,
 // the suggestion from the race is used.
 import { generatePlan, suggestLongRunMaxMinutes, type GoalRace, type HistoryRun, type WeeklySchedule } from "../src/plan/planGenerator.ts";
@@ -26,6 +27,7 @@ interface PlanSection {
   runsPerWeek?: number;
   longRunWeekdayByWeek?: Record<string, number>;
   strengthCountsInBudget?: boolean;
+  carbsStartGPerH?: number;
 }
 const EXAMPLE: PlanSection = {
   race: { name: "EXAMPLE 50 km trail race", date: "2027-05-29", expectedHours: 6.5, descentM: 2000, steepDescentM: 500 },
@@ -67,14 +69,16 @@ const schedule: WeeklySchedule = {
   longRunWeekdayByWeek: new Map(Object.entries(cfg.longRunWeekdayByWeek ?? {}).map(([d, wd]) => [dayNumber(d), wd])),
 };
 console.log(`Long run max ${schedule.longRunMaxMinutes} min${cfg.longRunMaxMinutes ? ` (suggested from the race: ${suggested})` : " (suggested from the race)"}`);
-const plan = generatePlan(history, schedule, race, today, options);
+const raceGPerH = loadAthleteProfile().form.intakeGPerH;
+const plan = generatePlan(history, schedule, race, today, { ...options, carbs: { raceGPerH, startGPerH: cfg.carbsStartGPerH } });
+console.log(`Carbs: race intake ${raceGPerH} g/h (Settings), long runs start at ${cfg.carbsStartGPerH ?? 30} g/h`);
 
 const iso = (d: number) => new Date(d * 864e5).toISOString().slice(0, 10);
 const days = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
 console.log(`\n${race.name}, ${cfg.race.date}, ~${race.expectedHours} h. Budget ${(cfg.weeklyMinutes / 60).toFixed(1)} h/week.`);
 console.log("week        phase        chronic  target  planned   hours  sessions (min, descent/steep m)");
 for (const w of plan.weeks) {
-  const ss = w.sessions.map((s) => `${days[(s.day - w.start + 7) % 7]} ${s.kind}${s.kind === "strength" ? "" : ` ${Math.round(s.minutes)}${s.descentM ? ` ${Math.round(s.descentM)}/${Math.round(s.steepDescentM)}` : ""}`}`).join(", ");
+  const ss = w.sessions.map((s) => `${days[(s.day - w.start + 7) % 7]} ${s.kind}${s.kind === "strength" ? "" : ` ${Math.round(s.minutes)}${s.descentM ? ` ${Math.round(s.descentM)}/${Math.round(s.steepDescentM)}` : ""}${s.carbsGPerH ? ` ${s.carbsGPerH}g/h` : ""}`}`).join(", ");
   console.log(`${iso(w.start)}  ${w.phase.padEnd(11)} ${w.chronicAtStart.toFixed(1).padStart(7)} ${w.targetMechanical.toFixed(0).padStart(7)} ${w.plannedMechanical.toFixed(0).padStart(8)} ${(w.plannedMinutes / 60).toFixed(1).padStart(7)}  ${ss}${w.notes.length ? `  [${w.notes.join("; ")}]` : ""}`);
 }
 console.log(`\nProjected chronic load on race day: ${plan.projectedChronicAtRace.toFixed(1)}`);

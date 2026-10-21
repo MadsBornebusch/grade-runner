@@ -133,6 +133,11 @@ export interface PlanOptions {
   strengthSessions?: number;
   strengthMinutes?: number;
   strengthCountsInBudget?: boolean;
+  /** Gut training (user request, 2026-10-21): carbs per hour on runs of
+   * FUELLED_RUN_MINUTES or more, from what the athlete has shown they can
+   * take (their logged intake, or `startGPerH`) up to the race's planned
+   * intake, `stepGPerH` more on each such run. Off without a race target. */
+  carbs?: { raceGPerH: number; startGPerH?: number; stepGPerH?: number };
 }
 
 export type Phase = "recovery" | "maintenance" | "base" | "specific" | "deload" | "taper" | "race";
@@ -146,6 +151,25 @@ export interface PlannedSession {
   mechanical: number;
   descentM: number;
   steepDescentM: number;
+  /** Carbs to take, g per hour (runs of FUELLED_RUN_MINUTES or more). */
+  carbsGPerH?: number;
+}
+
+/** Runs this long or longer get a carb target. */
+export const FUELLED_RUN_MINUTES = 90;
+
+/**
+ * Assumption, for gut training: start at the athlete's demonstrated
+ * intake (30 g/h without one) and add 5 g/h on each fuelled run up to the
+ * race's planned intake, then hold it there. Studies of "training the gut"
+ * (e.g. Costa et al. 2017, two weeks of daily high-carb intake during
+ * exercise) found fewer GI symptoms and better absorption; the step size
+ * and starting point here are this design's.
+ */
+export function carbTargets(fuelledRunCount: number, carbs: NonNullable<PlanOptions["carbs"]>): number[] {
+  const start = Math.min(carbs.raceGPerH, carbs.startGPerH ?? 30);
+  const step = carbs.stepGPerH ?? 5;
+  return Array.from({ length: fuelledRunCount }, (_, k) => Math.min(carbs.raceGPerH, start + step * k));
 }
 
 export interface PlanWeek {
@@ -333,6 +357,17 @@ export function generatePlan(
     });
   }
 
+  if (options.carbs) {
+    const fuelled = weeks.flatMap((w) => w.sessions).filter((x) => x.kind !== "race" && x.kind !== "strength" && x.minutes >= FUELLED_RUN_MINUTES);
+    carbTargets(fuelled.length, options.carbs).forEach((g, k) => (fuelled[k].carbsGPerH = g));
+    for (const x of weeks.flatMap((w) => w.sessions)) if (x.kind === "race") x.carbsGPerH = options.carbs.raceGPerH;
+    const reached = fuelled.findIndex((x) => x.carbsGPerH === options.carbs!.raceGPerH);
+    if (reached < 0) {
+      warnings.push(`Long runs don't reach the race's planned ${options.carbs.raceGPerH} g/h of carbs before race day (last: ${fuelled.at(-1)?.carbsGPerH ?? "none"} g/h); start higher or plan more long runs.`);
+    } else if (race.day - fuelled[reached].day < 28) {
+      warnings.push(`The race's planned ${options.carbs.raceGPerH} g/h of carbs is first practised under 4 weeks before race day.`);
+    }
+  }
   const projectedChronicAtRace = chronicBefore(race.day).chronic;
   const longest = Math.max(0, ...weeks.flatMap((w) => w.sessions.filter((x) => x.kind === "long").map((x) => x.minutes)));
   if (longest < LONG_RUN_RACE_SHARE * race.expectedHours * 60) {

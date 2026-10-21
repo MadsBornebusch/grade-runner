@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  generatePlan, recoveryWeeks, slotsForWeek, strengthDaysOf, suggestLongRunMaxMinutes, type HistoryRun, type PlanOptions, type WeeklySchedule,
+  carbTargets, generatePlan, recoveryWeeks, slotsForWeek, strengthDaysOf, suggestLongRunMaxMinutes, type HistoryRun, type PlanOptions, type WeeklySchedule,
 } from "./planGenerator";
 import { guardBreaches, referenceAt, runReferences } from "./sessionGuard";
 
@@ -92,6 +92,25 @@ describe("strengthDaysOf", () => {
     expect(strengthDaysOf([{ weekday: 1, minutes: 50 }, { weekday: 3, minutes: 50 }, { weekday: 5, minutes: 150 }], 5, 2, false)).toEqual([1, 3]);
     // Inside the budget only slot days qualify.
     expect(strengthDaysOf([{ weekday: 1, minutes: 50 }, { weekday: 5, minutes: 150 }], 5, 2, true)).toEqual([1]);
+  });
+});
+
+describe("carbs", () => {
+  it("steps up from the demonstrated intake to the race target and holds", () => {
+    expect(carbTargets(5, { raceGPerH: 70, startGPerH: 55 })).toEqual([55, 60, 65, 70, 70]);
+    expect(carbTargets(2, { raceGPerH: 40, startGPerH: 60 })).toEqual([40, 40]);
+  });
+
+  it("puts targets on fuelled runs only, rising, and the race at its target", () => {
+    const schedule: WeeklySchedule = { weeklyMinutes: 300, longRunWeekday: 5, longRunMaxMinutes: 210 };
+    const plan = generatePlan(history(rng(9), 20, 3, 45, 120), schedule, { name: "r", day: TODAY + 200, expectedHours: 10 }, TODAY, { ...OPTIONS, carbs: { raceGPerH: 70 } });
+    const all = plan.weeks.flatMap((w) => w.sessions);
+    for (const x of all) if (x.kind !== "race") expect(x.carbsGPerH !== undefined).toBe(x.kind !== "strength" && x.minutes >= 90);
+    const g = all.filter((x) => x.carbsGPerH !== undefined && x.kind !== "race").map((x) => x.carbsGPerH!);
+    expect(g[0]).toBe(30);
+    g.slice(1).forEach((v, k) => expect(v).toBeGreaterThanOrEqual(g[k]));
+    expect(all.find((x) => x.kind === "race")!.carbsGPerH).toBe(70);
+    expect(plan.warnings.some((w) => w.includes("g/h"))).toBe(false);
   });
 });
 

@@ -4519,6 +4519,14 @@ work).
      run: Tue and Thu, plus Sunday at 4 runs a week), each at most 75 min,
      the week's remaining minutes split evenly. Strength days and the
      quality day respect the neighbouring weeks' long runs too.
+   - *Carbs on long runs* (user request, 2026-10-21): every run of 90
+     min or more gets a carb target that steps up 5 g/h per run from the
+     athlete's demonstrated intake (30 g/h without a log) to the race's
+     planned intake (the fuelling setting), then holds; a warning if the
+     race intake isn't practised at least 4 weeks before race day.
+     Gut-training studies (e.g. Costa et al. 2017) support practising
+     race-level intake; the step and start are this design's assumptions.
+     Example: 30 → 60 g/h by early January.
    - *Long-run weeks* (user idea, 2026-10-21): every other build week
      (`longRunWeekEvery`, default 2) the long run may go past its usual
      slot up to `longRunWeekMinutes`, and the week's other runs shrink so
@@ -4565,6 +4573,22 @@ work).
    2026-10-20).
 8. Multi-athlete infrastructure: server-side storage, Strava webhooks,
    per-athlete fitting jobs. Resolve the Strava terms question before this.
+
+### User input: automatic first, a few quick asks (user direction, 2026-10-21)
+
+The app should run itself from Strava as far as possible, and ask only
+for what it can't get:
+- **Sleep and morning HRV**, entered by hand until a Garmin health
+  connection exists (stage 7). One optional, skippable check-in a day.
+  Stored from now on, so the recovery modifier (layer 5b) has a history to
+  start from when it's built; until then it doesn't change the plan.
+- **Carbs taken on each long run** (g/h or total grams, plus optional GI
+  trouble 0–3), logged after the run syncs. This closes the loop on the
+  carb targets above: the demonstrated intake sets where the next targets
+  start, and the race prediction can run at the intake the athlete has
+  actually trained (the solver already takes intake g/h as an input), so
+  the goal race screen can show what under-trained fuelling costs in
+  finish time.
 
 ### Open questions
 
