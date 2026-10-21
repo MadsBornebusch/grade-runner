@@ -3738,3 +3738,523 @@ Still open:
   LT1/LT2 inputs first — leaning toward fixing them (same "hold the
   lab-measured constants, fit only the latent coefficient" regularization
   discipline §13 already confirmed this project follows), but not decided.
+
+---
+
+## 15. Future work: adaptive training plan for a target race
+
+**Goal** (user request, 2026-10-19): add a module that builds a training plan
+for a target race and *adapts to the athlete*: to how much they actually
+train and to how their body responds to it. Built for this athlete first, but
+designed to scale to other athletes, so **every per-athlete parameter must be
+fitted automatically** rather than hand-tuned. Nothing in this section is
+built yet.
+
+**Priorities (user, 2026-10-20):** the point of the module is **a safe
+progression that keeps improving the athlete within a fixed weekly time
+budget**. Adjusting to HRV, resting HR and sleep is secondary and is built
+only once the rest works (build stage 7).
+
+Inputs to this design: §12's research (especially Q3), the user's
+experience with commercial adaptive plan apps, and a short literature pass
+on HRV-guided training, load→performance models and tapering. A detailed
+analysis of one such app was done in a separate session and is kept outside
+this repo, on purpose: it isn't ours to publish. This section only uses
+public concepts (TrainingPeaks' Performance Management Chart, published
+studies) and the user's own training data.
+
+### What existing plan apps do
+
+The common pattern, public since TrainingPeaks' Performance Management
+Chart: daily load scores (often a mechanical/running score and a
+cardio/HR score), a fixed-constant 42-day EWMA as "fitness" (CTL) and a
+7-day EWMA as "fatigue" (ATL), weekly targets expressed as a ramp in CTL
+points per week, phases counted back from a priority race (base, sharpening,
+taper), regular deload weeks, and a race-readiness score comparing CTL to
+what the race needs. Strava's Fitness & Freshness follows the same model.
+Nothing in it is fitted per athlete.
+
+**Weaknesses seen in practice, which this design should avoid:**
+1. *No response to how the body adapts.* The ramp is the same fixed number
+   for everyone, whether fitness is actually improving or not. That is the
+   gap the user wants filled.
+2. *Race days inflate fitness.* A 26 h race is a huge single-day load, and
+   an EWMA of it pushes CTL up by around 45% in one day. Recovery weeks
+   scaled off that inflated number come out far too big.
+3. *The plan prescribes its own spikes.* A race-simulation week can put most
+   of the week into one session far beyond the longest run of the previous
+   30 days. That is the "large spike" bucket in Frandsen et al. 2025
+   (hazard ratio 2.28).
+4. *Readiness ignores the course.* Bands that depend on race duration alone
+   give two 14 h races with very different terrain the same target.
+5. *Non-compliance stalls the plan silently.* When targets are anchored to
+   current CTL and the athlete completes only part of each week, CTL stays
+   flat and the plan repeats the same week without saying why.
+
+### Literature pass (2026-10-19)
+
+- **Banister / fitness–fatigue stays rejected as the *response model*** (§12
+  Q3: non-identifiable time constants, the fatigue term doesn't improve
+  cross-validated prediction). The alternatives in the recent literature are
+  mostly statistical regressions of performance on load features (elastic
+  net, PCR, random forests in Imbach et al. 2022's elite comparison) or
+  multi-dimensional extensions of the same impulse-response idea (Kontro et
+  al. 2025 preprint). None is clearly better for individual athletes. This
+  supports §12's conclusion: keep the response model simple and regularised.
+- **A fixed-constant EWMA is still fine as a *load ruler*.** The distinction
+  matters: TrainingPeaks-style apps use a 42-day EWMA as an accounting unit for
+  prescribing and guarding load, without fitting its constants or claiming it
+  predicts performance. That use doesn't suffer from the identifiability
+  problem, because nothing is fitted.
+- **HRV-guided training.** Meta-analyses find a small positive effect on
+  VO2max (ES ≈ 0.40, PMC7663087) and a medium effect on submaximal markers
+  (g ≈ 0.30; performance and VO2peak effects small and not significant). They
+  also report *fewer non-responders*, which is the relevant benefit for an
+  adaptive plan. Standard practice (Plews et al.; Heikura 2015 RCT) is a
+  **7-day rolling average of ln rMSSD compared against an individual
+  "smallest worthwhile change" band**. The daily value is too noisy (CV about
+  14.5% daily vs 6.7% for the 7-day average).
+- **Spikes.** Frandsen et al. 2025 (BJSM 59(17):1203; 5,205 Garmin runners).
+  A single run more than 10% longer than the longest run of the previous 30
+  days raises overuse-injury hazard: HR 1.64 for 10–30%, 1.52 for 30–100%,
+  2.28 for more than 100%. Weekly ACWR and week-to-week ratios showed *no*
+  positive association. The study measures distance only, with no
+  elevation.
+- **Taper** (secondary sources, not checked against primary papers):
+  Bosquet et al. 2007's meta-analysis points to about 2 weeks with 41–60%
+  volume reduction while keeping intensity and frequency. Smyth & Lawlor
+  2021 (158,000 recreational marathoners' logs) found a strict 3-week taper
+  best. Verify both before hard-coding numbers.
+- **Per-run fitness from HR vs output.** Decoupling and HR-to-speed
+  relationships are standard practice and track marathon performance at
+  population scale (2022 Sports Medicine study, 82,000 runners), but they are
+  only valid on steady efforts. No peer-reviewed validation of wearable-derived
+  indices was found, so this app must validate its own index (stage 2).
+
+### Data-source constraints (affect scaling, not the build order)
+
+- **Strava API agreement (Nov 2024).** Data may be shown only to the athlete
+  it belongs to, and may not be used in "artificial intelligence models".
+  Later reports (2026) say Strava wants written guidance before API data is
+  used in AI systems. Whether a per-athlete statistical fit counts is
+  unsettled. **Pooling athletes** (population priors fitted from other users'
+  Strava data) is the riskier use. Until Strava clarifies, population priors
+  come from published values and from the athlete's own data, or from data
+  the athlete uploads directly (FIT/GPX files, Garmin).
+- **Scaling needs server-side storage.** The run library is per-browser
+  IndexedDB holding only selected runs. Training load needs *every* session,
+  non-running ones included, ingested as it happens (Strava webhooks). Build
+  stages 1–5 against a storage interface on the existing local cache; move
+  it server-side at stage 7.
+- **Health data** (HRV, resting HR, sleep) comes from a source-agnostic daily
+  record, `{ date, lnRmssdNight, restingHr, sleepHours, source }`. Garmin
+  (official Health API, or personal workarounds), Apple Health / Health
+  Connect, other wearables or manual entry can fill it. Use the raw nightly
+  values, not vendor scores (sleep score, HRV status, Body Battery): those
+  formulas are unpublished and differ by device.
+
+### Design
+
+Five layers, each kept separate from the pacing model. The plan module
+*reads* fitted athlete parameters and calls the solver; it never adds terms
+to `CeilingParams` (see the `ceiling.ts` / `pacingFit.ts` boundary). New code
+goes in `src/plan/`.
+
+1. **Load ledger (no fitting).** One row per day, with two channels:
+   - *metabolic load*: the Minetti segment model's energy above a resting
+     baseline, intensity-weighted (relative to LT2) so it plays the role of
+     Cardio/TSS. Non-running sessions use an HR-based TRIMP from the activity
+     summary.
+   - *mechanical load*: `runningImpact.ts` per run, plus the descent
+     exposure that `descentImpact.ts` already computes, kept as its own
+     sub-channel for eccentric load.
+
+   Fixed-constant 42-day and 7-day EWMAs per channel serve as the ruler.
+   **Races and other outliers are capped** in the EWMA used for prescribing:
+   their full load is recorded, but the input is limited to 1.3× the
+   biggest (capped) day of the previous 30 days, so a race counts as at most
+   one progression-sized long run (see stage 1 results for the exact rule).
+   This avoids weakness 2. Validate the ledger against an existing app's
+   weekly scores for the same training (done privately, outside this repo).
+   The scales needn't match, but the ledger must beat trivial baselines
+   (km or hours times a constant).
+
+2. **Per-run fitness index (new; nothing in the code measures this today).**
+   `vo2MaxEstimate.ts` only works on 20–90 min hard efforts, and the pooled
+   ceiling/HR fits only use runs of 250+ minutes, so easy runs, which are
+   most of the log, produce no fitness value. Proposed index: **pace-derived
+   power at a reference HR**. Take each run's steady stretches (reusing
+   `hrCalibration.ts`'s smoothing, early-window restriction and
+   steady-stretch gating) and regress smoothed power on HR within that run.
+   Read off power at a fixed reference HR, e.g. 75% HRR. Hard efforts and
+   races add VO2max anchors through §12's inverse-variance fusion. Must be
+   validated before anything builds on it: test–retest noise on similar easy
+   runs, sensitivity to heat (cardiac drift) and terrain, and whether its
+   trend leads race results. If its noise is not well below the 4–10%
+   training effects §12 Q3 cites, this layer fails and the plan falls back to
+   fixed ramps (like existing apps).
+
+   **Threshold pace and HR, kept current from hard efforts** (user request,
+   2026-10-21). The metabolic channel's IF, the plan's intensity zones and
+   the fitness index's reference HR all hang off one threshold. Today it's
+   the lab value (LT2 0.814 of VO2max, from a step test that stopped at
+   15.5 km/h), and it goes stale: Askerspurten 10 km (17 Sep 2026, 42:28,
+   4:09/km) suggests LT2 is now faster than the lab's 12.5 km/h.
+   Proposal: every race or workout with a 20–60 min near-maximal stretch
+   (`vo2MaxEstimate.ts`'s 20–90 min window already finds these) gives a
+   threshold estimate. Grade-adjusted power over the stretch, scaled to a
+   60 min equivalent with the existing duration curve, gives threshold
+   pace on the flat. Mean HR over the stretch's second half gives
+   threshold HR. Each estimate goes into §12's inverse-variance fusion with
+   the lab value, time-decayed (60–90 day half-life), so a new race moves
+   the threshold and an old lab test fades. Threshold HR also re-anchors
+   `hrCalibration.ts`'s lab-derived LT2 point. Easy runs never lower the
+   threshold. Only a hard effort can, or the decay when none happens for
+   months. Shown to the athlete as pace and HR with the date and source
+   ("from Askerspurten, 17 Sep"), since a moved threshold changes every
+   load number after it.
+
+3. **Response model (the adaptive part).** Track the fitness index with §12's
+   time-decayed weighting (60–90 day half-life). Fit **one per-athlete
+   responsiveness**: the slope of the index's change over 3–6 week blocks
+   against the block's mean load ramp. Shrink it toward a prior (published
+   values first; a population fit only if the Strava terms allow it). The
+   athlete's fit moves away from the prior as evidence accumulates. Do not
+   fit EWMA time constants. Evaluate with the leakage-free backtest harness
+   (`scripts/backtestLeakageFree.ts`): does the fitted model predict the next
+   block's index change better than "same ramp for everyone"?
+
+4. **Plan generator.** Works back from race day:
+   - *Target load*: the chronic load at which past races of comparable
+     *course* (duration, climb, descent) went well, rather than
+     duration-only bands. Course-specific readiness (stage 5) replaces this
+     once it exists.
+   - *Ramp*: weekly target change in chronic load, in absolute load units,
+     starting from the common TrainingPeaks-style guidance of a few CTL
+     points per week (in this ledger's units) and then scaled by the athlete's fitted responsiveness. Good responders
+     get the planned ramp; flat responders get an earlier deload or a change
+     of stimulus instead of more load.
+   - *Phases*: base → specific → taper. Deload every 3–5 weeks, sooner when
+     the response stalls or recovery markers are down (layer 5). Taper length
+     and reduction come from the literature above, checked against
+     primary sources first.
+   - *Session guards*: **no prescribed session longer than about 1.1× the
+     longest run of the previous 30 days** (avoids weakness 3). Frandsen's
+     reference group was runs ≤ 10% longer, and the 10–30% bucket already
+     had HR 1.64, so a looser guard would be a deliberate trade-off, not
+     "following Frandsen". Frandsen measured distance only. Applying the
+     guard to mechanical load or time as well, since trail time and climb
+     matter, is this design's extrapolation. 1.1× is workable: a 2 h long
+     run reaches about 4 h in 7–8 steps (log 2 / log 1.1 ≈ 7.3), i.e. within
+     a normal build if each step is a week or two. Race-simulation sessions
+     are reached by stepping up to them this way.
+   - *Guard reference after a race* (from a spike analysis of the user's
+     Strava history and a variant test on this cache, 2026-10-21). Recovering from a race doesn't make it the new long-run
+     reference. With the race in the 30-day window, the raw Frandsen rule
+     was blind to the autumn 2025 calf-injury lead-up. The 28.5 km road run
+     on 19 Oct 2025 was +53% by distance over the longest non-race run of
+     the previous 30 days, but −75% against the 113 km ultra.
+     Design for the guard:
+     - Check per run, not per-day sums. Use the longest *non-race* run in
+       the window, on both distance and duration: the 19 Oct run was +53%
+       by distance but only +15% by time (road vs trail).
+     - Detect races by size, not by name. A run is a race when it was a
+       spike (above `capSpikes`'s 1.3× allowance), or carries Strava's
+       `workout_type` race flag, which `api/strava` doesn't pass through
+       yet. That works for any athlete. `spikes_races.py`'s keyword list
+       doesn't.
+     - Keep the window at 30 days. A 60-day window steadies the comeback
+       after a race, but on this history it hid the 19 Oct 2025 run
+       (ratio 0.99–1.09 instead of 1.16–1.28).
+     - Built into `capSpikes` (user decision, 2026-10-21): a *race*, a day
+       more than 2× its reference (Frandsen's "large" bucket), counts toward
+       later references at only 1.1× that reference, so afterwards the
+       allowance is the longest pre-race training day plus one 10% step.
+       Smaller capped days still count at their capped 1.3× size. Letting
+       every capped day count at 1.1× froze the spring 2025 build: 24 → 32 km
+       runs kept being capped against an ever-smaller reference. Nothing in
+       the first 30 days of a history is capped, because the reference there
+       is only the first few easy days. `spikeReferences` exposes each day's
+       reference for the guard. With one injury in the data, this isn't
+       validated. It's the conservative choice.
+     - No per-run or per-day rule caught the Pollença week in Oct 2025
+       (steep trails, 40–64 m/km). A steep-downhill (< −17%) 7-day :
+       42-day load ratio would have been high for 11 days in a row. A steep-descent field in the ledger would make that check
+       possible here (see "Muscular durability").
+   - *After a race*: recovery weeks, scaled to the race, before the build
+     resumes: an easy week well below maintenance, then a week near
+     maintenance (7 × chronic level), then the build. They scale off the
+     capped chronic level, not the race-inflated one (weakness 2). Their
+     number grows with the race's size against the reference (a 10 km race
+     needs none, a 100 km+ race about 2 easy weeks then 1 near
+     maintenance), a starting rule to
+     check against primary sources on post-ultra recovery before building.
+     Descent and long-run length restart from the post-race spike reference
+     above, not from the race.
+   - *Re-planning*: after every synced activity. When actual load stays below
+     plan for two or more weeks, say so and offer a lower-ramp plan instead
+     of silently repeating the same week (weakness 5).
+   - Sessions are prescribed in load units and converted to time/distance on
+     the athlete's own terrain.
+
+5. **Readiness and recovery.**
+   - *Course-specific readiness*: run the solver on the race GPX with the
+     athlete's current fitted parameters, and again with the parameters
+     projected to race day under the plan. This gives predicted finish time
+     and bonk risk instead of a duration band (weakness 4). It is the main
+     thing Grade Runner can do that duration-band readiness can't.
+   - *Recovery modifier*: 7-day rolling ln rMSSD vs the athlete's
+     smallest-worthwhile-change band, plus resting HR against its baseline.
+     Below band → move intensity to later in the week or pull the deload
+     forward. In band → train as planned. Optional: the plan must work
+     without any health data.
+
+### Time budget: training an ultra on limited hours
+
+**User constraint (2026-10-19):** family commitments limit training to a
+fixed weekly time budget (a suggested program used a 5 h/week cap). The plan
+must treat **hours as a hard constraint**, not an output. Nothing in the
+literature found supports 5 h as a specific number; it is a constraint, not a
+recommendation.
+
+What the evidence says (literature pass, 2026-10-19):
+- **Volume vs ultra performance is mixed.** Weekly volume predicts
+  performance in small studies of elite 100 km and 161 km mountain runners,
+  but in 79 recreational 24 h runners neither training volume nor
+  anthropometry was associated with race distance; marathon PB was the
+  strongest predictor. So volume helps, but for a recreational finisher it
+  is not the only lever.
+- **Intensity is what holds fitness when volume is cut.** Spiering et al.
+  2021 (review): endurance performance is maintained for up to 15 weeks with
+  as few as 2 sessions per week or a 33–66% volume reduction, *if intensity
+  is kept*. It says nothing about building an ultra-specific base, and the
+  authors say data for athletes is insufficient.
+- **Intensity distribution under a time cap.** The search found no trial
+  of polarized vs pyramidal distributions in *time-limited* recreational
+  runners. A randomized trial in recreational marathoners exists (linked
+  below), but its results were not read. One 10 km trial is still in
+  progress. The trained-athlete evidence leans polarized. Treat the split as a default to refine, not a finding.
+- **Eccentric/downhill conditioning can be bought efficiently.** The repeated
+  bout effect: one downhill session protects against muscle damage from the
+  next, and trail runners who do regular downhill intervals show less
+  strength loss after downhill running (exploratory 2026 study). Downhill
+  speed loss late in races separates top trail ultra performers. This is a
+  time-efficient way to build the "mechanical" channel that intensity alone
+  doesn't cover.
+
+Design consequences:
+1. **The budget caps hours; progression comes from load *density*.** With
+   hours fixed, the ramp in layer 4 comes from more load per hour: more climb
+   and descent per session, a higher share of steady/threshold work, downhill
+   repeats. Rough scale in this ledger's mechanical units: easy running is
+   about 60–70 per hour, so 5 h/week of easy running supports a chronic
+   level of about 45–50, roughly 70% of the user's level before SMVE.
+   Threshold-pace running is only about 1.4× as dense, and nobody trains at
+   threshold all week. **So a 5 h cap probably can't reach the chronic
+   level of the user's previous long-ultra builds.** Density narrows the gap; it does not promise to close
+   it. Layer 5a's job is to quantify the cost as a predicted finish time.
+2. **Long-run share.** Under a small cap the long run is a large part of the
+   week. The 30-day spike guard (≤ about 1.1× the longest recent run) still
+   applies. A **budget-borrowing** option lets the athlete trade hours between
+   weeks (e.g. a 7 h week before a 3 h week) with the athlete's consent, so
+   the longest runs can grow without breaking the weekly average.
+3. **Per-day availability**, not just a weekly total (e.g. weekdays 45 min,
+   one weekend slot of 2–3 h), because what fits in each slot decides the
+   sessions.
+4. **Strength work** (1–2 short sessions per week) is in scope as a scheduled
+   item even though it adds no running load, since minimal-dose strength
+   maintenance is well supported (same review).
+5. **Honest feasibility.** The course-specific readiness (layer 5a) runs the
+   solver with the parameters projected under the capped plan. If the goal
+   race is out of reach within the budget, it says so and shows the predicted
+   finish time, rather than quietly prescribing more hours.
+
+### Muscular durability under the time cap
+
+**User direction (2026-10-20):** when hours are capped, keep the legs getting
+stronger, because muscle damage is what slows people down in mountain
+ultras.
+
+What the evidence says (literature pass, 2026-10-20):
+- **Muscle damage limits pace more than it causes dropouts.** A 2026
+  systematic review finds substantial muscular and neuromuscular stress in
+  trail running, worst in races with heavy eccentric (downhill) loading, and
+  leg strength falls steadily over an ultra. Finishers of 161 km races cited
+  muscle pain, blisters and exhaustion as limiting performance more often
+  than non-finishers did. Dropouts, though, are led by nausea/vomiting (about
+  16–23% depending on the survey), missed cutoffs and injury, so durability
+  work must not crowd out fuelling and gut training.
+- **Pre-race strength isn't clearly protective.** A review of ultra runners
+  found little relationship between baseline strength, strength loss during
+  the race and performance. "Stronger legs, less damage" is plausible, not
+  shown.
+- **Downhill running is the most specific countermeasure.** The repeated
+  bout effect: a prior downhill bout reduces soreness, creatine kinase rise
+  and the running-economy loss after the next one. Trail runners who do
+  regular downhill intervals show less strength loss after downhill running
+  (exploratory 2026 study). Top trail ultra performers lose less speed on
+  late descents.
+- **Heavy strength training is the cheapest in time.** 2022 meta-analysis
+  (22 studies, distance runners): heavy resistance training improves running
+  economy slightly (g = −0.32), more with near-maximal loads; plyometrics
+  alone trivially (g = −0.13). The closest durability evidence is one RCT
+  (Zanini et al., 28 well-trained men): strength + plyometrics raised time
+  to exhaustion by 35% (vs −8% endurance-only) and kept economy better at
+  90 min. No trial shows lifting reduces muscle damage in a trail race.
+  Tendon stiffness needs about 8 weeks of consistent loading to adapt, so
+  start strength work early in a build.
+- **Uphill work is mostly metabolic.** Climbing is concentric and causes
+  little damage. It is dense metabolic load and race-specific for mountain
+  courses, but it is not the eccentric countermeasure.
+
+Design consequences:
+1. **Descent is its own progressing target.** Layer 4 schedules weekly
+   descent metres (and descent per session) as a separate progression
+   alongside load, starting from the athlete's recent level. The same
+   spike rule as the long run applies: no session's descent much beyond the
+   largest of the previous 30 days (about 1.1×). Applying Frandsen's rule to
+   descent is this design's extrapolation; Frandsen measured distance only.
+   Downhill-focused work is placed inside existing runs (e.g. descent repeats
+   in an easy run) so it costs little extra time, and is reduced in the last
+   1–2 weeks before the race.
+2. **Strength is scheduled, not counted as running load.** Two short heavy
+   sessions per week (about 20–30 min each: squats, lunges or step-ups, calf
+   raises; low reps, heavy load), planned from the start of the build because
+   of the 8-week tendon timescale. The athlete chooses whether strength time
+   counts inside the weekly budget or alongside it. The plan only records
+   whether sessions were done; it does not try to model strength gains.
+3. **Measure durability, so the plan can tell whether it works.** A
+   per-athlete durability index from the run history: how much *descent*
+   speed (and grade-adjusted pace) falls in the second half of long runs and
+   races compared with the first half, at similar grades. The scripts that
+   study late-run fatigue (`scripts/diagSurgeLossAsFatigueSign.ts`,
+   `diagEarlySurgesVsFatigue.ts`) and `descentImpact.ts`'s descent exposure
+   are the starting point. This sits next to layer 2's fitness index:
+   fitness says whether the engine improves, durability whether the legs
+   hold up. Like layer 2, it must be validated (noise vs real change) before
+   the plan acts on it.
+4. **"Keep improving within the cap" is checked, not assumed.** When the
+   weekly budget binds, layer 3's response model tracks both indices. If
+   fitness stops rising, the plan shifts the cap's hours toward density
+   (climb, threshold work); if durability stalls, toward descent and
+   strength; if both stall, it schedules a deload or a change of stimulus
+   rather than more of the same. Layer 5a reports what that means for the
+   predicted race finish time.
+
+### Route suggestions for key workouts
+
+**User request (2026-10-20):** suggest a route for a prescribed workout,
+e.g. a session needing a given descent, the long run, or other key
+sessions, based on the athlete's own route heatmap and trails nearby.
+
+Grade Runner's specific advantage here: the solver can predict how long a
+candidate route takes *this athlete* at the prescribed effort. A
+time-prescribed session ("3 h easy, 900 m descent") can therefore be matched
+on predicted duration, not just distance, which no generic route planner
+does.
+
+Three tiers, cheapest first:
+1. **From the athlete's own history (no routing).** Every past run is
+   already a route with known distance, climb, descent and surface. Rank
+   past routes (and simple combinations: out-and-backs, two loops from home)
+   by fit to the workout: predicted duration at the prescribed effort,
+   descent, climb, max descent per session (the spike guard), surface, and
+   start point. This is the MVP and uses only data Grade Runner already has.
+2. **Repeats on a known segment.** For descent targets, find descents in the
+   athlete's heatmap with a suitable steady grade and length (e.g. 100–300 m
+   drop) and prescribe *N* repeats plus the approach. Hill repeats meet a
+   descent target in the least time, so they fit the time cap best.
+3. **New loops from nearby trails.** Generate candidate loops from OSM
+   trails near a chosen start, then score them like tier 1, with a bonus for
+   segments the athlete has run before (heatmap familiarity). Two
+   implementation options:
+   - *Use a routing service's round-trip feature* (GraphHopper and
+     openrouteservice both offer round trips for a target length; vary the
+     seed to get many candidates, then score them). Fastest to build;
+     depends on the service's terms, quotas and foot/hiking profiles
+     (check before relying on them).
+   - *Own graph search* on an OSM trail graph (Overpass) with DEM elevation.
+     Full control over descent targets and familiarity, but much more work.
+     Do this only if the service's candidates fit descent targets badly.
+
+Data:
+- **Heatmap** from the athlete's own activities. Strava's personal heatmap is
+  not available through the API, but each activity's summary polyline comes
+  with the activity list (the backfill already pages through it), so a
+  heatmap of all runs costs no extra requests. Full-resolution streams are
+  only needed for the routes actually suggested. Shown only to the athlete
+  it belongs to (Strava terms).
+- **Trails**: OSM via Overpass (paths, tracks, `sac_scale`, surface).
+  Surface classification already goes through Valhalla (`api/surface.ts`).
+- **Elevation for new routes**: a DEM. For Norway, Kartverket's open
+  national terrain model; elsewhere a public DEM service. For segments the
+  athlete has run, their own recorded elevation can be compared against it.
+
+Constraints from the plan apply to suggestions: the spike guards (distance,
+time and descent vs the previous 30 days), the time budget (predicted
+duration within the slot), and the availability slot's start point (home,
+work).
+
+### Build order
+
+1. Load ledger (layer 1). **Built (2026-10-20):** `src/plan/loadLedger.ts`
+   (+ tests). Validated privately against an existing app's weekly scores
+   for the same training; that script and its detailed results are kept
+   outside this repo. Summary, at VO2max 55 / LT2 0.814, on 20 complete
+   weeks: weekly mechanical error 2.9% as is (1.0% after one scale factor),
+   against 5.2% for km × constant and 5.3% for hours × constant. The
+   42-day chronic level stays within about 1 point of the app's over 126
+   days, through SMVE. The metabolic channel (TSS-style, HR-free) adds
+   little beyond duration at the weekly level (r 0.99 with plain hours).
+   Per run it tracks Strava Relative Effort at r 0.95 (n = 88).
+   - *Summary fallback* (no points), fitted on 328 cached runs: mechanical
+     about 4% error vs the points-based ledger, metabolic about 14%, descent
+     about 10% (in-sample, on the runs it was fitted to).
+   - Coverage (2026-10-21): 30 runs from 13 Aug to 20 Oct 2026, including
+     Oslo Trail Challenge, were added through the Strava MCP
+     (`scripts/importStravaMcpStreams.ts`). The app's own `/api/strava`
+     route was not used, so no app API quota was spent. Two are treadmill
+     runs and have summaries only. The 20 Oct run is also summary-only: its
+     streams came back inline and couldn't be copied verbatim. Points are
+     missing for about half of Feb–Mar 2026 and late 2025. Non-running
+     activities are not cached (the backfill keeps runs only); for this
+     athlete those are strength sessions plus one kayak trip.
+   - *Race cap* (`capSpikes`): each day limited to 1.3× the biggest capped
+     day of the previous 30 days (or half the biggest of the previous 90,
+     after a break). An earlier version referenced 7× the chronic level and
+     still let SMVE lift the chronic level from 63 to about 82; this one
+     holds it to 63.3 → 67.0 (+6%), against 64.0 → 93.1 raw. Since 2025 it
+     trims 10 days: the races, plus long runs more than 1.3× the previous
+     month's biggest day (by 3–27%, e.g. the 19 Apr 2026 race simulation,
+     284 → 207). Those runs were above the spike guard anyway, so not counting
+     their excess when prescribing is intended. The cap compares against
+     nothing in the first month of a history, so run it over the whole
+     history.
+2. Per-run fitness index (layer 2) and durability index (see "Muscular
+   durability"), with their validation. *Go/no-go gate* for the adaptive
+   part.
+3. Response model and backtest (layer 3).
+4. Plan generator with the time budget as a hard constraint, fixed (prior)
+   ramp first, then the fitted ramp
+   (layer 4), plus UI: race selection, weekly plan, planned vs actual.
+5. Course-specific readiness (layer 5a).
+6. Route suggestions: tier 1 (own history) first, then descent repeats
+   (tier 2), then new loops (tier 3).
+7. Daily health record and recovery modifier (layer 5b); choose the data
+   source then. **Deferred** until stages 1–6 work (user priority,
+   2026-10-20).
+8. Multi-athlete infrastructure: server-side storage, Strava webhooks,
+   per-athlete fitting jobs. Resolve the Strava terms question before this.
+
+### Open questions
+
+- Is the per-run fitness index noise low enough (stage 2's gate)? This decides
+  whether the plan can be adaptive at all or stays a fixed-ramp plan.
+- Strava terms: does per-athlete fitting count as an "AI model"? Can
+  population priors use other athletes' Strava data?
+- How should cross-training count toward the mechanical channel (zero, as
+  in most apps) and toward the ramp?
+- Units shown to the athlete: own load units, or something familiar (time,
+  grade-adjusted km)?
+
+Sources: [HRV-guided training and VO2max meta-analysis](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7663087/), [HRV-guided training meta-analysis 2021](https://pubmed.ncbi.nlm.nih.gov/34489178/), [Heikura 2015, HRV-guided training in recreational runners](https://jyx.jyu.fi/handle/123456789/45036), [Plews-group thesis on rolling ln rMSSD](https://openrepository.aut.ac.nz/handle/10292/7122), [Frandsen et al. 2025, single-session spikes](https://pmc.ncbi.nlm.nih.gov/articles/PMC12421110), [Kontro et al. 2025, three-dimensional impulse-response](https://arxiv.org/abs/2503.14841v2), [Imbach et al. 2022, dose-response vs ML](https://pmc.ncbi.nlm.nih.gov/articles/PMC8799698), [Smyth & Lawlor 2021, marathon tapers](https://pmc.ncbi.nlm.nih.gov/articles/PMC8506252), [Taper summary incl. Bosquet 2007 (secondary)](https://thresholdlab.beehiiv.com/p/issue-19-the-science-of-tapering), [Strava API changes (TechRadar)](https://www.techradar.com/health-fitness/strava-could-soon-stop-working-with-some-of-your-third-party-apps-heres-what-you-need-to-know), [Strava API changes (TechRepublic)](https://techrepublic.com/article/news-strava-api-scraping-crackdown), [Spiering et al. 2021, minimal dose to maintain performance](https://pubmed.ncbi.nlm.nih.gov/33629972/), [Recreational 24 h ultra runners vs marathoners (2012)](https://doaj.org/article/ca79d520a7254fec87c26c7a14a4cb2d), [Training volume in elite 100 km runners](https://iris.unige.it/retrieve/e268c4cb-e0ee-a6b7-e053-3a05fe0adea1/2015OAJSM.pdf), [Polarized vs pyramidal in recreational marathoners](https://observatorio-cientifico.ua.es/documentos/6a81a772926b1d60e686fd55), [Downhill-running muscle damage in trail runners (2026)](https://pmc.ncbi.nlm.nih.gov/articles/PMC12846201), [Repeated bout effect, downhill running](https://pmc.ncbi.nlm.nih.gov/articles/PMC9189713), [Hoffman et al. 2015, ultramarathon health and finishing](https://sportsmedicine-open.springeropen.com/track/pdf/10.1186/s40798-015-0040-x), [Factors in completing a 161 km ultra](https://lida.sport-iat.de/ta/Record/4025226?lng=de), [Muscle, neuromuscular and cardiac damage in trail running: systematic review](https://zaguan.unizar.es/record/170428?ln=en), [Heavy resistance vs plyometrics meta-analysis 2022](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9653533/), [Zanini et al., strength training and durability RCT](https://www.citedrive.com/en/discovery/strength-training-improves-running-economy-durability-and-fatigued-high-intensity-performance-in-well-trained-male-runners-a-randomized-control-trial), [Strength and ultra running (review summary)](https://runningmagazine.ca/trail-running/is-muscle-damage-the-biggest-obstacle-for-your-upcoming-ultra/)
