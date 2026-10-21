@@ -138,6 +138,10 @@ export interface PlanOptions {
    * take (their logged intake, or `startGPerH`) up to the race's planned
    * intake, `stepGPerH` more on each such run. Off without a race target. */
   carbs?: { raceGPerH: number; startGPerH?: number; stepGPerH?: number };
+  /** Plan the rest of the current week too (from `today`), with the week's
+   * budget and target reduced by what's already been run since Monday.
+   * Without it the plan starts next Monday. */
+  includeCurrentWeek?: boolean;
 }
 
 export type Phase = "recovery" | "maintenance" | "base" | "specific" | "deload" | "taper" | "race";
@@ -153,6 +157,9 @@ export interface PlannedSession {
   steepDescentM: number;
   /** Carbs to take, g per hour (runs of FUELLED_RUN_MINUTES or more). */
   carbsGPerH?: number;
+  /** The session guard's limits on this day: show the session as "N min or
+   * M km, whichever comes first" from these, not from the speed estimate. */
+  allowance?: RunReference;
 }
 
 /** Runs this long or longer get a carb target. */
@@ -191,6 +198,9 @@ export interface PlanWeek {
 }
 
 export interface Plan {
+  /** "racePast": the goal race is before today, so there is nothing to
+   * plan; the weeks are empty. */
+  status: "ok" | "racePast";
   weeks: PlanWeek[];
   /** Chronic mechanical level on race morning if the plan is followed. */
   projectedChronicAtRace: number;
@@ -226,7 +236,7 @@ export function taperFractions(expectedHours: number): number[] {
   return expectedHours >= 3 ? [0.7, 0.5] : [0.6];
 }
 
-const mondayOf = (day: number) => day - ((((day + 3) % 7) + 7) % 7); // 1970-01-01 was a Thursday
+export const mondayOf = (day: number) => day - ((((day + 3) % 7) + 7) % 7); // 1970-01-01 was a Thursday
 
 export function generatePlan(
   history: HistoryRun[],
@@ -242,6 +252,9 @@ export function generatePlan(
   const strengthMinutes = options.strengthMinutes ?? 25;
   const warnings: string[] = [];
 
+  if (race.day < today) {
+    return { status: "racePast", weeks: [], projectedChronicAtRace: 0, comparableRaces: [], budgetBindsFrom: null, warnings: [] };
+  }
   const past = [...history].filter((r) => r.day < today).sort((a, b) => a.day - b.day);
   const { isRace } = runReferences(past);
   const firstDay = past[0]?.day ?? today;
@@ -261,7 +274,7 @@ export function generatePlan(
   // Most recent race, for recovery weeks.
   const lastRaceIdx = isRace.lastIndexOf(true);
   const lastRace = lastRaceIdx >= 0 ? past[lastRaceIdx] : null;
-  const firstWeek = mondayOf(today) + 7;
+  const firstWeek = mondayOf(today) + (options.includeCurrentWeek ? 0 : 7);
   const raceWeek = mondayOf(race.day);
   let recoveryEasy = 0;
   let recoveryMaintenance = 0;
@@ -322,6 +335,12 @@ export function generatePlan(
       // 7 days: c + 7 (x - c) / 42 = c (1 + ramp)  =>  x = c (1 + 6 ramp).
       target = 7 * chronic * (1 + (ramp * CHRONIC_TAU_DAYS) / 7);
     }
+    // The current week (includeCurrentWeek): what's been run since Monday
+    // counts against the week's target and budget, and only today onward
+    // gets sessions.
+    const doneThisWeek = past.filter((r) => r.day >= start && r.day < start + 7);
+    const doneMinutes = doneThisWeek.reduce((a, r) => a + r.movingMin, 0);
+    target = Math.max(0, target - doneThisWeek.reduce((a, r) => a + r.mechanical, 0));
 
     // Each session's allowance on its own day: a big run can age out of the
     // 30-day window between Monday and Saturday. Earlier sessions of the
@@ -329,7 +348,7 @@ export function generatePlan(
     const runsSoFar = nonRace();
     const allowOn = (day: number) => sessionAllowance(referenceAt(runsSoFar, day));
     const sessions = planWeek(start, phase, target, referenceAt(runsSoFar, start), allowOn, availability, longRunWeekday, race, options, {
-      lastWeekDescent, lastWeekSteep, strengthSessions, strengthMinutes, budgetMinutes: budgetPerWeek,
+      lastWeekDescent, lastWeekSteep, strengthSessions, strengthMinutes, budgetMinutes: Math.max(0, budgetPerWeek - doneMinutes), fromDay: today,
       prevLongDay, nextLongDay: start + 7 + (schedule.longRunWeekdayByWeek?.get(start + 7) ?? schedule.longRunWeekday),
     });
     const plannedMech = sessions.reduce((s, x) => s + x.mechanical, 0);
@@ -386,7 +405,7 @@ export function generatePlan(
       warnings.push(`Projected chronic load on race day (${projectedChronicAtRace.toFixed(0)}) is below the level before comparable past races (up to ${best.toFixed(0)}).`);
     }
   }
-  return { weeks, projectedChronicAtRace, comparableRaces, budgetBindsFrom, warnings };
+  return { status: "ok", weeks, projectedChronicAtRace, comparableRaces, budgetBindsFrom, warnings };
 }
 
 function chronicOfHistory(runs: HistoryRun[], firstDay: number, upTo: number): number {
@@ -402,6 +421,8 @@ interface WeekState {
   strengthMinutes: number;
   /** The week's running budget, which the slots may add up to more than. */
   budgetMinutes: number;
+  /** No session before this day (today, for the current week). */
+  fromDay: number;
   /** Last week's long-run day and next week's planned one (absolute days),
    * so "the day after / before the long run" works across week ends. */
   prevLongDay: number | null;
@@ -433,13 +454,14 @@ function planWeek(
   const out: PlannedSession[] = [];
   const session = (day: number, kind: SessionKind, minutes: number, density: number): PlannedSession => ({
     day, kind, minutes, distanceKm: Math.min((minutes / 60) * o.speedKmh, allowOn(day).distanceKm), mechanical: (minutes / 60) * density, descentM: 0, steepDescentM: 0,
+    allowance: allowOn(day),
   });
 
   if (phase === "race") {
     out.push({ day: race.day, kind: "race", minutes: race.expectedHours * 60, distanceKm: 0, mechanical: 0, descentM: race.descentM ?? 0, steepDescentM: race.steepDescentM ?? 0 });
   }
   const slots = [...availability]
-    .filter((s) => phase !== "race" || start + s.weekday < race.day - 1)
+    .filter((s) => (phase !== "race" || start + s.weekday < race.day - 1) && start + s.weekday >= state.fromDay)
     .sort((a, b) => (a.weekday === longRunWeekday ? -1 : b.weekday === longRunWeekday ? 1 : b.minutes - a.minutes));
 
   // Strength first: every week but race week, never on the long-run day
@@ -452,6 +474,7 @@ function planWeek(
       ? []
       : strengthDaysOf(slots, longRunWeekday, state.strengthSessions, !!o.strengthCountsInBudget, dayBeforeNextLong >= 0 && dayBeforeNextLong < 7 ? [dayBeforeNextLong] : []);
   for (const wd of strengthWeekdays) {
+    if (start + wd < state.fromDay) continue;
     out.push({ day: start + wd, kind: "strength", minutes: state.strengthMinutes, distanceKm: 0, mechanical: 0, descentM: 0, steepDescentM: 0 });
   }
   const free = new Map(slots.map((s) => [s.weekday, s.minutes - (o.strengthCountsInBudget && strengthWeekdays.includes(s.weekday) ? state.strengthMinutes : 0)]));

@@ -5,7 +5,7 @@ import {
 import { guardBreaches, referenceAt, runReferences } from "./sessionGuard";
 
 const OPTIONS: PlanOptions = { easyDensity: 70, maxDensity: 85, speedKmh: 9.5, maxDescentPerHour: 350, maxSteepDescentPerHour: 120 };
-const TODAY = 20000; // a Sunday... any day works; weeks start the next Monday
+const TODAY = 20000; // a Friday; plans start the next Monday unless includeCurrentWeek
 
 function rng(seed: number) {
   return () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
@@ -92,6 +92,29 @@ describe("strengthDaysOf", () => {
     expect(strengthDaysOf([{ weekday: 1, minutes: 50 }, { weekday: 3, minutes: 50 }, { weekday: 5, minutes: 150 }], 5, 2, false)).toEqual([1, 3]);
     // Inside the budget only slot days qualify.
     expect(strengthDaysOf([{ weekday: 1, minutes: 50 }, { weekday: 5, minutes: 150 }], 5, 2, true)).toEqual([1]);
+  });
+});
+
+describe("current week and past races", () => {
+  const schedule: WeeklySchedule = { weeklyMinutes: 300, longRunWeekday: 5, longRunMaxMinutes: 180 };
+  // TODAY (day 20000) is a Friday; its Monday is 19996.
+  const hist = history(rng(10), 12, 3, 45, 100).filter((r) => r.day < TODAY);
+
+  it("plans the rest of this week from today, net of what's been run since Monday", () => {
+    const plan = generatePlan(hist, schedule, { name: "r", day: TODAY + 120, expectedHours: 6 }, TODAY, { ...OPTIONS, includeCurrentWeek: true });
+    const first = plan.weeks[0];
+    expect(first.start).toBe(19996);
+    for (const x of first.sessions) expect(x.day).toBeGreaterThanOrEqual(TODAY);
+    const done = hist.filter((r) => r.day >= 19996).reduce((a, r) => a + r.movingMin, 0);
+    expect(first.plannedMinutes).toBeLessThanOrEqual(300 - done + 1e-6);
+  });
+
+  it("returns an empty plan for a race already run, and attaches allowances", () => {
+    expect(generatePlan(hist, schedule, { name: "r", day: TODAY - 1, expectedHours: 6 }, TODAY, OPTIONS).status).toBe("racePast");
+    const plan = generatePlan(hist, schedule, { name: "r", day: TODAY + 120, expectedHours: 6 }, TODAY, OPTIONS);
+    const long = plan.weeks.flatMap((w) => w.sessions).find((x) => x.kind === "long")!;
+    expect(long.allowance!.movingMin).toBeGreaterThanOrEqual(long.minutes);
+    expect(long.allowance!.distanceKm).toBeGreaterThanOrEqual(long.distanceKm);
   });
 });
 
