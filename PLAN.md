@@ -3960,8 +3960,8 @@ goes in `src/plan/`.
      - Check per run, not per-day sums. Use the longest *non-race* run in
        the window, on both distance and duration: the 19 Oct run was +53%
        by distance but only +15% by time (road vs trail).
-     - Detect races by size, not by name. A run is a race when it was a
-       spike (above `capSpikes`'s 1.3× allowance), or carries Strava's
+     - Detect races by size, not by name. A run is a race when it is more
+       than 2× its reference (the rule built below), or carries Strava's
        `workout_type` race flag, which `api/strava` doesn't pass through
        yet. That works for any athlete. `spikes_races.py`'s keyword list
        doesn't.
@@ -4477,6 +4477,52 @@ work).
 4. Plan generator with the time budget as a hard constraint, fixed (prior)
    ramp first, then the fitted ramp
    (layer 4), plus UI: race selection, weekly plan, planned vs actual.
+   **Generator built, fixed ramp (2026-10-21); UI not yet.**
+   `src/plan/planGenerator.ts` and `src/plan/sessionGuard.ts` (+ tests),
+   run on the real history by `scripts/planFromHistory.ts` (goal race and
+   availability from `athlete.local.json`'s optional `plan` section,
+   otherwise a labelled example). A pure function of history, weekly
+   availability and the goal race, so re-planning is a re-run.
+   - *Load:* each week's target comes from the chronic level the ledger
+     reaches with everything planned so far (same `capSpikes` + `ewma`),
+     +5% chronic per build week (an assumption, about 5% more weekly volume
+     per week). Every 4th build week is a deload at 70%. Recovery weeks
+     after a recent race by its duration (< 1.5 h none, < 4 h one easy
+     week, < 10 h one easy + one maintenance, longer two easy + one
+     maintenance: an assumption to check). Taper: two weeks at 70% and
+     50% for races ≥ 3 h, one at 60% otherwise. Bosquet et al. 2007's
+     meta-analysis found 8–14 days with a 41–60% volume cut, intensity
+     and frequency kept, best; the split is this design's.
+   - *Hours are a hard cap:* every session fits its slot. When a build
+     week's target needs more than the budget, sessions become quality or
+     descent sessions at up to the athlete's 90th-percentile load per hour,
+     and the week is marked "budget binds".
+   - *Session guard, per run:* duration, distance, descent and steep
+     descent each within 1.1× the biggest *non-race* run of the previous
+     30 days (half the 90-day biggest after a break), including runs
+     planned in earlier weeks. A race is a run more than 2× its reference
+     on duration or distance. Floors any athlete can take (guesses): 45
+     min, 8 km, 300 m descent, 150 m steep descent. On the real history it
+     flags the 19 Oct 2025 run (distance 1.53×, time 1.15×) and the 13 Oct
+     Pollença run on all four, and keeps Oslo Trail Challenge (26 Sep 2026)
+     out of today's reference (long run 73 min).
+   - *Descent:* weekly descent and steep descent each grow at most 10% a
+     week; in the specific phase (the last 6 weeks before the taper) one
+     run a week is a descent session.
+   - *Feasibility (descriptive until stage 5):* projected chronic level on
+     race day against the level before past races of 0.5–2× the goal's
+     duration, the first week the budget binds, and a warning when the
+     longest planned run is under 40% of the race's expected duration.
+   - *Example on the real history* (5 h/week, a 6.5 h race on 29 May
+     2027): 3.5 h in the first week, the 5 h budget binds from mid-January,
+     long run 72 → 150 min (the weekend slot), projected chronic level 47
+     against 38–40 before Ecotrail and this year's Oslo Trail Challenge, and
+     no guard breach in 115 planned runs. The long run stays at 2.5 h, so
+     it warns.
+   - *Not built yet:* the UI (race selection, weekly plan), stored plans
+     and planned-vs-actual with the "below plan for two weeks" message
+     (weakness 5), budget borrowing between weeks, converting sessions to
+     routes on the athlete's terrain, and the Strava race flag.
 5. Course-specific readiness (layer 5a).
 6. Route suggestions: tier 1 (own history) first, then descent repeats
    (tier 2), then new loops (tier 3).

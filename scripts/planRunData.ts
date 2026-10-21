@@ -30,6 +30,7 @@ export interface PlanRun {
   /** Days since 1970-01-01 of the local date. */
   day: number;
   movingMin: number;
+  distanceKm: number;
   load: ActivityLoad;
   /** Stage-2 fitness summary (null without points, HR, or enough flat time). */
   fitness: RunHrPowerSummary | null;
@@ -74,7 +75,7 @@ export function loadPlanRuns(): PlanRun[] {
         }
       }
     }
-    out.push({ id: a.stravaId, name: a.name, date, day: dayNumber(date), movingMin: a.durationS / 60, load, fitness, badElevation });
+    out.push({ id: a.stravaId, name: a.name, date, day: dayNumber(date), movingMin: a.durationS / 60, distanceKm: a.distanceKm, load, fitness, badElevation });
   }
   return out.sort((x, y) => x.day - y.day);
 }
