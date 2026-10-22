@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Plus, X } from "@phosphor-icons/react";
 import { useNumberField } from "./useNumberField";
+import { normalizeTimeSeparators } from "./format";
 import {
   displayToPaceMinPerKm,
   equivalentLT1LT2,
@@ -60,7 +61,7 @@ const formatPace = (min: number) => {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 };
 function parsePace(text: string): number | null {
-  const m = text.trim().match(/^(\d{1,2})(?::(\d{1,2}))?$/);
+  const m = normalizeTimeSeparators(text).match(/^(\d{1,2})(?::(\d{1,2}))?$/);
   if (!m) return null;
   const min = Number(m[1]) + Number(m[2] ?? 0) / 60;
   return min >= 2 && min <= 20 ? min : null;
@@ -76,7 +77,7 @@ function PaceField({ label, value, onChange }: { label: string; value: number; o
       <span className="input-unit">
         <input
           type="text"
-          inputMode="numeric"
+          inputMode="decimal"
           value={shown}
           onFocus={() => {
             setText(formatPace(value));

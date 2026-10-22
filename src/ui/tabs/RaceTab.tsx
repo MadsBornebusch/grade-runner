@@ -592,7 +592,7 @@ export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentC
                       <label className="form-row">
                         <span>{isGoalCourse ? "Your finish time" : "Target finish"}</span>
                         <span className="input-unit">
-                          <input type="text" inputMode="numeric" placeholder="H:MM" value={targetTimeInput} onChange={(e) => setTargetTimeInput(e.target.value)} />
+                          <input type="text" inputMode="decimal" placeholder="H:MM" value={targetTimeInput} onChange={(e) => setTargetTimeInput(e.target.value)} />
                           {targetTimeInput && (
                             <button type="button" className="link-button" onClick={() => setTargetTimeInput("")}>
                               Clear

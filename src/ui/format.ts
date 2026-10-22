@@ -23,11 +23,18 @@ export function formatMinPerKm(minPerKm: number | null): string {
   return minPerKm === null ? "--:--/km" : formatPace(1000 / (minPerKm * 60));
 }
 
-/** Inverse of formatDuration -- accepts "H:MM" or "H:MM:SS". Null for
+/** Phone number pads have no colon, only "." or "," (by locale), so time
+ * fields take either as the separator: "4.57" and "4,57" mean 4:57. */
+export function normalizeTimeSeparators(input: string): string {
+  return input.trim().replace(/[.,]/g, ":");
+}
+
+/** Inverse of formatDuration -- accepts "H:MM" or "H:MM:SS" (or "." / ","
+ * for ":", see normalizeTimeSeparators). Null for
  * empty/malformed input, so callers can distinguish "no target set" from
  * "user typed something invalid" if they need to. */
 export function parseDurationToSeconds(input: string): number | null {
-  const trimmed = input.trim();
+  const trimmed = normalizeTimeSeparators(input);
   if (!trimmed) return null;
   const parts = trimmed.split(":");
   if (parts.length !== 2 && parts.length !== 3) return null;

@@ -118,7 +118,7 @@ function Prediction({ formInputs, plan, course }: { formInputs: FormInputs; plan
               setOverrideText(null);
             }}
           >
-            <input autoFocus inputMode="numeric" placeholder="H:MM" value={overrideText} onChange={(e) => setOverrideText(e.target.value)} aria-label="Expected finish, H:MM" />
+            <input autoFocus inputMode="decimal" placeholder="H:MM" value={overrideText} onChange={(e) => setOverrideText(e.target.value)} aria-label="Expected finish, H:MM" />
             <button type="submit" className="button-on-dark">
               Save
             </button>

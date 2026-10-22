@@ -54,6 +54,11 @@ describe("parseDurationToSeconds", () => {
     expect(parseDurationToSeconds("1:01:01")).toBe(3661);
   });
 
+  it("takes . or , for : (phone number pads have no colon)", () => {
+    expect(parseDurationToSeconds("12.30")).toBe(12 * 3600 + 30 * 60);
+    expect(parseDurationToSeconds("1,01,01")).toBe(3661);
+  });
+
   it("round-trips with formatDuration", () => {
     expect(parseDurationToSeconds(formatDuration(3661))).toBe(3661);
   });
