@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowRight, FlagCheckered, PencilSimple, Ruler, Timer, TrendDown } from "@phosphor-icons/react";
+import { FlagCheckered, PencilSimple, Ruler, Timer, TrendDown } from "@phosphor-icons/react";
 import { demonstratedIntake } from "../../plan/carbLadder";
 import { dayNumberOf } from "../../plan/historyFromRuns";
 import { listStoredCourses, type StoredCourse } from "../../storage/courseLibrary";
@@ -18,10 +18,9 @@ interface GoalRaceCardProps {
   plan: PlanState;
   /** Bumped when a course is added, to refresh the picker. */
   refreshKey: number;
-  onOpenPacing: (course: StoredCourse) => void;
 }
 
-export function GoalRaceCard({ formInputs, plan, refreshKey, onOpenPacing }: GoalRaceCardProps) {
+export function GoalRaceCard({ formInputs, plan, refreshKey }: GoalRaceCardProps) {
   const settings = planSettingsStore.use();
   const race = settings.goalRace;
   const [courses, setCourses] = useState<StoredCourse[]>([]);
@@ -61,11 +60,6 @@ export function GoalRaceCard({ formInputs, plan, refreshKey, onOpenPacing }: Goa
       </div>
       <Prediction formInputs={formInputs} plan={plan} course={course} />
       <div className="race-hero__actions">
-        {course && (
-          <button type="button" className="button-on-dark" onClick={() => onOpenPacing(course)}>
-            Race plan <ArrowRight size={16} />
-          </button>
-        )}
         <button type="button" className="button-on-dark button-on-dark--ghost" onClick={() => setEditing(true)}>
           <PencilSimple size={16} /> Change race
         </button>
@@ -198,7 +192,7 @@ function GoalRaceForm({ courses, initial, onDone, canCancel }: { courses: Stored
         <FlagCheckered size={20} weight="duotone" /> Goal race
       </h2>
       {courses.length === 0 ? (
-        <p className="help">Add the race course first (+ Add course below): a GPX file or a Strava route.</p>
+        <p className="help">Add the race course first (Add a course below): a GPX file or a Strava route.</p>
       ) : (
         <>
           <label className="form-row">

@@ -29,7 +29,7 @@ export function PlanEmptyState({ plan, raceName, navigate }: { plan: PlanState; 
         tone="brand"
         title="Pick your goal race"
         text="Your plan is built backwards from race day. Choose a course and a date."
-        action={{ label: "Choose a race", onClick: () => navigate("race", "course") }}
+        action={{ label: "Choose a race", onClick: () => navigate("race") }}
       />
     );
   if (plan.blocker === "noPrediction")

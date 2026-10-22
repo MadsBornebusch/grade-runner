@@ -4,17 +4,19 @@ import { deleteStoredCourse, listStoredCourses, type StoredCourse } from "../sto
 import { planSettingsStore } from "../storage/planSettings";
 
 interface CourseLibraryPanelProps {
-  /** Opens a course in the race plan (Pacing). Passes the full stored
-   * course: the caller needs its id and saved checkpoints/target time. */
+  /** Opens a course's own page. */
   onSelect: (course: StoredCourse) => void;
   onAdd: () => void;
   /** Bump to reload after a course is saved elsewhere. */
   refreshKey: number;
+  title: string;
+  /** Left out of the list (the goal race, shown above it). */
+  excludeId?: string | null;
 }
 
 /** Your saved courses: tap one for its race plan. The goal race is
  * marked; deleting asks first. */
-export function CourseLibraryPanel({ onSelect, onAdd, refreshKey }: CourseLibraryPanelProps) {
+export function CourseLibraryPanel({ onSelect, onAdd, refreshKey, title, excludeId }: CourseLibraryPanelProps) {
   const [courses, setCourses] = useState<StoredCourse[] | null>(null);
   const goalCourseId = planSettingsStore.use().goalRace?.courseId;
 
@@ -31,9 +33,9 @@ export function CourseLibraryPanel({ onSelect, onAdd, refreshKey }: CourseLibrar
 
   return (
     <section>
-      <h3 className="section-title">Your courses</h3>
+      <h3 className="section-title">{title}</h3>
       <div className="card list course-list">
-        {courses?.map((c) => (
+        {courses?.filter((c) => c.id !== excludeId).map((c) => (
           <div key={c.id} className="course-list__row">
             <button type="button" className="list-row" onClick={() => onSelect(c)}>
               {c.id === goalCourseId ? <FlagCheckered size={20} weight="duotone" className="brand-ink" /> : <MapTrifold size={20} weight="duotone" className="muted" />}

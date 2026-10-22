@@ -50,7 +50,7 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
     </header>
   );
   const raceLine = race && dayNumberOf(race.date) >= today && (
-    <button type="button" className="race-line" onClick={() => navigate("race", "course")}>
+    <button type="button" className="race-line" onClick={() => navigate("race")}>
       <FlagCheckered size={18} weight="duotone" />
       <span>
         {race.name} · <strong className="num">{countdown(dayNumberOf(race.date) - today)}</strong>
@@ -103,7 +103,7 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
       ) : (
         todays.map((s) =>
           s.kind === "race" ? (
-            <button key="race" type="button" className="race-hero race-hero--today" onClick={() => navigate("race", "pacing")}>
+            <button key="race" type="button" className="race-hero race-hero--today" onClick={() => navigate("race")}>
               <span className="overline race-hero__date">Race day</span>
               <h2>{race?.name}</h2>
               <span>Good luck! See your race plan.</span>

@@ -1,6 +1,6 @@
 import { useCallback, useSyncExternalStore } from "react";
 
-// Hash routes (#/today, #/schedule/2026-11-02, #/race/pacing, #/runs, #/settings),
+// Hash routes (#/today, #/schedule/2026-11-02, #/race/courses/<id>, #/runs, #/settings),
 // so the browser's back button works and a refresh keeps the place. No
 // router library: the hash is the whole state.
 
@@ -9,7 +9,7 @@ export const TAB_IDS: TabId[] = ["today", "schedule", "race", "runs", "settings"
 
 export interface HashRoute {
   tab: TabId;
-  /** Path segments after the tab, e.g. ["pacing"] for #/race/pacing. */
+  /** Path segments after the tab, e.g. ["courses", id] for #/race/courses/<id>. */
   rest: string[];
 }
 

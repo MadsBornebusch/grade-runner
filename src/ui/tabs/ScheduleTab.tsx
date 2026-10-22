@@ -70,7 +70,7 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
         <div className="card empty-state">
           <h2>{race!.name} is done</h2>
           <p>How did it go? Pick your next race to get a new plan.</p>
-          <button type="button" className="button-primary" onClick={() => navigate("race", "course")}>
+          <button type="button" className="button-primary" onClick={() => navigate("race")}>
             Pick next race
           </button>
         </div>

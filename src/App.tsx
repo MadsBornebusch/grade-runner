@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { TabBar } from "./ui/TabBar";
 import { RaceTab } from "./ui/tabs/RaceTab";
-import { RACE_SEGMENTS, type RaceSegment } from "./ui/tabs/raceSegments";
 import { SettingsTab } from "./ui/tabs/SettingsTab";
 import { RunsTab } from "./ui/tabs/RunsTab";
 import { loadFormInputs, saveFormInputs, type FormInputs, type Vo2MaxEntry } from "./ui/formInputs";
@@ -110,7 +109,6 @@ function App() {
     return () => clearTimeout(timeout);
   }, [stravaConnected, formInputs]);
 
-  const raceSegment: RaceSegment = RACE_SEGMENTS.find((s) => s.id === route.rest[0])?.id ?? "course";
   const show = (tab: TabId) => ({ hidden: route.tab !== tab, className: `tab-page tab-page--${tab}` });
 
   return (
@@ -132,8 +130,8 @@ function App() {
             formInputs={formInputs}
             setFormInputs={setFormInputs}
             active={route.tab === "race"}
-            segment={raceSegment}
-            onSegmentChange={(segment) => route.navigate("race", segment)}
+            rest={route.tab === "race" ? route.rest : null}
+            navigate={route.navigate}
             plan={plan}
           />
         </div>

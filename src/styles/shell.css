@@ -194,12 +194,6 @@
   gap: var(--sp-4);
 }
 
-.race-tab__page {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
-}
-
 /* ---------- Settings ---------- */
 
 .settings-page {

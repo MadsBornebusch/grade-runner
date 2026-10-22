@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import { MapTrifold, Warning } from "@phosphor-icons/react";
+import { ArrowLeft, CaretRight, ClockCounterClockwise, MapTrifold } from "@phosphor-icons/react";
 import type { GpxPoint } from "../../gpx/pipeline";
 import { rawCourseStats, runPipeline } from "../../gpx/pipeline";
 import { findFlatPacedFinishTime, findThetaForTargetTime, type SolverInputs } from "../../model/solver";
@@ -40,10 +40,10 @@ import {
   resolveSubstrateAnchors,
   type FormInputs,
 } from "../formInputs";
-import { RACE_SEGMENTS, type RaceSegment } from "./raceSegments";
 import { buildSolverInputs } from "../solverInputs";
 import { GoalRaceCard } from "../plan/GoalRaceCard";
 import type { PlanState } from "../usePlan";
+import type { TabId } from "../useHashRoute";
 
 
 interface RaceTabProps {
@@ -52,15 +52,28 @@ interface RaceTabProps {
   /** False while another tab is showing: the solver cascade below freezes
    * at its last value, as it used to while the Settings overlay was open. */
   active: boolean;
-  segment: RaceSegment;
-  onSegmentChange: (segment: RaceSegment) => void;
+  /** The route after #/race while this tab shows, else null (the tab
+   * stays mounted and keeps its last view). */
+  rest: string[] | null;
+  navigate: (tab: TabId, ...rest: string[]) => void;
   plan: PlanState;
 }
 
-/** The race planner: course library, pacing plan and run analysis, the
- * three pages that used to be the app's carousel. */
-export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentChange, plan }: RaceTabProps) {
-  const resultMode = segment === "analyze" ? "analysis" : "planning";
+type RaceView = { kind: "goal" } | { kind: "course"; id: string } | { kind: "review"; id: string };
+
+/** #/race is the goal race: its card, its pacing plan, then the other
+ * courses. #/race/courses/<id> is another course's plan, and
+ * .../review looks back at a course that is a recorded run. */
+function parseView(rest: string[]): RaceView {
+  if (rest[0] === "courses" && rest[1]) return rest[2] === "review" ? { kind: "review", id: rest[1] } : { kind: "course", id: rest[1] };
+  return { kind: "goal" };
+}
+
+export function RaceTab({ formInputs, setFormInputs, active, rest, navigate, plan }: RaceTabProps) {
+  const lastRestRef = useRef<string[]>(rest ?? []);
+  if (rest) lastRestRef.current = rest;
+  const view = parseView(lastRestRef.current);
+  const resultMode = view.kind === "review" ? "analysis" : "planning";
   const frozen = !active;
   const [addCourseOpen, setAddCourseOpen] = useState(false);
 
@@ -138,21 +151,45 @@ export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentC
   // same setting, so changing either changes both (and sizes the plan).
   const goalRace = planSettingsStore.use().goalRace;
   const isGoalCourse = !!goalRace && goalRace.courseId === currentCourseId;
-  // Pacing opened with nothing loaded (a fresh app open): show the goal
-  // race's course rather than an empty page.
+  // The course this view shows: the goal race's on #/race, else the one
+  // in the route. Loaded from the library whenever that changes.
+  const goalCourseId = goalRace?.courseId ?? null;
+  const wantCourseId = view.kind === "goal" ? goalCourseId : view.id;
+  // A course's own page for the goal course is just the goal page.
+  const showingGoalAsCourse = !!rest && view.kind === "course" && view.id === goalCourseId;
   useEffect(() => {
-    if (segment !== "pacing" || currentCourseId || rawPoints || !goalRace) return;
+    if (showingGoalAsCourse) navigate("race");
+  }, [showingGoalAsCourse, navigate]);
+  const [courseStatus, setCourseStatus] = useState<"none" | "loading" | "missing" | "ready">("none");
+  useEffect(() => {
+    if (wantCourseId === currentCourseId && courseStatus === "ready") return;
+    // Null first, so the persistence effects can't write the old course's
+    // points or target into the new row while the load is in flight.
+    setCurrentCourseId(null);
+    setRawPoints(null);
+    setFileName(null);
+    setHighlightedDistanceKm(null);
+    setSavedPointsKm([]);
+    setTargetTimeInput("");
+    if (!wantCourseId) {
+      setCourseStatus("none");
+      return;
+    }
+    setCourseStatus("loading");
     let cancelled = false;
     void listStoredCourses().then((courses) => {
-      const c = courses.find((x) => x.id === goalRace.courseId);
-      if (c && !cancelled) loadCourse(c.points, c.name, c.id, c.savedPointsKm, c.targetTimeS);
+      if (cancelled) return;
+      const c = courses.find((x) => x.id === wantCourseId);
+      if (!c) return setCourseStatus("missing");
+      loadCourse(c.points, c.name, c.id, c.savedPointsKm, c.targetTimeS);
+      setCourseStatus("ready");
     });
     return () => {
       cancelled = true;
     };
-    // loadCourse only sets state.
+    // loadCourse only sets state; courseLibraryVersion reloads after a save.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segment, currentCourseId, rawPoints, goalRace?.courseId]);
+  }, [wantCourseId, courseLibraryVersion]);
   const goalTargetS = isGoalCourse && goalRace.expectedHoursOverride ? Math.round(goalRace.expectedHoursOverride * 3600) : null;
   useEffect(() => {
     if (!isGoalCourse) return;
@@ -525,260 +562,216 @@ export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentC
     return buildEffortTrendPoints(courseResult.segments, analysisResult.segments, formInputs.altitudeAdjustment);
   }, [analysisResult, courseResult, formInputs.altitudeAdjustment]);
 
-  const noCourse = (
-    <div className="card empty-state">
-      <div className="empty-state__art">
-        <MapTrifold size={40} weight="duotone" aria-hidden="true" />
-      </div>
-      <h2>No course open</h2>
-      <p>Pick one of your courses, or add a new one.</p>
-      <button type="button" className="button-primary" onClick={() => onSegmentChange("course")}>
-        Go to courses
+  const firstTime = rawPoints?.find((pt) => pt.time)?.time;
+  const courseRunDate = firstTime ? new Date(firstTime).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : null;
+
+  const back = (to: string[], label: string, title: string) => (
+    <div className="course-head">
+      <button type="button" className="icon-button" onClick={() => navigate("race", ...to)} aria-label={label}>
+        <ArrowLeft size={20} />
       </button>
+      <h1 className="course-head__title">{title}</h1>
     </div>
+  );
+
+  const loadingOrMissing =
+    courseStatus === "missing" ? (
+      <div className="card empty-state">
+        <div className="empty-state__art">
+          <MapTrifold size={40} weight="duotone" aria-hidden="true" />
+        </div>
+        <h2>Course not found</h2>
+        <p>{view.kind === "goal" ? "Your goal race's course was deleted. Add it again, or change race." : "It may have been deleted."}</p>
+        {view.kind !== "goal" && (
+          <button type="button" className="button-primary" onClick={() => navigate("race")}>
+            Back to your race
+          </button>
+        )}
+      </div>
+    ) : courseStatus === "loading" || (courseResult && !solverResult) ? (
+      <p className="help">Loading the course…</p>
+    ) : null;
+
+  // The pacing plan for the course on screen: on the goal page the race
+  // card above edits the finish time, elsewhere the target card does.
+  const pacingPlan = courseResult && solverResult && (
+    <>
+      {view.kind !== "goal" && (
+        <div className="card target-card">
+          <label className="form-row">
+            <span>Target finish</span>
+            <span className="input-unit">
+              <input type="text" inputMode="decimal" placeholder="H:MM" value={targetTimeInput} onChange={(e) => setTargetTimeInput(e.target.value)} />
+              {targetTimeInput && (
+                <button type="button" className="link-button" onClick={() => setTargetTimeInput("")}>
+                  Clear
+                </button>
+              )}
+            </span>
+          </label>
+          {targetTimeInput && targetTimeS === null ? (
+            <p className="help danger">Enter a time as H:MM or H:MM:SS.</p>
+          ) : (
+            <p className="help">Pacing, splits and fuel below follow it.</p>
+          )}
+        </div>
+      )}
+      <ResultsSummary
+        result={solverResult.result}
+        totalDistanceM={courseResult.totalDistance3D}
+        chosenPacing={chosenPacingResult}
+        bestDemonstrated={bestDemonstratedResult}
+        summaryStats={planSummaryStats}
+        target={targetTimeResult && targetTimeS !== null ? { result: targetTimeResult.result, theta: targetTimeResult.theta, targetTimeS } : null}
+      />
+      {courseResult.hasTimestamps && view.kind === "course" && (
+        <button type="button" className="card list-row" onClick={() => navigate("race", "courses", view.id, "review")}>
+          <ClockCounterClockwise size={20} weight="duotone" className="brand-ink" />
+          <span>
+            You ran this{courseRunDate ? ` on ${courseRunDate}` : ""}: look back at the run
+          </span>
+          <CaretRight size={16} />
+        </button>
+      )}
+      <RouteMap
+        routePoints={courseResult.routePoints}
+        splitPoints={chartPoints}
+        highlightedDistanceKm={highlightedDistanceKm}
+        onHighlight={setHighlightedDistanceKm}
+        savedPointsKm={savedPointsKm}
+        onSavePoint={saveHighlightedPoint}
+        onRemoveSavedPoint={removeSavedPoint}
+        onClearSavedPoints={clearSavedPoints}
+      />
+      {/* A handful of segments (e.g. an immediate bonk) isn't enough for a
+          meaningful chart axis/scale. */}
+      {chartPoints.length >= 5 && (
+        <>
+          {targetTimeResult && targetTimeS !== null && Math.abs(targetTimeResult.result.finishTimeS - targetTimeS) > 60 && (
+            <p className="help">The charts show the closest pace to {formatDuration(targetTimeS)} the course allows.</p>
+          )}
+          <ElevationProfileChart
+            points={chartPoints}
+            highlightedDistanceKm={highlightedDistanceKm}
+            savedPointsKm={savedPointsKm}
+            onPointClick={setHighlightedDistanceKm}
+          />
+          <GradeHistogram bins={planGradeBins} />
+          {view.kind === "goal" && <FuelingFields values={formInputs} onChange={setFormInputs} />}
+          <FuelChart points={chartPoints} />
+          <SplitTable
+            points={chartPoints}
+            splitLengthKm={formInputs.splitLengthKm}
+            onSplitLengthChange={(splitLengthKm) => setFormInputs((prev) => ({ ...prev, splitLengthKm }))}
+            savedPointsKm={savedPointsKm}
+            onClearSavedPoints={clearSavedPoints}
+            intakeGPerH={formInputs.intakeGPerH}
+          />
+        </>
+      )}
+    </>
+  );
+
+  const review = courseResult && analysisResult && (
+    <>
+      <AnalysisSummary result={analysisResult} totalDistanceM={courseResult.totalDistance3D} summaryStats={analysisSummaryStats} />
+      <RouteMap
+        routePoints={courseResult.routePoints}
+        splitPoints={analysisChartPoints}
+        highlightedDistanceKm={highlightedDistanceKm}
+        onHighlight={setHighlightedDistanceKm}
+        savedPointsKm={savedPointsKm}
+        onSavePoint={saveHighlightedPoint}
+        onRemoveSavedPoint={removeSavedPoint}
+        onClearSavedPoints={clearSavedPoints}
+      />
+      {analysisChartPoints.length >= 5 && (
+        <>
+          <ElevationProfileChart
+            points={analysisChartPoints}
+            highlightedDistanceKm={highlightedDistanceKm}
+            savedPointsKm={savedPointsKm}
+            onPointClick={setHighlightedDistanceKm}
+          />
+          <GradeHistogram bins={analysisGradeBins} />
+          {solverResult && (
+            <PaceEffortChart
+              actual={paceEffortActualPoints}
+              planned={paceEffortPlannedPoints}
+              plannedThetaFraction={solverResult.theta}
+              highlightedDistanceKm={highlightedDistanceKm}
+            />
+          )}
+          {(courseResult.hasPower || courseResult.hasHeartRate) && (
+            <PowerHrChart
+              points={powerHrPoints}
+              hasPower={courseResult.hasPower}
+              hasHeartRate={courseResult.hasHeartRate}
+              hasCalibratedPower={
+                courseResult.hasHeartRate && formInputs.hrPowerCalibrationSlope !== null && formInputs.hrPowerCalibrationIntercept !== null
+              }
+            />
+          )}
+          <FuelChart points={analysisChartPoints} />
+          <SubstrateChart points={substratePoints} />
+          <SplitTable
+            points={analysisChartPoints}
+            splitLengthKm={formInputs.splitLengthKm}
+            onSplitLengthChange={(splitLengthKm) => setFormInputs((prev) => ({ ...prev, splitLengthKm }))}
+            savedPointsKm={savedPointsKm}
+            onClearSavedPoints={clearSavedPoints}
+            intakeGPerH={formInputs.intakeGPerH}
+          />
+          {analysisInputs && (
+            <PacingFitPanel
+              points={pacingFitPoints}
+              ceilingParams={analysisInputs.ceilingParams ?? {}}
+              onApplyDrift={(durabilityDriftPerHour) => setFormInputs((prev) => ({ ...prev, durabilityDriftPerHour }))}
+            />
+          )}
+        </>
+      )}
+    </>
   );
 
   return (
     <div className="race-tab">
-      <div className="segmented" role="tablist" aria-label="Race planner">
-        {RACE_SEGMENTS.map((seg) => (
-          <button
-            key={seg.id}
-            type="button"
-            role="tab"
-            aria-selected={segment === seg.id}
-            className={segment === seg.id ? "segmented__item segmented__item--active" : "segmented__item"}
-            onClick={() => onSegmentChange(seg.id)}
-          >
-            {seg.label}
-          </button>
-        ))}
-      </div>
-
-      {[
-          {
-            id: "course",
-            content: (
-              <>
-                <GoalRaceCard
-                  formInputs={formInputs}
-                  plan={plan}
-                  refreshKey={courseLibraryVersion}
-                  onOpenPacing={(course) => {
-                    loadCourse(course.points, course.name, course.id, course.savedPointsKm, course.targetTimeS);
-                    onSegmentChange("pacing");
-                  }}
-                />
-                <CourseLibraryPanel
-                  refreshKey={courseLibraryVersion}
-                  onSelect={(course) => {
-                    loadCourse(course.points, course.name, course.id, course.savedPointsKm, course.targetTimeS);
-                    onSegmentChange("pacing");
-                  }}
-                  onAdd={() => setAddCourseOpen(true)}
-                />
-                <FuelingFields values={formInputs} onChange={setFormInputs} />
-              </>
-            ),
-          },
-          {
-            id: "pacing",
-            content: (
-              <>
-                {!courseResult && noCourse}
-                {courseResult && solverResult && (
-                  <>
-                    <div className="card target-card">
-                      <label className="form-row">
-                        <span>{isGoalCourse ? "Your finish time" : "Target finish"}</span>
-                        <span className="input-unit">
-                          <input type="text" inputMode="decimal" placeholder="H:MM" value={targetTimeInput} onChange={(e) => setTargetTimeInput(e.target.value)} />
-                          {targetTimeInput && (
-                            <button type="button" className="link-button" onClick={() => setTargetTimeInput("")}>
-                              Clear
-                            </button>
-                          )}
-                        </span>
-                      </label>
-                      {targetTimeInput && targetTimeS === null ? (
-                        <p className="help danger">Enter a time as H:MM or H:MM:SS.</p>
-                      ) : (
-                        <p className="help">
-                          {isGoalCourse
-                            ? "Pacing, splits and fuel below follow it, and it sizes your training plan (same as the time on the race card)."
-                            : "Pacing, splits and fuel below follow it."}
-                        </p>
-                      )}
-                    </div>
-                    <ResultsSummary
-                      result={solverResult.result}
-                      totalDistanceM={courseResult.totalDistance3D}
-                      chosenPacing={chosenPacingResult}
-                      bestDemonstrated={bestDemonstratedResult}
-                      summaryStats={planSummaryStats}
-                      target={
-                        targetTimeResult && targetTimeS !== null
-                          ? { result: targetTimeResult.result, theta: targetTimeResult.theta, targetTimeS }
-                          : null
-                      }
-                    />
-                    <RouteMap
-                      routePoints={courseResult.routePoints}
-                      splitPoints={chartPoints}
-                      highlightedDistanceKm={highlightedDistanceKm}
-                      onHighlight={setHighlightedDistanceKm}
-                      savedPointsKm={savedPointsKm}
-                      onSavePoint={saveHighlightedPoint}
-                      onRemoveSavedPoint={removeSavedPoint}
-                      onClearSavedPoints={clearSavedPoints}
-                    />
-                    {/* A handful of segments (e.g. an immediate bonk) isn't
-                        enough for a meaningful chart axis/scale. */}
-                    {chartPoints.length >= 5 && (
-                      <>
-                        {targetTimeResult && targetTimeS !== null && (
-                          <p className="help">
-                            Splits and charts below show your {formatDuration(targetTimeS)} target
-                            {Math.abs(targetTimeResult.result.finishTimeS - targetTimeS) > 60
-                              ? " (closest achievable pace, not exact)"
-                              : ""}
-                            . Clear it to go back to the theoretical ceiling.
-                          </p>
-                        )}
-                        <ElevationProfileChart
-                          points={chartPoints}
-                          highlightedDistanceKm={highlightedDistanceKm}
-                          savedPointsKm={savedPointsKm}
-                          onPointClick={setHighlightedDistanceKm}
-                        />
-                        <GradeHistogram bins={planGradeBins} />
-                        <FuelChart points={chartPoints} />
-                        <SplitTable
-                          points={chartPoints}
-                          splitLengthKm={formInputs.splitLengthKm}
-                          onSplitLengthChange={(splitLengthKm) => setFormInputs((prev) => ({ ...prev, splitLengthKm }))}
-                          savedPointsKm={savedPointsKm}
-                          onClearSavedPoints={clearSavedPoints}
-                          intakeGPerH={formInputs.intakeGPerH}
-                        />
-                      </>
-                    )}
-                  </>
-                )}
-              </>
-            ),
-          },
-          {
-            id: "analyze",
-            content: (
-              <>
-                {!courseResult && noCourse}
-                {courseResult && !courseResult.hasTimestamps && (
-                  <div className="banner banner--warning">
-                    <Warning size={20} weight="duotone" aria-hidden="true" />
-                    <p>This course has no times in it. Analyze needs a recorded run: add one from Strava or a GPX file from your watch.</p>
-                  </div>
-                )}
-                {courseResult && analysisResult && (
-                  <>
-                    <AnalysisSummary result={analysisResult} totalDistanceM={courseResult.totalDistance3D} summaryStats={analysisSummaryStats} />
-                    <RouteMap
-                      routePoints={courseResult.routePoints}
-                      splitPoints={analysisChartPoints}
-                      highlightedDistanceKm={highlightedDistanceKm}
-                      onHighlight={setHighlightedDistanceKm}
-                      savedPointsKm={savedPointsKm}
-                      onSavePoint={saveHighlightedPoint}
-                      onRemoveSavedPoint={removeSavedPoint}
-                      onClearSavedPoints={clearSavedPoints}
-                    />
-                    {analysisChartPoints.length >= 5 && (
-                      <>
-                        <ElevationProfileChart
-                          points={analysisChartPoints}
-                          highlightedDistanceKm={highlightedDistanceKm}
-                          savedPointsKm={savedPointsKm}
-                          onPointClick={setHighlightedDistanceKm}
-                        />
-                        <GradeHistogram bins={analysisGradeBins} />
-                        {solverResult && (
-                          <PaceEffortChart
-                            actual={paceEffortActualPoints}
-                            planned={paceEffortPlannedPoints}
-                            plannedThetaFraction={solverResult.theta}
-                            highlightedDistanceKm={highlightedDistanceKm}
-                          />
-                        )}
-                        {(courseResult.hasPower || courseResult.hasHeartRate) && (
-                          <PowerHrChart
-                            points={powerHrPoints}
-                            hasPower={courseResult.hasPower}
-                            hasHeartRate={courseResult.hasHeartRate}
-                            hasCalibratedPower={
-                              courseResult.hasHeartRate &&
-                              formInputs.hrPowerCalibrationSlope !== null &&
-                              formInputs.hrPowerCalibrationIntercept !== null
-                            }
-                          />
-                        )}
-                        <FuelChart points={analysisChartPoints} />
-                        <SubstrateChart points={substratePoints} />
-                        <SplitTable
-                          points={analysisChartPoints}
-                          splitLengthKm={formInputs.splitLengthKm}
-                          onSplitLengthChange={(splitLengthKm) => setFormInputs((prev) => ({ ...prev, splitLengthKm }))}
-                          savedPointsKm={savedPointsKm}
-                          onClearSavedPoints={clearSavedPoints}
-                          intakeGPerH={formInputs.intakeGPerH}
-                        />
-                        {analysisInputs && (
-                          <PacingFitPanel
-                            points={pacingFitPoints}
-                            ceilingParams={analysisInputs.ceilingParams ?? {}}
-                            onApplyDrift={(durabilityDriftPerHour) =>
-                              setFormInputs((prev) => ({ ...prev, durabilityDriftPerHour }))
-                            }
-                          />
-                        )}
-                      </>
-                    )}
-                  </>
-                )}
-              </>
-            ),
-          },
-        ]
-        .filter((page) => page.id === segment)
-        .map((page) => (
-          <section key={page.id} className="race-tab__page" role="tabpanel">
-            {page.content}
-          </section>
-        ))}
+      {view.kind === "goal" && (
+        <>
+          <GoalRaceCard formInputs={formInputs} plan={plan} refreshKey={courseLibraryVersion} />
+          {goalRace && (loadingOrMissing ?? pacingPlan)}
+          <CourseLibraryPanel
+            title={goalRace ? "Other courses" : "Your courses"}
+            excludeId={goalCourseId}
+            refreshKey={courseLibraryVersion}
+            onSelect={(course) => navigate("race", "courses", course.id)}
+            onAdd={() => setAddCourseOpen(true)}
+          />
+          {!goalRace && <FuelingFields values={formInputs} onChange={setFormInputs} />}
+        </>
+      )}
+      {view.kind === "course" && (
+        <>
+          {back([], "Back to your race", fileName ?? "Course")}
+          {loadingOrMissing ?? pacingPlan}
+        </>
+      )}
+      {view.kind === "review" && (
+        <>
+          {back(["courses", view.id], "Back to the course", fileName ?? "Run")}
+          {loadingOrMissing ??
+            (courseResult && !courseResult.hasTimestamps ? <p className="help">This course has no times in it, so there's no run to look back at.</p> : review)}
+        </>
+      )}
 
       <AddCoursePanel
         open={addCourseOpen}
         onClose={() => setAddCourseOpen(false)}
         onCourseLoaded={(points, name, stravaId) => {
-          setRawPoints(points);
-          setFileName(name);
-          // Clears currentCourseId (not just savedPointsKm/targetTimeInput)
-          // so the persistence effects above don't write this fresh
-          // course's empty state into the PREVIOUS course's row during the
-          // gap before saveCourse resolves below -- see loadCourse's own
-          // doc on why reset and course-id changes have to land together.
-          setCurrentCourseId(null);
-          setHighlightedDistanceKm(null);
-          setSavedPointsKm([]);
-          setTargetTimeInput("");
           void saveCourse(name, points, stravaId !== undefined ? `strava:${stravaId}` : undefined).then((saved) => {
             setCourseLibraryVersion((v) => v + 1);
-            setCurrentCourseId(saved.id);
-            // A stable (Strava) id can resolve to a row that already had
-            // aid-station points/a target saved from a previous import --
-            // restore them now that we know. A fresh plain-upload id never
-            // has either, so this is a no-op for that case.
-            if (saved.savedPointsKm && saved.savedPointsKm.length > 0) setSavedPointsKm(saved.savedPointsKm);
-            if (saved.targetTimeS != null) setTargetTimeInput(formatDuration(saved.targetTimeS));
+            if (saved.id === goalCourseId) navigate("race");
+            else navigate("race", "courses", saved.id);
           });
         }}
         formInputs={formInputs}

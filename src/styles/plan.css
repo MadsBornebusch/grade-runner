@@ -2202,3 +2202,18 @@ a.button-primary,
 a.button-ghost {
   text-decoration: none;
 }
+
+/* ---------- Course page header ---------- */
+
+.course-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.course-head__title {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--fs-xl);
+  overflow-wrap: anywhere;
+}
