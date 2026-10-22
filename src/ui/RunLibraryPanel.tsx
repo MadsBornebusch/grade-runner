@@ -34,6 +34,7 @@ import {
   subscribeToAutoFetch,
 } from "./autoFetchRuns";
 import { getBackfillStatus, runBackfillBatch, subscribeToBackfill } from "./backfillRuns";
+import { loadLastBackfillDate, saveLastBackfillDate } from "./syncOnOpen";
 import {
   getRunFitStatus,
   MIN_HR_CALIBRATION_R_SQUARED,
@@ -107,31 +108,6 @@ function twoYearsAgoDateInput(): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Persists the backfill "from" date across sessions (same localStorage
- * pattern as formInputs.ts's own settings) -- so a returning user doesn't
- * have to remember or re-enter it, and clicking the same button again
- * naturally becomes an incremental update: after a successful backfill,
- * this is advanced to today, so next time there's nothing to re-scan
- * except whatever's genuinely new since then. */
-const LAST_BACKFILL_DATE_STORAGE_KEY = "grade-runner:lastBackfillDate";
-
-function loadLastBackfillDate(): string | null {
-  try {
-    return localStorage.getItem(LAST_BACKFILL_DATE_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function saveLastBackfillDate(dateInput: string): void {
-  try {
-    localStorage.setItem(LAST_BACKFILL_DATE_STORAGE_KEY, dateInput);
-  } catch {
-    // Storage can fail (private browsing, quota) -- losing the saved date
-    // just means the next visit falls back to the one-year-ago default,
-    // not a functional break.
-  }
-}
 
 /** Which values `fitTauFInfWithSupportGate` actually applied, if any -- the
  * tau-only fit and the joint fInf/tau fit are two independently-run,
@@ -351,16 +327,6 @@ export function RunLibraryPanel({
     });
   }, [backfillFrom, markNewFetchCandidates, refresh]);
 
-  // Incremental sync on every app open (this panel stays mounted in the
-  // hidden Settings tab), once a first backfill has set the saved date: the
-  // plan reads new runs without a trip to Settings. The first, two-year
-  // backfill stays a deliberate click.
-  const syncedOnOpenRef = useRef(false);
-  useEffect(() => {
-    if (!stravaConnected || syncedOnOpenRef.current || !loadLastBackfillDate()) return;
-    syncedOnOpenRef.current = true;
-    runBackfill();
-  }, [stravaConnected, runBackfill]);
 
   const ceilingParams = resolveCeilingParams(formInputs);
 

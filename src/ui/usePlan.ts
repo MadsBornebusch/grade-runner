@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { buildHistory } from "../plan/historyCache";
 import { dayNumberOf, type DatedHistoryRun } from "../plan/historyFromRuns";
 import { ladderStart } from "../plan/carbLadder";
@@ -34,6 +34,8 @@ export interface PlanState {
   snapshot: PlanSnapshot | null;
   blocker: PlanBlocker | null;
   predicting: boolean;
+  /** The generator threw for these inputs. */
+  error: string | null;
   today: number;
   replanNow: () => void;
 }
@@ -41,7 +43,7 @@ export interface PlanState {
 /** Runs -> history -> plan, re-planned only when planFromSettings.ts's
  * rule says so. Also keeps the goal race's cached prediction in step with
  * the athlete's settings. */
-export function usePlan(formInputs: FormInputs): PlanState {
+export function usePlan(formInputs: FormInputs, pausePrediction = false): PlanState {
   const settings = planSettingsStore.use();
   const { snapshot } = planSnapshotStore.use();
   const logs = fuelLogStore.use().byRunId;
@@ -50,14 +52,19 @@ export function usePlan(formInputs: FormInputs): PlanState {
   const [progress, setProgress] = useState<PlanState["progress"]>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [predicting, setPredicting] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
   const today = todayDayNumber();
 
   // Reload the runs whenever a sync or points download finishes.
   const backfillRunning = useSyncExternalStore(subscribeToBackfill, getBackfillStatus).running;
   const autoFetchRunning = useSyncExternalStore(subscribeToAutoFetch, getAutoFetchStatus).running;
   const syncing = backfillRunning || autoFetchRunning;
+  // Only on a running -> idle transition: each load reads every stored
+  // track from IndexedDB, which is the slow part of opening the app.
+  const wasSyncingRef = useRef(syncing);
   useEffect(() => {
-    if (!syncing) setReloadKey((k) => k + 1);
+    if (wasSyncingRef.current && !syncing) setReloadKey((k) => k + 1);
+    wasSyncingRef.current = syncing;
   }, [syncing]);
 
   useEffect(() => {
@@ -84,26 +91,31 @@ export function usePlan(formInputs: FormInputs): PlanState {
   const race = settings.goalRace;
   const wantKey = predictionKey(formInputs);
   useEffect(() => {
-    if (!race || race.predictionKey === wantKey) return;
+    if (!race || race.predictionKey === wantKey || pausePrediction) return;
     let cancelled = false;
     setPredicting(true);
     const timer = setTimeout(async () => {
       try {
         const course = (await listStoredCourses()).find((c) => c.id === race.courseId);
         if (cancelled || !course) return;
+        const t0 = performance.now();
         const facts = courseFacts(course, formInputs);
+        console.info(`[plan] race prediction took ${Math.round(performance.now() - t0)} ms`);
         planSettingsStore.set((s) => (s.goalRace?.courseId === race.courseId ? { ...s, goalRace: { ...s.goalRace, ...facts, predictionKey: wantKey } } : s));
+      } catch {
+        // The plan keeps the last prediction.
       } finally {
         if (!cancelled) setPredicting(false);
       }
-    }, 50);
+    }, 1500);
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      setPredicting(false);
     };
     // formInputs is fully represented by wantKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [race?.courseId, race?.predictionKey, wantKey]);
+  }, [race?.courseId, race?.predictionKey, wantKey, pausePrediction]);
 
   const carbs = useMemo(() => {
     const runs = (history ?? []).map((r) => ({ runId: r.runId, day: r.day, movingMin: r.movingMin }));
@@ -115,8 +127,14 @@ export function usePlan(formInputs: FormInputs): PlanState {
       if (!history) return;
       const key = planInputsKey(settings, carbs);
       if (!force && (!key || !needsReplan(snapshot, today, key))) return;
-      const out = planFromSettings(history, settings, today, carbs);
-      if ("snapshot" in out) planSnapshotStore.set({ version: 1, snapshot: out.snapshot });
+      // A generator failure shows as a card; it must not take the app down.
+      try {
+        const out = planFromSettings(history, settings, today, carbs);
+        if ("snapshot" in out) planSnapshotStore.set({ version: 1, snapshot: out.snapshot });
+        setPlanError(null);
+      } catch (err) {
+        setPlanError(err instanceof Error ? err.message : String(err));
+      }
     },
     [history, settings, carbs, snapshot, today],
   );
@@ -135,6 +153,7 @@ export function usePlan(formInputs: FormInputs): PlanState {
     snapshot: blocker ? null : snapshot,
     blocker,
     predicting,
+    error: planError,
     today,
     replanNow: () => generate(true),
   };

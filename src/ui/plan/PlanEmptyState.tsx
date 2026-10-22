@@ -44,6 +44,8 @@ export function PlanEmptyState({ plan, raceName, navigate }: { plan: PlanState; 
         action={{ label: "Open Settings", onClick: () => navigate("settings") }}
       />
     );
+  if (plan.error && !plan.snapshot)
+    return <Empty icon={CalendarDots} tone="quality" title="Couldn't make a plan" text={`Something in the plan settings tripped it up (${plan.error}). Try changing the race date or your week.`} />;
   if (!plan.history || !plan.snapshot)
     return (
       <Empty

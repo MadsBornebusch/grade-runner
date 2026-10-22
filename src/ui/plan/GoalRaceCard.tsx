@@ -9,7 +9,8 @@ import { runPipeline } from "../../gpx/pipeline";
 import { formatDuration, parseDurationToSeconds } from "../format";
 import type { FormInputs } from "../formInputs";
 import { predictFinishS } from "../solverInputs";
-import type { PlanState } from "../usePlan";
+import { TIME_ZONE, type PlanState } from "../usePlan";
+import { localDateKey } from "../../plan/loadLedger";
 import { shortDate } from "./planCopy";
 
 interface GoalRaceCardProps {
@@ -163,7 +164,7 @@ function GoalRaceForm({ courses, initial, onDone, canCancel }: { courses: Stored
   const [name, setName] = useState(initial?.name ?? "");
   const [date, setDate] = useState(initial?.date ?? "");
   const course = courses.find((c) => c.id === courseId);
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = localDateKey(new Date(), TIME_ZONE);
   const valid = !!course && !!date && date >= todayIso;
   return (
     <form

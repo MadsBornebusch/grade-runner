@@ -2,7 +2,7 @@ import { ArrowLeft, FlagCheckered, Path, Warning } from "@phosphor-icons/react";
 import type { DatedHistoryRun } from "../../plan/historyFromRuns";
 import type { Plan } from "../../plan/planGenerator";
 import { PHASE_LABEL, formatMinutes, shortDate } from "./planCopy";
-import { planWarnings } from "./planViewModel";
+import { planWarnings, weekProgress } from "./planViewModel";
 
 interface PlanOverviewProps {
   plan: Plan;
@@ -123,7 +123,7 @@ export function PlanOverview({ plan, raceName, raceDay, expectedHours, generic, 
                     <span className={`phase-dot phase-${w.phase}`} /> {PHASE_LABEL[w.phase]}
                   </td>
                   <td className="right num">
-                    {(w.plannedMinutes / 60).toFixed(1)}
+                    {(weekProgress(w, history, today).plannedMin / 60).toFixed(1)}
                     {w.budgetBinds && <span className="muted" title="Hours full"> ▪</span>}
                   </td>
                   <td className="right num">

@@ -8,6 +8,7 @@ import { useStravaSession } from "./ui/useStravaSession";
 import { getRunFitStatus, subscribeToRunFit } from "./ui/runFitBatch";
 import { useHashRoute, type TabId } from "./ui/useHashRoute";
 import { usePlan } from "./ui/usePlan";
+import { syncOnOpen } from "./ui/syncOnOpen";
 import { TodayTab } from "./ui/tabs/TodayTab";
 import { ScheduleTab } from "./ui/tabs/ScheduleTab";
 import { PlanSettingsSection } from "./ui/plan/PlanSettingsSection";
@@ -19,7 +20,17 @@ function App() {
   const route = useHashRoute("today");
   const [formInputs, setFormInputs] = useState(() => loadFormInputs());
   const { connected: stravaConnected } = useStravaSession();
-  const plan = usePlan(formInputs);
+  // Re-predicting the race is a long solve: not while typing in Settings.
+  const plan = usePlan(formInputs, route.tab === "settings");
+  useEffect(() => {
+    if (stravaConnected) syncOnOpen();
+  }, [stravaConnected]);
+  // Settings (with the run library's heavy fit memos) mounts on its first
+  // visit and stays mounted after, so it doesn't slow every app open.
+  const [settingsVisited, setSettingsVisited] = useState(false);
+  useEffect(() => {
+    if (route.tab === "settings") setSettingsVisited(true);
+  }, [route.tab]);
 
   // Fit runs as a module-level process (runFitBatch.ts), independent of
   // whether the Settings tab is showing -- see that file's own doc. This
@@ -97,31 +108,33 @@ function App() {
           />
         </div>
         <div {...show("settings")}>
-          <SettingsTab
-            formInputs={formInputs}
-            onChange={setFormInputs}
-            onApplySurfaceCostMultipliers={(surfaceCostMultipliers) => setFormInputs((prev) => ({ ...prev, surfaceCostMultipliers }))}
-            onApplyDescentCapCurve={(descentCapCurve) => setFormInputs((prev) => ({ ...prev, descentCapCurve }))}
-            onApplyDurationCeiling={(powerLawFraction60Min, powerLawExponent) =>
-              // Switching to powerLaw here is the point: the fit only runs on
-              // confirmed races and only applies above its support gates, so a
-              // non-defaults result IS the evidence that this athlete's own
-              // curve is better than the exponential default.
-              setFormInputs((prev) => ({ ...prev, powerLawFraction60Min, powerLawExponent }))
-            }
-            onApplyAnaerobicCapacityMin={(anaerobicCapacityMin) => setFormInputs((prev) => ({ ...prev, anaerobicCapacityMin }))}
-            onApplyHrCalibration={(hrPowerCalibrationSlope, hrPowerCalibrationIntercept) =>
-              setFormInputs((prev) => ({ ...prev, hrPowerCalibrationSlope, hrPowerCalibrationIntercept }))
-            }
-            onApplyPacingMargin={(fit) =>
-              setFormInputs((prev) => ({
-                ...prev,
-                pacingMargin: { marginFInf: fit.marginFInf, marginTauHours: fit.marginTauHours, bestUpsideOffset: fit.bestUpsideOffset },
-              }))
-            }
-            onAddVo2MaxEntry={(entry: Vo2MaxEntry) => setFormInputs((prev) => ({ ...prev, vo2MaxHistory: [...prev.vo2MaxHistory, entry] }))}
-            planSection={<PlanSettingsSection plan={plan} formInputs={formInputs} onChange={setFormInputs} />}
-          />
+          {(settingsVisited || route.tab === "settings") && (
+            <SettingsTab
+              formInputs={formInputs}
+              onChange={setFormInputs}
+              onApplySurfaceCostMultipliers={(surfaceCostMultipliers) => setFormInputs((prev) => ({ ...prev, surfaceCostMultipliers }))}
+              onApplyDescentCapCurve={(descentCapCurve) => setFormInputs((prev) => ({ ...prev, descentCapCurve }))}
+              onApplyDurationCeiling={(powerLawFraction60Min, powerLawExponent) =>
+                // Switching to powerLaw here is the point: the fit only runs on
+                // confirmed races and only applies above its support gates, so a
+                // non-defaults result IS the evidence that this athlete's own
+                // curve is better than the exponential default.
+                setFormInputs((prev) => ({ ...prev, powerLawFraction60Min, powerLawExponent }))
+              }
+              onApplyAnaerobicCapacityMin={(anaerobicCapacityMin) => setFormInputs((prev) => ({ ...prev, anaerobicCapacityMin }))}
+              onApplyHrCalibration={(hrPowerCalibrationSlope, hrPowerCalibrationIntercept) =>
+                setFormInputs((prev) => ({ ...prev, hrPowerCalibrationSlope, hrPowerCalibrationIntercept }))
+              }
+              onApplyPacingMargin={(fit) =>
+                setFormInputs((prev) => ({
+                  ...prev,
+                  pacingMargin: { marginFInf: fit.marginFInf, marginTauHours: fit.marginTauHours, bestUpsideOffset: fit.bestUpsideOffset },
+                }))
+              }
+              onAddVo2MaxEntry={(entry: Vo2MaxEntry) => setFormInputs((prev) => ({ ...prev, vo2MaxHistory: [...prev.vo2MaxHistory, entry] }))}
+              planSection={<PlanSettingsSection plan={plan} formInputs={formInputs} onChange={setFormInputs} />}
+            />
+          )}
         </div>
       </main>
     </div>

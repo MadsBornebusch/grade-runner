@@ -48,7 +48,14 @@ export async function buildHistory(runs: StoredRun[], timeZone: string, onProgre
     else todo.push(run);
   }
   for (let i = 0; i < todo.length; i += CHUNK) {
-    for (const run of todo.slice(i, i + CHUNK)) keep[keyOf(run)] = historyRunFromStored(run, timeZone);
+    for (const run of todo.slice(i, i + CHUNK)) {
+      // One unreadable run is left out, not the whole history.
+      try {
+        keep[keyOf(run)] = historyRunFromStored(run, timeZone);
+      } catch {
+        keep[keyOf(run)] = null;
+      }
+    }
     onProgress?.(Math.min(todo.length, i + CHUNK), todo.length);
     await nextFrame();
   }

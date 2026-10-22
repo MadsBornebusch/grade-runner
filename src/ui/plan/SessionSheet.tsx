@@ -1,7 +1,7 @@
 import { Info } from "@phosphor-icons/react";
 import type { DatedHistoryRun } from "../../plan/historyFromRuns";
 import type { PlannedSession } from "../../plan/planGenerator";
-import { SESSION_GUARD_MULTIPLE } from "../../plan/sessionGuard";
+import { GUARD_FLOORS, SESSION_GUARD_MULTIPLE } from "../../plan/sessionGuard";
 import { Sheet } from "./Sheet";
 import { KIND_TITLE, dayLabel, distanceLine, formatMinutes, formatMinutesExact, howToRun } from "./planCopy";
 
@@ -79,10 +79,11 @@ export function SessionSheet({ session: s, runs, raceName, raceGPerH, strengthCo
             <Info size={16} /> Why the limit?
           </summary>
           <p>
-            No run more than 10% beyond your biggest of the last 30 days (
-            {formatMinutesExact(ref.movingMin / SESSION_GUARD_MULTIPLE)}, {(ref.distanceKm / SESSION_GUARD_MULTIPLE).toFixed(0)} km). Today's limit:
-            {" "}{formatMinutesExact(ref.movingMin)}, {Math.round(ref.distanceKm)} km, {Math.round(ref.descentM / 10) * 10} m down. Small steps keep you
-            injury-free.
+            {ref.movingMin <= GUARD_FLOORS.movingMin * SESSION_GUARD_MULTIPLE
+              ? "A starting limit until you have a few weeks of longer runs."
+              : `No run more than 10% beyond your biggest of the last 30 days (${formatMinutesExact(ref.movingMin / SESSION_GUARD_MULTIPLE)}, ${(ref.distanceKm / SESSION_GUARD_MULTIPLE).toFixed(0)} km).`}{" "}
+            Today's limit: {formatMinutesExact(ref.movingMin)}, {Math.round(ref.distanceKm)} km, {Math.round(ref.descentM / 10) * 10} m down. Small steps keep
+            you injury-free.
           </p>
         </details>
       )}
