@@ -29,9 +29,9 @@ export function saveLastBackfillDate(dateInput: string): void {
 let synced = false;
 
 /** Incremental Strava sync on app open, once a first backfill (a
- * deliberate click in Settings) has set the saved date: the plan reads new
- * runs without a trip to Settings. Once per page load. Choosing which new
- * runs to download in full stays with Settings, which marks them when it
+ * deliberate click on the Runs tab) has set the saved date: the plan reads new
+ * runs without a trip to Runs. Once per page load. Choosing which new
+ * runs to download in full stays with Runs, which marks them when it
  * next opens. */
 export function syncOnOpen(): void {
   const from = loadLastBackfillDate();

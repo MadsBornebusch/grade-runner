@@ -37,7 +37,7 @@
   bottom: 0;
   z-index: 20;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   height: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
   background: color-mix(in srgb, var(--surface-raised) 92%, transparent);
@@ -74,7 +74,7 @@
   position: relative;
   display: grid;
   place-items: center;
-  width: 60px;
+  width: 56px;
   height: 32px;
   border-radius: var(--r-pill);
   transition: background-color var(--dur-med) var(--ease-out);

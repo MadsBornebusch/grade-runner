@@ -297,9 +297,9 @@ interface LtThresholdFieldProps {
  * LT1/LT2 as either a raw %VO2max fraction (the base representation) or a
  * pace + heart rate the athlete actually knows -- pace converts to the
  * equivalent fraction via the same Minetti pace->power conversion the fat-ox
- * curve uses (paceToVo2MaxFraction); heart rate is reference-only (this
- * app's ceiling model is power/pace-based, not HR-based) and just carried
- * alongside for the athlete's own record.
+ * curve uses (paceToVo2MaxFraction). Heart rate is entered in either mode:
+ * the ceiling model is power/pace-based and ignores it, but the training
+ * plan's effort targets and the threshold HR calibration use it.
  */
 function LtThresholdField({
   label,
@@ -324,8 +324,16 @@ function LtThresholdField({
           checked={usingPace}
           onChange={(e) => onPaceChange(e.target.checked ? defaultPaceMinPerKm : null)}
         />
-        <span>Enter {label} as pace + pulse instead</span>
+        <span>Enter {label} as pace instead</span>
       </label>
+      <NumberField
+        label={`${label} heart rate`}
+        hint="bpm, sets the plan's heart-rate targets"
+        value={heartRateBpm ?? 0}
+        step={1}
+        min={0}
+        onChange={(v) => onHeartRateChange(v > 0 ? v : null)}
+      />
       {!usingPace && (
         <NumberField
           label={label}
@@ -346,14 +354,6 @@ function LtThresholdField({
             step={0.05}
             min={2}
             onChange={onPaceChange}
-          />
-          <NumberField
-            label={`${label} heart rate`}
-            hint="bpm, reference only -- not used in any calculation"
-            value={heartRateBpm ?? 0}
-            step={1}
-            min={0}
-            onChange={(v) => onHeartRateChange(v > 0 ? v : null)}
           />
           <p className="field-group-note">
             ≈ {(paceToVo2MaxFraction(paceMinPerKm, walkMaxMs, vo2Max) * 100).toFixed(0)}% of VO2max

@@ -1,8 +1,9 @@
-import { CalendarDots, GearSix, Mountains, SunHorizon, type Icon } from "@phosphor-icons/react";
+import { CalendarDots, Footprints, GearSix, Mountains, SunHorizon, type Icon } from "@phosphor-icons/react";
 import type { TabId } from "./useHashRoute";
 
 const TABS: { id: TabId; label: string; icon: Icon }[] = [
   { id: "today", label: "Today", icon: SunHorizon },
+  { id: "runs", label: "Runs", icon: Footprints },
   { id: "schedule", label: "Schedule", icon: CalendarDots },
   { id: "race", label: "Goal race", icon: Mountains },
   { id: "settings", label: "Settings", icon: GearSix },
@@ -11,7 +12,7 @@ const TABS: { id: TabId; label: string; icon: Icon }[] = [
 interface TabBarProps {
   active: TabId;
   onSelect: (tab: TabId) => void;
-  /** Tabs that carry a dot, e.g. Settings when a fit result is waiting. */
+  /** Tabs that carry a dot, e.g. Runs when a model update failed. */
   badges?: Partial<Record<TabId, string>>;
 }
 

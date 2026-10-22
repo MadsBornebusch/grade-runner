@@ -40,8 +40,8 @@ export function PlanEmptyState({ plan, raceName, navigate }: { plan: PlanState; 
         icon={CloudArrowDown}
         tone="quality"
         title="No runs yet"
-        text="Your plan is sized from your recent running. Connect Strava in Settings and bring in your runs."
-        action={{ label: "Open Settings", onClick: () => navigate("settings") }}
+        text="Your plan is sized from your recent running. Connect Strava in Runs and bring in your runs."
+        action={{ label: "Open Runs", onClick: () => navigate("runs") }}
       />
     );
   if (plan.error && !plan.snapshot)

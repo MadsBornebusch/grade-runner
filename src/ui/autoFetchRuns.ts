@@ -182,7 +182,7 @@ export async function runAutoFetchBatch(pending: StoredRun[], onDone: () => void
   if (rateLimited) {
     error = `Fetched ${fetched} of ${total} recommended runs -- Strava's rate limit kicked in. Paused; retries automatically in about 15 minutes.`;
   } else if (sessionExpired) {
-    error = "Your Strava session expired. Reconnect Strava in Settings, then this will pick up where it left off.";
+    error = "Your Strava session expired. Reconnect Strava in Runs, then this will pick up where it left off.";
   } else if (realFailures > 0) {
     const noGpsNote = skippedNoGps > 0 ? `, and skipped ${skippedNoGps} with no GPS data` : "";
     error = `Fetched ${fetched} of ${total} recommended runs -- ${realFailures} failed${noGpsNote}. Try again shortly.`;

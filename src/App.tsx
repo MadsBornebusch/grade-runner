@@ -3,6 +3,7 @@ import { TabBar } from "./ui/TabBar";
 import { RaceTab } from "./ui/tabs/RaceTab";
 import { RACE_SEGMENTS, type RaceSegment } from "./ui/tabs/raceSegments";
 import { SettingsTab } from "./ui/tabs/SettingsTab";
+import { RunsTab } from "./ui/tabs/RunsTab";
 import { loadFormInputs, saveFormInputs, type FormInputs, type Vo2MaxEntry } from "./ui/formInputs";
 import { useStravaSession } from "./ui/useStravaSession";
 import { getRunFitStatus, subscribeToRunFit } from "./ui/runFitBatch";
@@ -25,30 +26,29 @@ function App() {
   useEffect(() => {
     if (stravaConnected) syncOnOpen();
   }, [stravaConnected]);
-  // Settings (with the run library's heavy fit memos) mounts on its first
+  // Runs (with the run library's heavy fit memos) mounts on its first
   // visit and stays mounted after, so it doesn't slow every app open.
-  const [settingsVisited, setSettingsVisited] = useState(false);
+  const [runsVisited, setRunsVisited] = useState(false);
   useEffect(() => {
-    if (route.tab === "settings") setSettingsVisited(true);
+    if (route.tab === "runs") setRunsVisited(true);
   }, [route.tab]);
 
   // Fit runs as a module-level process (runFitBatch.ts), independent of
-  // whether the Settings tab is showing -- see that file's own doc. This
-  // just surfaces a badge on the Settings tab when a fit finished (success
-  // or error) while another tab was showing, so leaving Settings to do
-  // something else doesn't mean losing track of when the result lands.
+  // whether the Runs tab is showing -- see that file's own doc. This just
+  // surfaces a badge on the Runs tab when a fit finished (success or
+  // error) while another tab was showing.
   const runFitStatus = useSyncExternalStore(subscribeToRunFit, getRunFitStatus);
   const [hasUnseenFitResult, setHasUnseenFitResult] = useState(false);
   const wasFitRunningRef = useRef(runFitStatus.running);
-  const settingsShowing = route.tab === "settings";
+  const runsShowing = route.tab === "runs";
   useEffect(() => {
     const justFinished = wasFitRunningRef.current && !runFitStatus.running && (runFitStatus.result || runFitStatus.error);
     wasFitRunningRef.current = runFitStatus.running;
-    if (justFinished && !settingsShowing) setHasUnseenFitResult(true);
-  }, [runFitStatus, settingsShowing]);
+    if (justFinished && !runsShowing) setHasUnseenFitResult(true);
+  }, [runFitStatus, runsShowing]);
   useEffect(() => {
-    if (settingsShowing) setHasUnseenFitResult(false);
-  }, [settingsShowing]);
+    if (runsShowing) setHasUnseenFitResult(false);
+  }, [runsShowing]);
 
   useEffect(() => {
     saveFormInputs(formInputs);
@@ -88,7 +88,7 @@ function App() {
       <TabBar
         active={route.tab}
         onSelect={(tab) => route.navigate(tab)}
-        badges={hasUnseenFitResult ? { settings: "your fit result is ready" } : {}}
+        badges={hasUnseenFitResult ? { runs: "your fit result is ready" } : {}}
       />
       <main className="app-main">
         <div {...show("today")}>
@@ -107,11 +107,10 @@ function App() {
             plan={plan}
           />
         </div>
-        <div {...show("settings")}>
-          {(settingsVisited || route.tab === "settings") && (
-            <SettingsTab
+        <div {...show("runs")}>
+          {(runsVisited || route.tab === "runs") && (
+            <RunsTab
               formInputs={formInputs}
-              onChange={setFormInputs}
               onApplySurfaceCostMultipliers={(surfaceCostMultipliers) => setFormInputs((prev) => ({ ...prev, surfaceCostMultipliers }))}
               onApplyDescentCapCurve={(descentCapCurve) => setFormInputs((prev) => ({ ...prev, descentCapCurve }))}
               onApplyDurationCeiling={(powerLawFraction60Min, powerLawExponent) =>
@@ -132,9 +131,15 @@ function App() {
                 }))
               }
               onAddVo2MaxEntry={(entry: Vo2MaxEntry) => setFormInputs((prev) => ({ ...prev, vo2MaxHistory: [...prev.vo2MaxHistory, entry] }))}
-              planSection={<PlanSettingsSection plan={plan} formInputs={formInputs} onChange={setFormInputs} />}
             />
           )}
+        </div>
+        <div {...show("settings")}>
+          <SettingsTab
+            formInputs={formInputs}
+            onChange={setFormInputs}
+            planSection={<PlanSettingsSection plan={plan} formInputs={formInputs} onChange={setFormInputs} />}
+          />
         </div>
       </main>
     </div>

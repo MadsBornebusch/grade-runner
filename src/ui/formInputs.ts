@@ -44,10 +44,9 @@ export interface FormInputs {
    * thresholds in pace terms rather than an abstract VO2max fraction. */
   lt1PaceMinPerKm: number | null;
   lt2PaceMinPerKm: number | null;
-  /** Reference-only -- this app's ceiling model is power/pace-based, not
-   * HR-based, so these aren't fed into any calculation. Captured purely so
-   * an athlete entering pace-based thresholds can record the heart rate
-   * they saw there too. */
+  /** Not fed into the ceiling model (power/pace-based), but they set the
+   * training plan's heart-rate targets (ui/plan/intensity.ts) and anchor
+   * the threshold HR calibration (hrCalibration.ts). */
   lt1HeartRateBpm: number | null;
   lt2HeartRateBpm: number | null;
   /** Power-law anchor: sustainable fraction of VO2max at 60 minutes. Should
