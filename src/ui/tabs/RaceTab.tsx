@@ -39,6 +39,9 @@ import {
   type FormInputs,
 } from "../formInputs";
 import { RACE_SEGMENTS, type RaceSegment } from "./raceSegments";
+import { buildSolverInputs } from "../solverInputs";
+import { GoalRaceCard } from "../plan/GoalRaceCard";
+import type { PlanState } from "../usePlan";
 
 
 interface RaceTabProps {
@@ -49,11 +52,12 @@ interface RaceTabProps {
   active: boolean;
   segment: RaceSegment;
   onSegmentChange: (segment: RaceSegment) => void;
+  plan: PlanState;
 }
 
 /** The race planner: course library, pacing plan and run analysis, the
  * three pages that used to be the app's carousel. */
-export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentChange }: RaceTabProps) {
+export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentChange, plan }: RaceTabProps) {
   const resultMode = segment === "analyze" ? "analysis" : "planning";
   const frozen = !active;
   const [addCourseOpen, setAddCourseOpen] = useState(false);
@@ -193,23 +197,7 @@ export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentC
       lastSolverInputsRef.current = null;
       return null;
     }
-    const { lt1Fraction, lt2Fraction } = resolveLt1Lt2Fractions(formInputs);
-    const { x0, k, intensityIsAbsolutePower } = resolveSubstrateAnchors({ ...formInputs, lt1Fraction, lt2Fraction });
-    const built: SolverInputs = {
-      segments: courseResult.segments,
-      bodyMassKg: formInputs.bodyMassKg,
-      ceilingParams: resolveCeilingParams(formInputs),
-      substrateParams: { x0, k, intensityIsAbsolutePower, foPeakGPerMin: formInputs.foPeakGPerMin },
-      fueling: { intakeGPerH: formInputs.intakeGPerH },
-      glycogenStoreG: resolveGlycogenStoreG(formInputs),
-      walkMaxMs: formInputs.walkMaxMs,
-      forceWalkAboveGrade: formInputs.forceWalkAboveGrade ?? undefined,
-      altitudeAdjustment: formInputs.altitudeAdjustment,
-      unpavedCostMultiplier: formInputs.unpavedCostMultiplier,
-      surfaceCostMultipliers: formInputs.surfaceCostMultipliers ?? undefined,
-      anaerobicCapacityMin: formInputs.anaerobicCapacityMin,
-      descentCapCurve: formInputs.descentCapCurve ?? undefined,
-    };
+    const built = buildSolverInputs(courseResult.segments, formInputs);
     lastSolverInputsRef.current = built;
     return built;
     // Narrow, explicit field list -- the whole solver cascade downstream
@@ -516,6 +504,15 @@ export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentC
             id: "course",
             content: (
               <>
+                <GoalRaceCard
+                  formInputs={formInputs}
+                  plan={plan}
+                  refreshKey={courseLibraryVersion}
+                  onOpenPacing={(course) => {
+                    loadCourse(course.points, course.name, course.id, course.savedPointsKm, course.targetTimeS);
+                    onSegmentChange("pacing");
+                  }}
+                />
                 <CourseLibraryPanel
                   selectedCourseId={currentCourseId}
                   refreshKey={courseLibraryVersion}

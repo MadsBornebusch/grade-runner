@@ -213,3 +213,10 @@
      horizontally. */
   overflow-x: hidden;
 }
+
+/* The plan screens read as one column, also on desktop. */
+.tab-page--today,
+.tab-page--schedule {
+  max-width: var(--content-max);
+  margin: 0 auto;
+}

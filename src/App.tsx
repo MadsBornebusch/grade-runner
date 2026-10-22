@@ -7,13 +7,19 @@ import { loadFormInputs, saveFormInputs, type FormInputs, type Vo2MaxEntry } fro
 import { useStravaSession } from "./ui/useStravaSession";
 import { getRunFitStatus, subscribeToRunFit } from "./ui/runFitBatch";
 import { useHashRoute, type TabId } from "./ui/useHashRoute";
+import { usePlan } from "./ui/usePlan";
+import { TodayTab } from "./ui/tabs/TodayTab";
+import { ScheduleTab } from "./ui/tabs/ScheduleTab";
+import { PlanSettingsSection } from "./ui/plan/PlanSettingsSection";
 import "./App.css";
 import "./styles/shell.css";
+import "./styles/plan.css";
 
 function App() {
-  const route = useHashRoute("race");
+  const route = useHashRoute("today");
   const [formInputs, setFormInputs] = useState(() => loadFormInputs());
   const { connected: stravaConnected } = useStravaSession();
+  const plan = usePlan(formInputs);
 
   // Fit runs as a module-level process (runFitBatch.ts), independent of
   // whether the Settings tab is showing -- see that file's own doc. This
@@ -75,12 +81,10 @@ function App() {
       />
       <main className="app-main">
         <div {...show("today")}>
-          <h1 className="screen-title">Today</h1>
-          <p className="placeholder">Your training plan shows here once a goal race is set.</p>
+          {route.tab === "today" && <TodayTab plan={plan} formInputs={formInputs} navigate={route.navigate} />}
         </div>
         <div {...show("schedule")}>
-          <h1 className="screen-title">Schedule</h1>
-          <p className="placeholder">Your weekly schedule shows here once a goal race is set.</p>
+          {route.tab === "schedule" && <ScheduleTab plan={plan} formInputs={formInputs} rest={route.rest} navigate={route.navigate} />}
         </div>
         <div {...show("race")}>
           <RaceTab
@@ -89,6 +93,7 @@ function App() {
             active={route.tab === "race"}
             segment={raceSegment}
             onSegmentChange={(segment) => route.navigate("race", segment)}
+            plan={plan}
           />
         </div>
         <div {...show("settings")}>
@@ -115,6 +120,7 @@ function App() {
               }))
             }
             onAddVo2MaxEntry={(entry: Vo2MaxEntry) => setFormInputs((prev) => ({ ...prev, vo2MaxHistory: [...prev.vo2MaxHistory, entry] }))}
+            planSection={<PlanSettingsSection plan={plan} formInputs={formInputs} onChange={setFormInputs} />}
           />
         </div>
       </main>

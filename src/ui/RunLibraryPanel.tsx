@@ -351,6 +351,17 @@ export function RunLibraryPanel({
     });
   }, [backfillFrom, markNewFetchCandidates, refresh]);
 
+  // Incremental sync on every app open (this panel stays mounted in the
+  // hidden Settings tab), once a first backfill has set the saved date: the
+  // plan reads new runs without a trip to Settings. The first, two-year
+  // backfill stays a deliberate click.
+  const syncedOnOpenRef = useRef(false);
+  useEffect(() => {
+    if (!stravaConnected || syncedOnOpenRef.current || !loadLastBackfillDate()) return;
+    syncedOnOpenRef.current = true;
+    runBackfill();
+  }, [stravaConnected, runBackfill]);
+
   const ceilingParams = resolveCeilingParams(formInputs);
 
   // Lab-derived HR calibration -- from the athlete's own entered LT1/LT2

@@ -48,7 +48,11 @@ export function historyRunFromStored(run: StoredRun, timeZone: string): DatedHis
 
 /** Typical values for a generic athlete, used until enough runs have points. */
 const GENERIC_OPTIONS: PlanOptions = { easyDensity: 70, maxDensity: 85, speedKmh: 9, maxDescentPerHour: 300, maxSteepDescentPerHour: 100 };
-const MIN_RUNS_FOR_OWN_OPTIONS = 20;
+export const MIN_RUNS_FOR_OWN_OPTIONS = 20;
+
+/** True when planOptionsFromHistory falls back to the generic values. */
+export const usesGenericPlanOptions = (history: DatedHistoryRun[]) =>
+  history.filter((r) => r.source === "points" && r.movingMin >= 30).length < MIN_RUNS_FOR_OWN_OPTIONS;
 
 /** The generator's density, speed and descent options from the athlete's
  * own points-based runs of 30+ min: median and 90th-percentile load per
