@@ -162,12 +162,17 @@ export function StravaImport({ onImport }: StravaImportProps) {
             type="date"
             className="field-input"
             value={dateInput}
-            onChange={(e) => {
-              setDateInput(e.target.value);
-              if (e.target.value) void loadActivities(1, false, endOfDayEpoch(e.target.value));
-            }}
+            onChange={(e) => setDateInput(e.target.value)}
           />
         </label>
+        <button
+          type="button"
+          className="button-ghost button-small"
+          onClick={() => void loadActivities(1, false, endOfDayEpoch(dateInput))}
+          disabled={!dateInput || listLoading}
+        >
+          Show
+        </button>
       </div>
 
       {error && <p className="help danger">{error}</p>}

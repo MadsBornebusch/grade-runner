@@ -22,7 +22,7 @@ export function AnalysisSummary({ result, totalDistanceM, summaryStats }: Analys
     <div className={`card results-summary ${result.bonked ? "results-summary--warn" : "results-summary--ok"}`}>
       <div
         className="results-summary__stat"
-        title="The moving-time-weighted average of your actual power vs. your sustainable aerobic ceiling at each point in the run. Unlike Planning's Effort, this is descriptive, not a solved target -- it can read over 100% if you ran harder than the ceiling model says was sustainable for that duration (a hard push, or a sign your athlete settings don't quite match your current fitness)."
+        title="The moving-time-weighted average of your actual power vs. your sustainable aerobic ceiling at each point in the run. Unlike a planned effort on Pacing, this is descriptive, not a solved target -- it can read over 100% if you ran harder than the ceiling model says was sustainable for that duration (a hard push, or a sign your athlete settings don't quite match your current fitness)."
       >
         <span className="results-summary__label">Effort</span>
         <span className="results-summary__value">{(result.avgEffortFraction * 100).toFixed(0)}%</span>
@@ -39,7 +39,7 @@ export function AnalysisSummary({ result, totalDistanceM, summaryStats }: Analys
       {(summaryStats.avgPaceMinPerKm !== null || summaryStats.avgHrBpm !== null) && (
         <div className="results-summary__averages">
           <span title="From your file's recorded distance and time.">Avg pace {formatMinPerKm(summaryStats.avgPaceMinPerKm)}</span>
-          <span title="Grade-adjusted pace -- your recorded pace re-expressed as an equivalent flat-ground pace, via the same cost model Planning uses. Modeled, not a raw recording.">
+          <span title="Grade-adjusted pace -- your recorded pace re-expressed as an equivalent flat-ground pace, via the same cost model Pacing uses. Modeled, not a raw recording.">
             GAP {formatMinPerKm(summaryStats.avgGapMinPerKm)}
           </span>
           {summaryStats.avgHrBpm !== null && (

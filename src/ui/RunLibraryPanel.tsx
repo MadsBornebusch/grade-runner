@@ -741,7 +741,7 @@ export function RunLibraryPanel({
                 <h4 className="lab__title">HR-effort calibration: from your training history</h4>
                 <p className="help">
                   Maps heart rate to effort fraction, fit from each race's early portion (least cardiac drift). Doesn't
-                  affect pace/power predictions -- used for HR-based effort estimates elsewhere (e.g. Analysis mode).
+                  affect pace/power predictions -- used for HR-based effort estimates elsewhere (e.g. on Analyze).
                 </p>
                 <p className="help">
                   Best fit: effort fraction ≈ {hrCalibrationFitResult.intercept.toFixed(3)} +{" "}
@@ -776,7 +776,7 @@ export function RunLibraryPanel({
                 <h4 className="lab__title">Pacing margin: chosen effort vs. race length</h4>
                 <p className="help">
                   How much of your fitted ceiling you actually hold, by race length -- fit from your confirmed races' own
-                  heart rate. Drives the "Chosen pacing" number shown with your predicted finish time.
+                  heart rate. Drives the "Likely" finish time on Pacing.
                 </p>
                 <p className="help">
                   Fit from {pacingMarginFitResult.raceCount} confirmed race{pacingMarginFitResult.raceCount === 1 ? "" : "s"}, spanning{" "}
@@ -850,7 +850,7 @@ export function RunLibraryPanel({
                 <h4 className="lab__title">Duration ceiling: how hard you can go, by race length</h4>
                 <p className="help">
                   The upper bound on sustainable effort as a function of race duration, fit as an envelope over your
-                  confirmed races -- the tightest curve that no race of yours sits above. Drives the "Theoretical ceiling"
+                  confirmed races -- the tightest curve that no race of yours sits above. Drives the "Ceiling"
                   finish time.
                 </p>
                 {durationCeilingFitResult.tier === "defaults" ? (

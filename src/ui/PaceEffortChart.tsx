@@ -48,7 +48,7 @@ export function PaceEffortChart({ actual, planned, plannedThetaFraction, highlig
         )}
       </div>
       <p className="help">
-        Actual pace and effort (solid) against the Planning page's solved pace for this course (dashed). The red
+        Actual pace and effort (solid) against the Pacing page's planned pace for this course (dashed). The red
         effort line is your actual power as a fraction of your modeled aerobic ceiling at that point in the race —
         it crossing above the grey 100% line marks a stretch run harder than the model thinks was sustainable there.
       </p>
