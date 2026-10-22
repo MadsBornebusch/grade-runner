@@ -40,7 +40,7 @@ export function CourseLibraryPanel({ onSelect, onAdd, refreshKey }: CourseLibrar
               <span>
                 <span className="course-list__name">{c.name}</span>
                 <span className="num muted course-list__facts">
-                  {(c.distanceM / 1000).toFixed(1)} km · {Math.round(c.elevationGainM).toLocaleString()} m up
+                  {(c.distanceM / 1000).toFixed(1)} km · {Math.round(c.elevationGainM).toLocaleString()} m
                   {c.id === goalCourseId && " · goal race"}
                 </span>
               </span>

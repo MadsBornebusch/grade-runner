@@ -95,7 +95,7 @@ export function AddCoursePanel({
           <section className="add-course__loaded">
             {fileName && <p className="add-course__name">{fileName}</p>}
             <p className="num muted">
-              {(courseResult.totalDistance3D / 1000).toFixed(1)} km · {courseResult.totalElevationGain.toFixed(0)} m up
+              {(courseResult.totalDistance3D / 1000).toFixed(1)} km · {courseResult.totalElevationGain.toFixed(0)} m
             </p>
             {!courseResult.hasElevation && <p className="help">No elevation in this file, so the course counts as flat.</p>}
             <details className="lab">

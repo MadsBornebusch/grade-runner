@@ -3,9 +3,9 @@ import type { TabId } from "./useHashRoute";
 
 const TABS: { id: TabId; label: string; icon: Icon }[] = [
   { id: "today", label: "Today", icon: SunHorizon },
-  { id: "runs", label: "Runs", icon: Footprints },
   { id: "schedule", label: "Schedule", icon: CalendarDots },
   { id: "race", label: "Goal race", icon: Mountains },
+  { id: "runs", label: "Runs", icon: Footprints },
   { id: "settings", label: "Settings", icon: GearSix },
 ];
 
