@@ -26,16 +26,15 @@ export function saveLastBackfillDate(dateInput: string): void {
   }
 }
 
-let synced = false;
+let synced: Promise<void> | null = null;
 
 /** Incremental Strava sync on app open, once a first backfill (a
- * deliberate click on the Runs tab) has set the saved date: the plan reads new
- * runs without a trip to Runs. Once per page load. Choosing which new
- * runs to download in full stays with Runs, which marks them when it
- * next opens. */
-export function syncOnOpen(): void {
+ * deliberate click on the Runs tab) has set the saved date: the plan reads
+ * new runs without a trip to Runs. Once per page load; resolves when the
+ * sync has finished (or failed), for modelRefresh.ts to follow. */
+export function syncOnOpen(): Promise<void> {
   const from = loadLastBackfillDate();
-  if (synced || !from) return;
-  synced = true;
-  void runBackfillBatch(from, () => saveLastBackfillDate(new Date().toISOString().slice(0, 10)));
+  if (!from) return Promise.resolve();
+  synced ??= runBackfillBatch(from, () => saveLastBackfillDate(new Date().toISOString().slice(0, 10)));
+  return synced;
 }

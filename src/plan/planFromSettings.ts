@@ -24,10 +24,17 @@ export interface CarbInputs {
   startGPerH: number;
 }
 
-/** Expected hours rounded to 15 min before they key a re-plan, so a small
- * change to a physiology setting doesn't reshuffle the current week. */
+/** Expected hours rounded to 15 min before they size a plan, so a small
+ * change to a physiology setting doesn't reshuffle the weeks. */
 export const roundedExpectedHours = (hours: number) => Math.round(hours * 4) / 4;
 
+/**
+ * What the athlete set: a change re-plans at once. The predicted finish is
+ * left out on purpose: it moves whenever the model learns from a new run
+ * (modelRefresh.ts refits after each sync), and that must not reshuffle
+ * the current week. A new prediction is picked up on Monday's re-plan, or
+ * with "Re-plan now". The athlete's own expected time is in.
+ */
 export function planInputsKey(settings: PlanSettings, carbs: CarbInputs): string | null {
   const race = settings.goalRace;
   const hours = race && expectedHoursOf(race);
@@ -35,7 +42,7 @@ export function planInputsKey(settings: PlanSettings, carbs: CarbInputs): string
   // The leading version bumps when the generator's output changes shape,
   // so stored snapshots regenerate.
   return JSON.stringify([
-    2, race.courseId, race.date, race.descentM, race.steepDescentM, roundedExpectedHours(hours),
+    3, race.courseId, race.date, race.descentM, race.steepDescentM, race.expectedHoursOverride,
     settings.schedule, settings.longRunMoves, carbs.raceGPerH, settings.carbsStartGPerH,
   ]);
 }

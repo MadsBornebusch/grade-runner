@@ -51,8 +51,10 @@ describe("needsReplan", () => {
     expect(needsReplan(null, today, key)).toBe(true);
   });
 
-  it("ignores a prediction change under the 15 min rounding", () => {
-    const nudged = { ...settings, goalRace: { ...settings.goalRace!, predictedFinishS: 6.12 * 3600 } };
-    expect(planInputsKey(nudged, carbs)).toBe(key);
+  it("waits for Monday on a new prediction, re-plans at once on the athlete's own time", () => {
+    const repredicted = { ...settings, goalRace: { ...settings.goalRace!, predictedFinishS: 5 * 3600 } };
+    expect(planInputsKey(repredicted, carbs)).toBe(key);
+    const own = { ...settings, goalRace: { ...settings.goalRace!, expectedHoursOverride: 7 } };
+    expect(needsReplan(snapshot, today, planInputsKey(own, carbs)!)).toBe(true);
   });
 });

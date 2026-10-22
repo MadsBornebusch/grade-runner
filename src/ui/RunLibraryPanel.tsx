@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { SurfaceCategory } from "../gpx/pipeline";
 import { runPipeline } from "../gpx/pipeline";
 import { analyzeRun } from "../model/analysis";
-import { DURABILITY_MIN_DURATION_S, selectFetchCandidateIds } from "../model/suggestRuns";
+import { DURABILITY_MIN_DURATION_S } from "../model/suggestRuns";
+import { DEFAULT_HALF_LIFE_DAYS, markNewFetchCandidates, saveFitInputsKeyAfterManualFit } from "./modelRefresh";
 import { dedupeStoredRuns } from "../model/dedupeRuns";
 import { splitAtTransitGaps } from "../gpx/transitGap";
 import { fitHrToPowerCalibrationFromThresholds, predictHeartRateFromPower } from "../model/hrCalibration";
@@ -12,7 +13,6 @@ import {
   clearStoredRuns,
   deleteStoredRun,
   listStoredRuns,
-  markRunsWantedForFetch,
   setStoredRunRaceTags,
   setVo2MaxEstimability,
   type StoredRun,
@@ -58,36 +58,6 @@ interface RunLibraryPanelProps {
   onAddVo2MaxEntry: (entry: Vo2MaxEntry) => void;
 }
 
-/** suggestRunsForFit's own default (10 per bucket) is deliberately small --
- * it exists to keep a MANUAL review list short (see that file's own doc:
- * "meant to replace manually scanning hundreds of rows, not to invite
- * fetching all of them"). That rationale doesn't apply once fetching is
- * fully automatic (no one is scanning rows) -- a 10-per-bucket cap
- * silently starved a real backfill of 280 summaries down to just 10
- * downloaded runs, nowhere near enough moving time to fit anything. This
- * is the PER-BUCKET pool size fed into suggestRunsForFit -- generous on
- * purpose, since AUTO_FETCH_TOTAL_CAP below is what actually bounds how
- * many get fetched; this just needs to be large enough that each bucket
- * has enough of its own pool to pick a good, diverse set from before that
- * final cap trims the combined list down. */
-const AUTO_FETCH_CANDIDATE_COUNT = 60;
-/** The REAL ceiling on how many runs get auto-fetched, across all
- * suggestion buckets combined -- suggestRunsForFit's own candidateCount
- * only bounds each bucket independently, so passing it
- * AUTO_FETCH_CANDIDATE_COUNT alone still let the deduped union balloon to
- * up to 3x that (a real 280-summary backfill produced 138 candidates, not
- * 60). This total is enforced by interleaving picks round-robin across the
- * buckets before truncating, so a big vo2max pool can't crowd out
- * the durability/duration-spread picks the tau fit actually needs.
- *
- * This is a cap on the LIFETIME marked set, not on one pass. Counting only
- * the current pass was the bug behind a library that grew to 122 marked
- * runs: every run that downloaded successfully dropped out of
- * suggestRunsForFit's `unfetched` pool, freeing its slot for the next-
- * ranked run, which the next Settings open then marked. The marked set
- * ratcheted up by roughly one new run per success and never converged, so
- * "needs to download N" refilled itself forever. */
-const AUTO_FETCH_TOTAL_CAP = 60;
 
 /** m/s as a min/km pace string -- the descent cap is stored as a speed but
  * is only legible to a runner as a pace. */
@@ -97,7 +67,6 @@ function paceFromMs(speedMs: number): string {
   return `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
 }
 
-const DEFAULT_HALF_LIFE_DAYS = 75;
 /** Only the strongest few estimates are shown -- see vo2MaxEstimates below
  * for why sorting by estimate descending is itself the intensity filter. */
 const MAX_VO2MAX_ESTIMATES_SHOWN = 3;
@@ -184,25 +153,6 @@ export function RunLibraryPanel({
 
   const refresh = useCallback(() => {
     listStoredRuns().then(setRuns).catch((err) => setError(String(err)));
-  }, []);
-
-  // Computes "which summary-only runs are worth fetching full data for"
-  // ONCE (via suggestRunsForFit + the same interleave-then-cap logic as
-  // before) and PERSISTS the decision (StoredRun.wantsFullData), rather
-  // than re-deriving it reactively on every render. Re-deriving reactively
-  // was the actual cause of fetches appearing to "fail and restart":
-  // listStoredRuns() (called by refresh()) returns a brand-new array every
-  // time even when nothing meaningful changed, so any refresh() firing
-  // anywhere (duplicate cleanup, a manual fit, etc.) gave the fetch
-  // effect's own dependency a new-but-similar list, aborting whatever
-  // iteration was in flight and restarting from a fresh (but nearly
-  // identical) batch. Marking is idempotent and cheap to call again with
-  // an unchanged candidate set (already-marked ids are just skipped).
-  const markNewFetchCandidates = useCallback(async () => {
-    const freshRuns = await listStoredRuns();
-    const { kept } = dedupeStoredRuns(freshRuns);
-    const candidateIds = selectFetchCandidateIds(kept, AUTO_FETCH_TOTAL_CAP, AUTO_FETCH_CANDIDATE_COUNT);
-    if (candidateIds.length > 0) await markRunsWantedForFetch(candidateIds);
   }, []);
 
   useEffect(() => {
@@ -325,7 +275,7 @@ export function RunLibraryPanel({
       // reactively later (see markNewFetchCandidates' own doc).
       void markNewFetchCandidates().then(refresh);
     });
-  }, [backfillFrom, markNewFetchCandidates, refresh]);
+  }, [backfillFrom, refresh]);
 
 
   const ceilingParams = resolveCeilingParams(formInputs);
@@ -496,7 +446,10 @@ export function RunLibraryPanel({
       onApplyDescentCapCurve,
       onApplyDurationCeiling,
       onApplyAnaerobicCapacityMin,
-    }).then(refresh);
+    }).then(() => {
+      if (!getRunFitStatus().error) void saveFitInputsKeyAfterManualFit();
+      refresh();
+    });
   };
 
   /** On-demand, not a live recompute -- ~100 sequential tau refits is too
@@ -512,7 +465,7 @@ export function RunLibraryPanel({
     if (!dedupedRuns.some((r) => r.points === null && !r.wantsFullData)) return;
     ranCatchUpMarking.current = true;
     void markNewFetchCandidates().then(refresh);
-  }, [dedupedRuns, markNewFetchCandidates, refresh]);
+  }, [dedupedRuns, refresh]);
 
   // isDueForFetch keeps runs that have repeatedly failed to download out of
   // the auto batch (see autoFetchRuns.ts) -- without it, a run that can
