@@ -149,15 +149,13 @@ function FatOxRow({ point, speedUnit, rateUnit, onChange, onRemove }: FatOxRowPr
   return (
     <div className="fatox-row">
       <input type="number" step={0.05} min={0} {...paceField} aria-label={`Pace, ${SPEED_UNIT_LABELS[speedUnit]}`} />
-      <span className="fatox-row__unit">{SPEED_UNIT_LABELS[speedUnit]}</span>
-      <input
+            <input
         type="number"
         step={0.01}
         min={0}
         {...fatField}
         aria-label={`Fat oxidation, ${RATE_UNIT_LABELS[rateUnit]}`}
       />
-      <span className="fatox-row__unit">{RATE_UNIT_LABELS[rateUnit]} fat</span>
       <input
         type="number"
         step={0.01}
@@ -165,12 +163,11 @@ function FatOxRow({ point, speedUnit, rateUnit, onChange, onRemove }: FatOxRowPr
         {...carbField}
         aria-label={`Carb oxidation, ${RATE_UNIT_LABELS[rateUnit]}`}
       />
-      <span className="fatox-row__unit">{RATE_UNIT_LABELS[rateUnit]} carb</span>
       <input
         type="number"
         step={1}
         min={0}
-        placeholder="HR"
+        placeholder="–"
         value={point.heartRateBpm ?? ""}
         onChange={(e) => {
           const raw = e.target.value;
@@ -178,9 +175,8 @@ function FatOxRow({ point, speedUnit, rateUnit, onChange, onRemove }: FatOxRowPr
         }}
         aria-label="Heart rate at this stage, bpm (optional -- lets this point feed the HR calibration)"
       />
-      <span className="fatox-row__unit">bpm</span>
       <button type="button" className="fatox-row__remove" onClick={onRemove} aria-label="Remove point">
-        &times;
+        <X size={16} aria-hidden="true" />
       </button>
     </div>
   );
@@ -230,6 +226,15 @@ function FatOxRows({ points, speedUnit, rateUnit, onSpeedUnitChange, onRateUnitC
           </label>
         </div>
       )}
+      {points.length > 0 && (
+        <div className="fatox-row fatox-row--head" aria-hidden="true">
+          <span>Pace, {SPEED_UNIT_LABELS[speedUnit]}</span>
+          <span>Fat, {RATE_UNIT_LABELS[rateUnit]}</span>
+          <span>Carb, {RATE_UNIT_LABELS[rateUnit]}</span>
+          <span>HR, bpm</span>
+          <span />
+        </div>
+      )}
       {points.map((p, i) => (
         <FatOxRow
           key={i}
@@ -240,8 +245,9 @@ function FatOxRows({ points, speedUnit, rateUnit, onSpeedUnitChange, onRateUnitC
           onRemove={() => remove(i)}
         />
       ))}
-      <button type="button" className="fatox-add" onClick={add}>
-        + Add point
+      <button type="button" className="button-ghost button-small fatox-add" onClick={add}>
+        <Plus size={16} aria-hidden="true" />
+        Add a test stage
       </button>
     </div>
   );

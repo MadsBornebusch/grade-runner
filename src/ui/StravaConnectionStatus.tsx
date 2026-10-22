@@ -1,10 +1,6 @@
 import { useStravaSession } from "./useStravaSession";
 
-/**
- * Connect/disconnect link + status line -- shared by StravaImport's own
- * activity browser (Course tab) and SettingsModal's backfill/fit flow, so
- * neither has to own "log in with Strava" as its own concern.
- */
+/** Connect button, or who's connected with a way out. */
 export function StravaConnectionStatus() {
   const { connected, athleteName, loading } = useStravaSession();
 
@@ -12,16 +8,21 @@ export function StravaConnectionStatus() {
 
   if (!connected) {
     return (
-      <a className="strava-import__connect" href="/api/strava/login">
-        Connect Strava
-      </a>
+      <div className="card strava-status">
+        <p className="help">Connect Strava so your runs, races and fitness come in on their own.</p>
+        <a className="button-primary" href="/api/strava/login">
+          Connect Strava
+        </a>
+      </div>
     );
   }
 
   return (
-    <div className="strava-import__header">
-      <span>Connected to Strava as {athleteName}</span>
-      <a href="/api/strava/logout">Disconnect</a>
-    </div>
+    <p className="help strava-status__line">
+      Connected to Strava as {athleteName}.
+      <a className="link-button" href="/api/strava/logout">
+        Disconnect
+      </a>
+    </p>
   );
 }

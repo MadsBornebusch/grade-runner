@@ -15,7 +15,6 @@ import type { RunFitCallbacks } from "./ui/runFitBatch";
 import { TodayTab } from "./ui/tabs/TodayTab";
 import { ScheduleTab } from "./ui/tabs/ScheduleTab";
 import { PlanSettingsSection } from "./ui/plan/PlanSettingsSection";
-import "./App.css";
 import "./styles/shell.css";
 import "./styles/plan.css";
 

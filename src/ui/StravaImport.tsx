@@ -1,7 +1,6 @@
 import { useCallback, useState } from "react";
 import type { GpxPoint } from "../gpx/pipeline";
 import { fetchStravaActivity } from "./stravaClient";
-import { StravaConnectionStatus } from "./StravaConnectionStatus";
 import { useStravaSession } from "./useStravaSession";
 
 interface StravaActivitySummary {
@@ -44,9 +43,6 @@ export function StravaImport({ onImport }: StravaImportProps) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [nameFilter, setNameFilter] = useState("");
   const [minKm, setMinKm] = useState("");
-  const [maxKm, setMaxKm] = useState("");
-  const [minHours, setMinHours] = useState("");
-  const [maxHours, setMaxHours] = useState("");
   const [linkInput, setLinkInput] = useState("");
   const [linkImporting, setLinkImporting] = useState(false);
   const [importingId, setImportingId] = useState<string | null>(null);
@@ -73,11 +69,6 @@ export function StravaImport({ onImport }: StravaImportProps) {
       else setListLoading(false);
     }
   }, []);
-
-  const jumpToDate = useCallback(() => {
-    if (!dateInput) return;
-    void loadActivities(1, false, endOfDayEpoch(dateInput));
-  }, [dateInput, loadActivities]);
 
   const importById = useCallback(
     async (id: string, fallbackName: string) => {
@@ -115,89 +106,114 @@ export function StravaImport({ onImport }: StravaImportProps) {
   if (loading) return null;
 
   if (!connected) {
-    return <StravaConnectionStatus />;
+    return (
+      <p className="help">
+        <a className="link-button" href="/api/strava/login">
+          Connect Strava
+        </a>{" "}
+        to pick one of your runs or races.
+      </p>
+    );
   }
 
   const visibleActivities =
     activities?.filter((a) => {
       if (!a.name.toLowerCase().includes(nameFilter.toLowerCase())) return false;
       if (minKm && a.distanceKm < Number(minKm)) return false;
-      if (maxKm && a.distanceKm > Number(maxKm)) return false;
-      const hours = a.movingTimeS / 3600;
-      if (minHours && hours < Number(minHours)) return false;
-      if (maxHours && hours > Number(maxHours)) return false;
       return true;
     }) ?? null;
 
   return (
     <div className="strava-import">
-      <StravaConnectionStatus />
-
-      <div className="strava-import__link-row">
+      <div className="strava-import__row">
         <input
           type="text"
-          placeholder="Or paste a Strava activity link or ID"
+          className="field-input"
+          placeholder="Paste a Strava activity link"
+          aria-label="Strava activity link or ID"
           value={linkInput}
           onChange={(e) => setLinkInput(e.target.value)}
         />
-        <button type="button" className="fatox-add" onClick={() => void importByLink()} disabled={!linkInput.trim() || linkImporting}>
+        <button
+          type="button"
+          className="button-ghost button-small"
+          onClick={() => void importByLink()}
+          disabled={!linkInput.trim() || linkImporting}
+        >
           {linkImporting ? "Importing…" : "Import"}
         </button>
       </div>
 
-      <div className="strava-import__link-row">
+      <div className="strava-import__row">
         <button
           type="button"
-          className="fatox-add"
-          onClick={() => void loadActivities(1, false, null)}
+          className="button-ghost button-small"
+          onClick={() => {
+            setDateInput("");
+            void loadActivities(1, false, null);
+          }}
           disabled={listLoading}
         >
           {listLoading ? "Loading…" : "Show recent runs"}
         </button>
-        <span className="strava-import__or">or on</span>
-        <input type="date" value={dateInput} onChange={(e) => setDateInput(e.target.value)} />
-        <button type="button" className="fatox-add" onClick={jumpToDate} disabled={!dateInput || listLoading}>
-          {listLoading ? "Loading…" : "Jump to date"}
-        </button>
+        <label className="strava-import__date">
+          <span>or up to</span>
+          <input
+            type="date"
+            className="field-input"
+            value={dateInput}
+            onChange={(e) => {
+              setDateInput(e.target.value);
+              if (e.target.value) void loadActivities(1, false, endOfDayEpoch(e.target.value));
+            }}
+          />
+        </label>
       </div>
 
-      {error && <p className="gpx-upload__error">{error}</p>}
+      {error && <p className="help danger">{error}</p>}
 
       {activities && (
         <>
-          <input
-            type="text"
-            placeholder="Filter loaded runs by name"
-            value={nameFilter}
-            onChange={(e) => setNameFilter(e.target.value)}
-          />
-          <div className="strava-import__range-row">
-            <span>Distance</span>
-            <input type="number" min={0} placeholder="min" value={minKm} onChange={(e) => setMinKm(e.target.value)} />
-            <span>–</span>
-            <input type="number" min={0} placeholder="max" value={maxKm} onChange={(e) => setMaxKm(e.target.value)} />
-            <span>km</span>
-            <span>Duration</span>
-            <input type="number" min={0} placeholder="min" value={minHours} onChange={(e) => setMinHours(e.target.value)} />
-            <span>–</span>
-            <input type="number" min={0} placeholder="max" value={maxHours} onChange={(e) => setMaxHours(e.target.value)} />
-            <span>h</span>
+          <div className="strava-import__row">
+            <input
+              type="text"
+              className="field-input"
+              placeholder="Filter by name"
+              aria-label="Filter by name"
+              value={nameFilter}
+              onChange={(e) => setNameFilter(e.target.value)}
+            />
+            <label className="input-unit">
+              <input
+                type="number"
+                className="field-input strava-import__km"
+                min={0}
+                placeholder="min"
+                aria-label="Shortest distance, km"
+                value={minKm}
+                onChange={(e) => setMinKm(e.target.value)}
+              />
+              km
+            </label>
           </div>
-          <div className="fatox-rows">
+          <div className="list strava-import__list">
             {visibleActivities!.length === 0 && (
-              <p className="placeholder">
-                {activities.length === 0 ? "No runs found on Strava for this range." : "No loaded runs match that filter."}
+              <p className="help">
+                {activities.length === 0 ? "No runs on Strava in this range." : "None of these runs match."}
               </p>
             )}
             {visibleActivities!.map((activity) => (
-              <div key={activity.id} className="run-library-row">
-                <span className="run-library-row__label">
-                  {activity.name} &middot; {activity.distanceKm.toFixed(1)} km &middot;{" "}
-                  {(activity.movingTimeS / 3600).toFixed(1)} h &middot; {new Date(activity.date).toLocaleDateString()}
+              <div key={activity.id} className="list-row">
+                <span className="strava-import__run">
+                  <span>{activity.name}</span>
+                  <span className="muted num">
+                    {new Date(activity.date).toLocaleDateString()} · {activity.distanceKm.toFixed(1)} km ·{" "}
+                    {(activity.movingTimeS / 3600).toFixed(1)} h
+                  </span>
                 </span>
                 <button
                   type="button"
-                  className="fatox-add"
+                  className="button-ghost button-small"
                   onClick={() => void importFromList(activity)}
                   disabled={importingId === String(activity.id)}
                 >
@@ -209,11 +225,11 @@ export function StravaImport({ onImport }: StravaImportProps) {
           {hasMore && (
             <button
               type="button"
-              className="fatox-add"
+              className="button-ghost button-small"
               onClick={() => void loadActivities(page + 1, true, beforeAnchor)}
               disabled={loadingMore}
             >
-              {loadingMore ? "Loading…" : "Load more (further back in time)"}
+              {loadingMore ? "Loading…" : "Load older runs"}
             </button>
           )}
         </>

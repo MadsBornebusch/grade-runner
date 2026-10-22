@@ -1,6 +1,6 @@
 /* Grade Runner design tokens -- "Alpine morning".
  *
- * Load order: import this file first (before App.css). Light is the default;
+ * Load order: import this file first (before index.css). Light is the default;
  * dark applies via the OS preference unless the page pins data-theme="light",
  * and can be forced on any subtree with data-theme="dark" (used by the mockup
  * and for a future in-app theme toggle).
@@ -238,28 +238,6 @@
   --shadow-3: 0 12px 32px rgba(0, 0, 0, 0.5);
   --shadow-tabbar: 0 -1px 0 var(--border);
 }
-
-/* ---------- Legacy aliases ----------
- * The current index.css/App.css and every Recharts chart read these names.
- * Keep this block until the components are migrated; delete the old
- * definitions from index.css so these win. */
-:root,
-[data-theme="dark"] {
-  --text-h: var(--text);
-  --bg-alt: var(--surface-2);
-  --accent-bg: color-mix(in srgb, var(--brand) 14%, transparent);
-  --accent-border: color-mix(in srgb, var(--brand) 60%, transparent);
-  --accent-fg: var(--on-brand);
-  --warn: var(--danger);
-  --warn-bg: var(--danger-soft);
-  --terrain-bg: var(--terrain);
-  --sans: var(--font-sans);
-  --mono: var(--font-mono);
-}
-/* NOTE: legacy --accent was the purple brand colour. In this file --accent is
- * the sunrise highlight. Charts that use stroke="var(--accent)" for the main
- * series should switch to var(--brand); until they do, sunrise orange is an
- * acceptable, readable series colour on both themes. */
 
 /* Base hooks */
 :root {

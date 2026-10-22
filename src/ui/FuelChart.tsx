@@ -16,11 +16,11 @@ export function FuelChart({ points }: FuelChartProps) {
   const { startIndex, endIndex, isZoomed, domain, onBrushChange, reset } = useDomainZoom(data);
 
   return (
-    <div className="chart">
+    <div className="card chart">
       <div className="chart__header">
-        <h3>Glycogen balance</h3>
+        <h3 className="card-title">Glycogen balance</h3>
         {isZoomed && (
-          <button type="button" className="chart__reset-zoom" onClick={reset}>
+          <button type="button" className="button-ghost button-small" onClick={reset}>
             Reset zoom
           </button>
         )}
@@ -58,8 +58,8 @@ export function FuelChart({ points }: FuelChartProps) {
               endIndex={endIndex}
               onChange={onBrushChange}
               travellerWidth={10}
-              stroke="var(--accent-border)"
-              fill="var(--bg-alt)"
+              stroke="var(--border-strong)"
+              fill="var(--surface-2)"
               tickFormatter={(value: number) => value.toFixed(0)}
             />
           </LineChart>

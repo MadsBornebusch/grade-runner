@@ -38,16 +38,16 @@ export function PaceEffortChart({ actual, planned, plannedThetaFraction, highlig
   const { startIndex, endIndex, isZoomed, domain, onBrushChange, reset } = useDomainZoom(actualData);
 
   return (
-    <div className="chart">
+    <div className="card chart">
       <div className="chart__header">
-        <h3>Pace &amp; effort vs. plan</h3>
+        <h3 className="card-title">Pace &amp; effort vs. plan</h3>
         {isZoomed && (
-          <button type="button" className="chart__reset-zoom" onClick={reset}>
+          <button type="button" className="button-ghost button-small" onClick={reset}>
             Reset zoom
           </button>
         )}
       </div>
-      <p className="field-group-help">
+      <p className="help">
         Actual pace and effort (solid) against the Planning page's solved pace for this course (dashed). The red
         effort line is your actual power as a fraction of your modeled aerobic ceiling at that point in the race —
         it crossing above the grey 100% line marks a stretch run harder than the model thinks was sustainable there.
@@ -120,7 +120,7 @@ export function PaceEffortChart({ actual, planned, plannedThetaFraction, highlig
               type="monotone"
               dataKey="paceMinPerKm"
               name="Actual pace"
-              stroke="var(--text-h)"
+              stroke="var(--text)"
               dot={false}
               strokeWidth={1.5}
               isAnimationActive={false}
@@ -143,8 +143,8 @@ export function PaceEffortChart({ actual, planned, plannedThetaFraction, highlig
               endIndex={endIndex}
               onChange={onBrushChange}
               travellerWidth={10}
-              stroke="var(--accent-border)"
-              fill="var(--bg-alt)"
+              stroke="var(--border-strong)"
+              fill="var(--surface-2)"
               tickFormatter={(value: number) => value.toFixed(0)}
             />
           </ComposedChart>

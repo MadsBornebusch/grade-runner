@@ -136,7 +136,7 @@ export function ResultsSummary({
   );
 
   return (
-    <div className={`results-summary ${result.feasible ? "results-summary--ok" : "results-summary--warn"}`}>
+    <div className={`card results-summary ${result.feasible ? "results-summary--ok" : "results-summary--warn"}`}>
       {headline === "target" && targetStat}
       {headline === "chosen" && chosenStat}
       {headline === "ceiling" && ceilingStat}

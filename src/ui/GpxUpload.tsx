@@ -1,3 +1,4 @@
+import { UploadSimple } from "@phosphor-icons/react";
 import { useCallback, useState } from "react";
 import { parseGpx, type GpxPoint } from "../gpx/pipeline";
 
@@ -27,9 +28,10 @@ export function GpxUpload({ onLoaded }: GpxUploadProps) {
   );
 
   return (
-    <div className="gpx-upload">
-      <label className="gpx-upload__control">
-        <span>Upload course GPX</span>
+    <>
+      <label className="button-ghost gpx-upload">
+        <UploadSimple size={20} aria-hidden="true" />
+        Choose a GPX file
         <input
           type="file"
           accept=".gpx"
@@ -39,7 +41,7 @@ export function GpxUpload({ onLoaded }: GpxUploadProps) {
           }}
         />
       </label>
-      {error && <p className="gpx-upload__error">{error}</p>}
-    </div>
+      {error && <p className="help danger">{error}</p>}
+    </>
   );
 }

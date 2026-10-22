@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { MapTrifold, Warning } from "@phosphor-icons/react";
 import type { GpxPoint } from "../../gpx/pipeline";
 import { rawCourseStats, runPipeline } from "../../gpx/pipeline";
 import { findFlatPacedFinishTime, findThetaForTargetTime, type SolverInputs } from "../../model/solver";
@@ -524,6 +525,19 @@ export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentC
     return buildEffortTrendPoints(courseResult.segments, analysisResult.segments, formInputs.altitudeAdjustment);
   }, [analysisResult, courseResult, formInputs.altitudeAdjustment]);
 
+  const noCourse = (
+    <div className="card empty-state">
+      <div className="empty-state__art">
+        <MapTrifold size={40} weight="duotone" aria-hidden="true" />
+      </div>
+      <h2>No course open</h2>
+      <p>Pick one of your courses, or add a new one.</p>
+      <button type="button" className="button-primary" onClick={() => onSegmentChange("course")}>
+        Go to courses
+      </button>
+    </div>
+  );
+
   return (
     <div className="race-tab">
       <div className="segmented" role="tablist" aria-label="Race planner">
@@ -571,7 +585,7 @@ export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentC
             id: "pacing",
             content: (
               <>
-                {!courseResult && <p className="placeholder">Pick or add a course on the Course page.</p>}
+                {!courseResult && noCourse}
                 {courseResult && solverResult && (
                   <>
                     <div className="card target-card">
@@ -623,7 +637,7 @@ export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentC
                     {chartPoints.length >= 5 && (
                       <>
                         {targetTimeResult && targetTimeS !== null && (
-                          <p className="field-group-note">
+                          <p className="help">
                             Splits and charts below show your {formatDuration(targetTimeS)} target
                             {Math.abs(targetTimeResult.result.finishTimeS - targetTimeS) > 60
                               ? " (closest achievable pace, not exact)"
@@ -658,12 +672,12 @@ export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentC
             id: "analyze",
             content: (
               <>
-                {!courseResult && <p className="placeholder">Pick or add a course on the Course page.</p>}
+                {!courseResult && noCourse}
                 {courseResult && !courseResult.hasTimestamps && (
-                  <p className="warning">
-                    This GPX has no timestamps — Analyze needs a recorded run, not a course. Upload a run with a
-                    recorded time to use this page.
-                  </p>
+                  <div className="banner banner--warning">
+                    <Warning size={20} weight="duotone" aria-hidden="true" />
+                    <p>This course has no times in it. Analyze needs a recorded run: add one from Strava or a GPX file from your watch.</p>
+                  </div>
                 )}
                 {courseResult && analysisResult && (
                   <>
@@ -707,15 +721,6 @@ export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentC
                             }
                           />
                         )}
-                        {analysisInputs && (
-                          <PacingFitPanel
-                            points={pacingFitPoints}
-                            ceilingParams={analysisInputs.ceilingParams ?? {}}
-                            onApplyDrift={(durabilityDriftPerHour) =>
-                              setFormInputs((prev) => ({ ...prev, durabilityDriftPerHour }))
-                            }
-                          />
-                        )}
                         <FuelChart points={analysisChartPoints} />
                         <SubstrateChart points={substratePoints} />
                         <SplitTable
@@ -726,6 +731,15 @@ export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentC
                           onClearSavedPoints={clearSavedPoints}
                           intakeGPerH={formInputs.intakeGPerH}
                         />
+                        {analysisInputs && (
+                          <PacingFitPanel
+                            points={pacingFitPoints}
+                            ceilingParams={analysisInputs.ceilingParams ?? {}}
+                            onApplyDrift={(durabilityDriftPerHour) =>
+                              setFormInputs((prev) => ({ ...prev, durabilityDriftPerHour }))
+                            }
+                          />
+                        )}
                       </>
                     )}
                   </>

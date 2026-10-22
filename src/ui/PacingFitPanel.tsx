@@ -45,56 +45,57 @@ export function PacingFitPanel({ points, ceilingParams, onApplyDrift }: PacingFi
   };
 
   return (
-    <div className="chart">
-      <div className="chart__header">
-        <h3>Check this run against your ceiling</h3>
-        <button type="button" className="chart__reset-zoom" onClick={run}>
-          {ran ? "Re-run" : "Analyze"}
+    <details className="lab card">
+      <summary>Lab: did you fade on this run?</summary>
+      <div className="lab__body">
+        <p className="help">
+          Checks whether your effort held level against your ceiling, and if it fell away, how much durability drift
+          would explain it. This assumes you tried to hold even effort: a planned negative split or a careful start
+          looks the same in the data, so weigh it against what you remember of the run.
+        </p>
+        <button type="button" className="button-ghost button-small" onClick={run}>
+          {ran ? "Check again" : "Check this run"}
         </button>
+        {ran && result?.trendPctPerHour === null && (
+          <p className="help">Not enough moving time in this run to see a trend. It needs a longer recording.</p>
+        )}
+        {result?.trendPctPerHour !== null && result?.trendPctPerHour !== undefined && (
+          <>
+            <p className="help">
+              Effort against your ceiling changed by {result.trendPctPerHour >= 0 ? "+" : ""}
+              {result.trendPctPerHour.toFixed(1)}% per hour.
+              {Math.abs(result.trendPctPerHour) <= FLAT_ENOUGH_PCT_PER_HOUR &&
+                " That's flat enough: your ceiling already describes this run."}
+            </p>
+
+            {result.trendPctPerHour > FLAT_ENOUGH_PCT_PER_HOUR && (
+              <p className="help">
+                Your effort rose through this run. That looks like a pacing choice, a negative split or a strong
+                finish, rather than anything the ceiling gets wrong. Drift can't describe it: it only ever makes the
+                ceiling fall faster.
+              </p>
+            )}
+
+            {result.drift && (
+              <>
+                <p className="help">
+                  A drift of {(result.drift.durabilityDriftPerHour * 100).toFixed(1)}% per hour would flatten this
+                  (what's left: {result.drift.trendAtFitPctPerHour >= 0 ? "+" : ""}
+                  {result.drift.trendAtFitPctPerHour.toFixed(1)}% per hour). One run is thin evidence, so only apply it
+                  if this is how you usually fade.
+                </p>
+                <button
+                  type="button"
+                  className="button-ghost button-small"
+                  onClick={() => onApplyDrift(result.drift!.durabilityDriftPerHour)}
+                >
+                  Apply {(result.drift.durabilityDriftPerHour * 100).toFixed(1)}% per hour
+                </button>
+              </>
+            )}
+          </>
+        )}
       </div>
-      <p className="field-group-help">
-        Measures whether your effort held level against your fitted aerobic ceiling, and if it fell away, how much
-        durability drift would account for it. This assumes you tried to hold roughly even effort throughout — a
-        deliberate negative split or a very cautious start looks identical in this data, so weigh it against what you
-        actually remember of the run, and eyeball the effort curve above before applying anything.
-      </p>
-      {ran && result?.trendPctPerHour === null && (
-        <p className="warning">Not enough moving time in this run to fit a trend (need a longer recording).</p>
-      )}
-      {result?.trendPctPerHour !== null && result?.trendPctPerHour !== undefined && (
-        <>
-          <p className="field-group-note">
-            Effort trend against your ceiling: {result.trendPctPerHour >= 0 ? "+" : ""}
-            {result.trendPctPerHour.toFixed(1)}%/hour.
-            {Math.abs(result.trendPctPerHour) <= FLAT_ENOUGH_PCT_PER_HOUR &&
-              " That's flat enough — your ceiling already describes this run."}
-          </p>
-
-          {result.trendPctPerHour > FLAT_ENOUGH_PCT_PER_HOUR && (
-            <p className="field-group-note">
-              Your effort rose through this run. That looks like a pacing choice — a negative split or a strong
-              finish — rather than anything the ceiling gets wrong. Durability drift can't describe it either: it only
-              ever makes the ceiling fall faster, which would make an upward trend worse.
-            </p>
-          )}
-
-          {result.drift && (
-            <p className="field-group-note">
-              Durability drift of {(result.drift.durabilityDriftPerHour * 100).toFixed(1)}%/hour would flatten this
-              (residual trend {result.drift.trendAtFitPctPerHour >= 0 ? "+" : ""}
-              {result.drift.trendAtFitPctPerHour.toFixed(1)}%/hour at that rate). One run is thin evidence for it —
-              apply it only if this matches how you fade generally, not just on this day.{" "}
-              <button
-                type="button"
-                className="fatox-add"
-                onClick={() => onApplyDrift(result.drift!.durabilityDriftPerHour)}
-              >
-                Apply drift = {(result.drift.durabilityDriftPerHour * 100).toFixed(1)}%/hour
-              </button>
-            </p>
-          )}
-        </>
-      )}
-    </div>
+    </details>
   );
 }

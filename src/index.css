@@ -13,7 +13,7 @@ body {
 h1,
 h2,
 h3 {
-  color: var(--text-h);
+  color: var(--text);
   font-weight: 600;
   margin: 0 0 0.5em;
 }

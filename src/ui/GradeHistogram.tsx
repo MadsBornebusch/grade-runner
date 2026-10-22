@@ -44,16 +44,16 @@ export function GradeHistogram({ bins }: GradeHistogramProps) {
   const brakeKm = bins.filter((b) => b.hasBraking).reduce((a, b) => a + b.distanceM, 0) / 1000;
 
   return (
-    <div className="chart">
+    <div className="card chart">
       <div className="chart__header">
-        <h3>Grade distribution</h3>
+        <h3 className="card-title">Grade distribution</h3>
       </div>
-      <p className="field-group-note">
-        <span className="grade-histogram__swatch grade-histogram__swatch--walk" /> walking (
+      <p className="help">
+        <span className="chart-swatch chart-swatch--walk" /> walking (
         {walkKm.toFixed(1)} km) &nbsp;
-        <span className="grade-histogram__swatch grade-histogram__swatch--brake" /> braking on descents (
+        <span className="chart-swatch chart-swatch--brake" /> braking on descents (
         {brakeKm.toFixed(1)} km) &nbsp;
-        <span className="grade-histogram__swatch grade-histogram__swatch--plain" /> running, limited by effort
+        <span className="chart-swatch chart-swatch--plain" /> running, limited by effort
       </p>
       <div className="chart__canvas" ref={containerRef}>
         {width > 0 && (
@@ -91,7 +91,7 @@ export function GradeHistogram({ bins }: GradeHistogramProps) {
                   // in practice (walking is an uphill result, braking a
                   // descent one), but the precedence is stated rather than
                   // left to render order.
-                  fill={b.hasWalking ? "#b45309" : b.hasBraking ? "var(--success)" : "var(--accent-border)"}
+                  fill={b.hasWalking ? "var(--warning)" : b.hasBraking ? "var(--kind-long)" : "color-mix(in srgb, var(--brand) 55%, transparent)"}
                 />
               ))}
             </Bar>

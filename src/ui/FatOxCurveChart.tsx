@@ -26,9 +26,9 @@ export function FatOxCurveChart({ points }: FatOxCurveChartProps) {
   return (
     <div className="chart">
       <div className="chart__header">
-        <h3>Theoretical fat oxidation curve</h3>
+        <h3 className="card-title">Theoretical fat oxidation curve</h3>
       </div>
-      <p className="field-group-help">
+      <p className="help">
         Derived from LT1, LT2, and VO2max alone (no lab data) -- the same logistic fuel-split model a real
         fat-ox test would calibrate, just anchored on your thresholds instead of measured points. Enter your own
         fat-ox curve below to replace this with real data.
@@ -55,7 +55,7 @@ export function FatOxCurveChart({ points }: FatOxCurveChartProps) {
               type="monotone"
               dataKey="fatGPerMin"
               name="fat"
-              stroke="var(--text-h)"
+              stroke="var(--text)"
               dot={false}
               strokeWidth={2}
               isAnimationActive={false}

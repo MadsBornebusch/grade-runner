@@ -20,31 +20,29 @@ function GenericCourseForm({ onCreate }: { onCreate: (points: GpxPoint[], name: 
   const valid = Number.isFinite(parsed) && parsed > 0;
 
   return (
-    <div className="generic-course">
-      <label className="generic-course__control">
-        <div className="generic-course__row">
-          <input
-            type="number"
-            min={0.1}
-            step={0.1}
-            value={distanceKm}
-            onChange={(e) => setDistanceKm(e.target.value)}
-            aria-label="Distance, km"
-          />
-          <span>km</span>
-          <button
-            type="button"
-            className="button-ghost"
-            disabled={!valid}
-            onClick={() => {
-              if (!valid) return;
-              onCreate(createFlatCourse(parsed), `Flat ${parsed}km course`);
-            }}
-          >
-            Create
-          </button>
-        </div>
+    <div className="strava-import__row">
+      <label className="input-unit">
+        <input
+          type="number"
+          min={0.1}
+          step={0.1}
+          value={distanceKm}
+          onChange={(e) => setDistanceKm(e.target.value)}
+          aria-label="Distance, km"
+        />
+        km
       </label>
+      <button
+        type="button"
+        className="button-ghost button-small"
+        disabled={!valid}
+        onClick={() => {
+          if (!valid) return;
+          onCreate(createFlatCourse(parsed), `Flat ${parsed}km course`);
+        }}
+      >
+        Create
+      </button>
     </div>
   );
 }

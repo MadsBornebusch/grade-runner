@@ -21,16 +21,16 @@ export function SubstrateChart({ points }: SubstrateChartProps) {
   const { startIndex, endIndex, isZoomed, domain, onBrushChange, reset } = useDomainZoom(data);
 
   return (
-    <div className="chart">
+    <div className="card chart">
       <div className="chart__header">
-        <h3>Carb vs. fat burned</h3>
+        <h3 className="card-title">Carb vs. fat burned</h3>
         {isZoomed && (
-          <button type="button" className="chart__reset-zoom" onClick={reset}>
+          <button type="button" className="button-ghost button-small" onClick={reset}>
             Reset zoom
           </button>
         )}
       </div>
-      <p className="field-group-help">
+      <p className="help">
         Modeled, not measured — no file records what you actually burned. Derived from your pace/power and the
         substrate-split model in Settings (fat-oxidation peak, LT1/LT2), applied to this run.
       </p>
@@ -65,7 +65,7 @@ export function SubstrateChart({ points }: SubstrateChartProps) {
               type="monotone"
               dataKey="cumulativeFatG"
               name="fat"
-              stroke="var(--text-h)"
+              stroke="var(--text)"
               dot={false}
               strokeWidth={2}
               isAnimationActive={false}
@@ -77,8 +77,8 @@ export function SubstrateChart({ points }: SubstrateChartProps) {
               endIndex={endIndex}
               onChange={onBrushChange}
               travellerWidth={10}
-              stroke="var(--accent-border)"
-              fill="var(--bg-alt)"
+              stroke="var(--border-strong)"
+              fill="var(--surface-2)"
               tickFormatter={(value: number) => value.toFixed(0)}
             />
           </LineChart>

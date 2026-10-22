@@ -47,12 +47,12 @@ export function SplitTable({
   });
 
   return (
-    <div className="split-table">
-      <div className="split-table__header">
-        <h3>Splits</h3>
+    <div className="card chart">
+      <div className="chart__header">
+        <h3 className="card-title">Splits</h3>
         {usingSavedPoints ? (
           onClearSavedPoints && (
-            <button type="button" className="chart__reset-zoom" onClick={onClearSavedPoints}>
+            <button type="button" className="button-ghost button-small" onClick={onClearSavedPoints}>
               Back to fixed-distance splits
             </button>
           )
@@ -67,48 +67,50 @@ export function SplitTable({
         )}
       </div>
       {usingSavedPoints && (
-        <p className="field-group-help">
+        <p className="help">
           Legs between your {savedPointsKm.length} saved point{savedPointsKm.length === 1 ? "" : "s"} on the map above, aid-station style
           -- not fixed-distance splits.
         </p>
       )}
-      <table>
-        <thead>
-          <tr>
-            <th>Km</th>
-            <th>Mode</th>
-            <th>+/- (m)</th>
-            <th>Pace</th>
-            {hasHrEstimate && <th>Est. HR</th>}
-            <th>Split time</th>
-            <th>Cumulative</th>
-            {hasCarbs && <th>Carb intake</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {splits.map((s) => (
-            <tr key={s.index}>
-              <td>
-                {s.startKm.toFixed(1)}&ndash;{s.endKm.toFixed(1)}
-              </td>
-              <td>{s.mode}</td>
-              <td>
-                +{s.elevationGainM.toFixed(0)} / -{s.elevationLossM.toFixed(0)}
-              </td>
-              <td>{formatPace(s.avgSpeedMs)}</td>
-              {hasHrEstimate && <td>{s.avgEstimatedHeartRateBpm !== null ? `${s.avgEstimatedHeartRateBpm.toFixed(0)} bpm` : "—"}</td>}
-              <td>{formatDuration(s.timeS)}</td>
-              <td>{formatDuration(s.cumulativeTimeS)}</td>
-              {hasCarbs && (
-                <td>
-                  {s.intakeCarbG.toFixed(0)}g{" "}
-                  <span className="split-table__cumulative-note">({s.cumulativeIntakeCarbG.toFixed(0)}g total)</span>
-                </td>
-              )}
+      <div className="split-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Km</th>
+              <th>Mode</th>
+              <th>+/- (m)</th>
+              <th>Pace</th>
+              {hasHrEstimate && <th>Est. HR</th>}
+              <th>Split time</th>
+              <th>Cumulative</th>
+              {hasCarbs && <th>Carb intake</th>}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {splits.map((s) => (
+              <tr key={s.index}>
+                <td>
+                  {s.startKm.toFixed(1)}&ndash;{s.endKm.toFixed(1)}
+                </td>
+                <td>{s.mode}</td>
+                <td>
+                  +{s.elevationGainM.toFixed(0)} / -{s.elevationLossM.toFixed(0)}
+                </td>
+                <td>{formatPace(s.avgSpeedMs)}</td>
+                {hasHrEstimate && <td>{s.avgEstimatedHeartRateBpm !== null ? `${s.avgEstimatedHeartRateBpm.toFixed(0)} bpm` : "—"}</td>}
+                <td>{formatDuration(s.timeS)}</td>
+                <td>{formatDuration(s.cumulativeTimeS)}</td>
+                {hasCarbs && (
+                  <td>
+                    {s.intakeCarbG.toFixed(0)}g{" "}
+                    <span className="split-table__cumulative-note">({s.cumulativeIntakeCarbG.toFixed(0)}g total)</span>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

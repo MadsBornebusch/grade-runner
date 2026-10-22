@@ -105,7 +105,7 @@ function SelectedPointStats({ point }: { point: ChartPoint }) {
   const hrBpm = point.recordedHeartRateBpm ?? point.estimatedHeartRateBpm;
   const hrIsEstimated = point.recordedHeartRateBpm === undefined && point.estimatedHeartRateBpm !== null;
   return (
-    <p className="field-group-note route-map__point-stats">
+    <p className="route-map__point-stats">
       <strong>{point.distanceKm.toFixed(2)} km</strong> · {formatDuration(point.cumulativeTimeS)} elapsed ·{" "}
       {point.speedMs > 0 ? formatPace(point.speedMs) : "stopped"} · {point.elevationM.toFixed(0)}m elevation ·{" "}
       {(point.gradient * 100).toFixed(1)}% grade · {point.mode}
@@ -152,23 +152,23 @@ export function RouteMap({
   if (positions.length < 2) return null;
 
   return (
-    <div className="chart">
+    <div className="card chart">
       <div className="chart__header">
-        <h3>Route map</h3>
+        <h3 className="card-title">Route map</h3>
         <div className="route-map__header-actions">
           {highlightedDistanceKm !== null && (
             <>
-              <button type="button" className="chart__reset-zoom" onClick={() => onSavePoint(highlightedDistanceKm)} disabled={alreadySaved}>
+              <button type="button" className="button-ghost button-small" onClick={() => onSavePoint(highlightedDistanceKm)} disabled={alreadySaved}>
                 {alreadySaved ? "Point saved" : "Save point"}
               </button>
-              <button type="button" className="chart__reset-zoom" onClick={() => onHighlight(null)}>
+              <button type="button" className="button-ghost button-small" onClick={() => onHighlight(null)}>
                 Clear highlight
               </button>
             </>
           )}
         </div>
       </div>
-      <p className="field-group-help">
+      <p className="help">
         Click the map to highlight the nearest point on the route in the charts below. Save points to plan legs between them
         (aid stations) in the split table.
       </p>
@@ -185,7 +185,7 @@ export function RouteMap({
                 </button>
               </span>
             ))}
-          <button type="button" className="chart__reset-zoom" onClick={onClearSavedPoints}>
+          <button type="button" className="button-ghost button-small" onClick={onClearSavedPoints}>
             Clear saved points
           </button>
         </div>

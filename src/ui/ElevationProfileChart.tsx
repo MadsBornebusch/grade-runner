@@ -59,18 +59,18 @@ export function ElevationProfileChart({ points, highlightedDistanceKm, savedPoin
   const unpavedFraction = unpavedBands ? data.filter((p) => p.surfaceUnpaved).length / data.length : null;
 
   return (
-    <div className="chart">
+    <div className="card chart">
       <div className="chart__header">
-        <h3>Elevation &amp; pace</h3>
+        <h3 className="card-title">Elevation &amp; pace</h3>
         {isZoomed && (
-          <button type="button" className="chart__reset-zoom" onClick={reset}>
+          <button type="button" className="button-ghost button-small" onClick={reset}>
             Reset zoom
           </button>
         )}
       </div>
       {unpavedFraction !== null && (
-        <p className="field-group-note">
-          <span className="elevation-chart__legend-swatch" /> unpaved/technical terrain --{" "}
+        <p className="help">
+          <span className="chart-swatch chart-swatch--terrain" /> unpaved/technical terrain --{" "}
           {(unpavedFraction * 100).toFixed(0)}% of this course.
         </p>
       )}
@@ -115,7 +115,7 @@ export function ElevationProfileChart({ points, highlightedDistanceKm, savedPoin
                 yAxisId="elevation"
                 x1={band.startKm}
                 x2={band.endKm}
-                fill="var(--terrain-bg)"
+                fill="var(--terrain)"
                 stroke="none"
                 ifOverflow="hidden"
               />
@@ -153,15 +153,15 @@ export function ElevationProfileChart({ points, highlightedDistanceKm, savedPoin
               yAxisId="elevation"
               type="monotone"
               dataKey="elevationM"
-              fill="var(--accent-bg)"
-              stroke="var(--accent-border)"
+              fill="color-mix(in srgb, var(--brand) 14%, transparent)"
+              stroke="color-mix(in srgb, var(--brand) 60%, transparent)"
               isAnimationActive={false}
             />
             <Line
               yAxisId="pace"
               type="monotone"
               dataKey="paceMinPerKm"
-              stroke="var(--text-h)"
+              stroke="var(--text)"
               dot={false}
               strokeWidth={1.5}
               isAnimationActive={false}
@@ -187,8 +187,8 @@ export function ElevationProfileChart({ points, highlightedDistanceKm, savedPoin
               endIndex={endIndex}
               onChange={onBrushChange}
               travellerWidth={10}
-              stroke="var(--accent-border)"
-              fill="var(--bg-alt)"
+              stroke="var(--border-strong)"
+              fill="var(--surface-2)"
               tickFormatter={(value: number) => value.toFixed(0)}
             />
           </ComposedChart>

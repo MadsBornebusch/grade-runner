@@ -72,14 +72,14 @@ export function CourseDebugChart({
   return (
     <div className="chart">
       <div className="chart__header">
-        <h3>Course processing debug</h3>
+        <h3 className="card-title">Course processing debug</h3>
         {isZoomed && (
-          <button type="button" className="chart__reset-zoom" onClick={reset}>
+          <button type="button" className="button-ghost button-small" onClick={reset}>
             Reset zoom
           </button>
         )}
       </div>
-      <p className="field-group-help">
+      <p className="help">
         Raw GPS elevation (dashed) vs. what the model uses after processing (solid), plotted by % of
         each line's own distance so the two shapes line up. Use the table below, not the chart, to
         compare actual distance/gain numbers.
@@ -137,8 +137,8 @@ export function CourseDebugChart({
               endIndex={endIndex}
               onChange={onBrushChange}
               travellerWidth={10}
-              stroke="var(--accent-border)"
-              fill="var(--bg-alt)"
+              stroke="var(--border-strong)"
+              fill="var(--surface-2)"
               tickFormatter={(value: number) => value.toFixed(0)}
             />
           </ComposedChart>
@@ -167,7 +167,7 @@ export function CourseDebugChart({
           </tr>
         </tbody>
       </table>
-      <p className="field-group-help">
+      <p className="help">
         If distance looks too short, lower the segment length -- but keep the smoothing window well
         above 0 so gradient stays protected from GPS noise.
       </p>

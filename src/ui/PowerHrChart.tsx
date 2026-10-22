@@ -46,16 +46,16 @@ export function PowerHrChart({ points, hasPower, hasHeartRate, hasCalibratedPowe
   const { startIndex, endIndex, isZoomed, domain, onBrushChange, reset } = useDomainZoom(data);
 
   return (
-    <div className="chart">
+    <div className="card chart">
       <div className="chart__header">
-        <h3>Measured vs. modeled power{hasHeartRate ? " & heart rate" : ""}</h3>
+        <h3 className="card-title">Measured vs. modeled power{hasHeartRate ? " & heart rate" : ""}</h3>
         {isZoomed && (
-          <button type="button" className="chart__reset-zoom" onClick={reset}>
+          <button type="button" className="button-ghost button-small" onClick={reset}>
             Reset zoom
           </button>
         )}
       </div>
-      <p className="field-group-help">
+      <p className="help">
         {hasPower
           ? "Modeled power (dashed) comes purely from speed + gradient via the Minetti cost curve. If your device measured power (solid), note it's on its own axis: a footpod's \"power\" (e.g. Stryd) correlates with metabolic power but isn't the same quantity or scale -- a multi-fold gap is normal. What's worth looking at is whether the two rise and fall together, not whether they match numerically."
           : "This device didn't record power, so only the model's own speed/gradient-based estimate is shown."}
@@ -101,7 +101,7 @@ export function PowerHrChart({ points, hasPower, hasHeartRate, hasCalibratedPowe
                 type="monotone"
                 dataKey="measuredPowerW"
                 name="Measured power"
-                stroke="var(--text-h)"
+                stroke="var(--text)"
                 dot={false}
                 strokeWidth={1.5}
                 isAnimationActive={false}
@@ -124,7 +124,7 @@ export function PowerHrChart({ points, hasPower, hasHeartRate, hasCalibratedPowe
                 type="monotone"
                 dataKey="calibratedPowerW"
                 name="HR-calibrated power"
-                stroke="#3b82f6"
+                stroke="var(--info)"
                 strokeDasharray="2 2"
                 dot={false}
                 strokeWidth={1.5}
@@ -151,8 +151,8 @@ export function PowerHrChart({ points, hasPower, hasHeartRate, hasCalibratedPowe
               endIndex={endIndex}
               onChange={onBrushChange}
               travellerWidth={10}
-              stroke="var(--accent-border)"
-              fill="var(--bg-alt)"
+              stroke="var(--border-strong)"
+              fill="var(--surface-2)"
               tickFormatter={(value: number) => value.toFixed(0)}
             />
           </ComposedChart>

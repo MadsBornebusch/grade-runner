@@ -673,288 +673,285 @@ export function RunLibraryPanel({
               </label>
             )}
 
-    
-              {fitCompletedAt !== null && (
-                <p className="field-group-note">
-                  Fitted {new Date(fitCompletedAt).toLocaleString()} ({formatRelativeAge(fitCompletedAt)}) from{" "}
-                  {runFitStatus.result?.races.length ?? 0} runs.
+            {fitCompletedAt !== null && (
+              <p className="help">
+                Fitted {new Date(fitCompletedAt).toLocaleString()} ({formatRelativeAge(fitCompletedAt)}) from{" "}
+                {runFitStatus.result?.races.length ?? 0} runs.
+              </p>
+            )}
+
+            {transitGapCount > 0 && (
+              <p className="help">
+                Detected and cropped out {transitGapCount} transit gap{transitGapCount === 1 ? "" : "s"} (GPS jumps far
+                faster than running is possible, typically a watch left running across a train/bus/car leg) -- the
+                genuine running before and after each gap was still used, just as separate legs.
+              </p>
+            )}
+
+            {excludedForDurationCount > 0 && (
+              <p className="help">
+                Left out {excludedForDurationCount} run{excludedForDurationCount === 1 ? "" : "s"} under{" "}
+                {(DURABILITY_MIN_DURATION_S / 60).toFixed(0)} minutes -- too short to contribute a usable effort trend.
+              </p>
+            )}
+
+            {surfaceCostMultiplierFitResult && (
+              <div className="lab__section">
+                <h4 className="lab__title">Terrain surface cost</h4>
+                <p className="help">
+                  One cost multiplier per surface category, from how much slower you move at the same heart rate on each
+                  surface. Every run with heart rate and surface data contributes, not just races -- this fit
+                  doesn't need race pacing to be valid.
                 </p>
-              )}
-    
-              {transitGapCount > 0 && (
-                <p className="field-group-note">
-                  Detected and cropped out {transitGapCount} transit gap{transitGapCount === 1 ? "" : "s"} (GPS jumps far
-                  faster than running is possible, typically a watch left running across a train/bus/car leg) -- the
-                  genuine running before and after each gap was still used, just as separate legs.
+                <p className="help">
+                  Across {surfaceCostMultiplierFitResult.runCount} run{surfaceCostMultiplierFitResult.runCount === 1 ? "" : "s"} (
+                  {surfaceCostMultiplierFitResult.segmentCount} segments):
                 </p>
-              )}
-    
-              {excludedForDurationCount > 0 && (
-                <p className="field-group-note">
-                  Left out {excludedForDurationCount} run{excludedForDurationCount === 1 ? "" : "s"} under{" "}
-                  {(DURABILITY_MIN_DURATION_S / 60).toFixed(0)} minutes -- too short to contribute a usable effort trend.
-                </p>
-              )}
-    
-          {surfaceCostMultiplierFitResult && (
-            <div className="run-library__experimental-fit">
-              <p className="field-group-note">Terrain surface cost</p>
-              <p className="field-group-help">
-                One cost multiplier per surface category, from how much slower you move at the same heart rate on each
-                surface. Every run with heart rate and surface data contributes, not just races -- this fit
-                doesn't need race pacing to be valid.
-              </p>
-              <p className="field-group-note">
-                Across {surfaceCostMultiplierFitResult.runCount} run{surfaceCostMultiplierFitResult.runCount === 1 ? "" : "s"} (
-                {surfaceCostMultiplierFitResult.segmentCount} segments):
-              </p>
-              <ul className="field-group-note">
-                {Object.entries(surfaceCostMultiplierFitResult.surfaceCostMultipliers).map(([category, multiplier]) => (
-                  <li key={category}>
-                    {category}: {multiplier!.toFixed(2)}x ({((multiplier! - 1) * 100).toFixed(0)}% slower at matched effort)
-                    {(surfaceCostMultiplierFitResult.variableInflationFactors[category as SurfaceCategory] ?? 0) > 5 && " -- shaky, high VIF"}
-                  </li>
-                ))}
-              </ul>
-              {surfaceCostMultiplierFitResult.runCount < MIN_SURFACE_FIT_RUNS && (
-                <p className="warning">
-                  Only {surfaceCostMultiplierFitResult.runCount} runs went into this fit -- with fewer than{" "}
-                  {MIN_SURFACE_FIT_RUNS}, treat these multipliers with real caution.
-                </p>
-              )}
-              <button
-                type="button"
-                className="fatox-add"
-                onClick={() => onApplySurfaceCostMultipliers(surfaceCostMultiplierFitResult.surfaceCostMultipliers)}
-              >
-                Apply per-category costs
-              </button>
-              <p className="field-group-note">
-                {surfaceCostMultiplierFitResult.runCount >= MIN_SURFACE_FIT_RUNS
-                  ? "Applied automatically -- enough runs to trust this."
-                  : "Not applied automatically -- see the note above; you can still apply it manually if you trust it."}
-              </p>
-            </div>
-          )}
-    
-          {hrCalibrationFitResult && (
-            <div className="run-library__experimental-fit">
-              <p className="field-group-note">HR-effort calibration -- from your training history</p>
-              <p className="field-group-help">
-                Maps heart rate to effort fraction, fit from each race's early portion (least cardiac drift). Doesn't
-                affect pace/power predictions -- used for HR-based effort estimates elsewhere (e.g. Analysis mode).
-              </p>
-              <p className="field-group-note">
-                Best fit: effort fraction ≈ {hrCalibrationFitResult.intercept.toFixed(3)} +{" "}
-                {hrCalibrationFitResult.slope.toFixed(4)} × heart rate, R² = {hrCalibrationFitResult.rSquared.toFixed(2)},
-                from {hrCalibrationFitResult.pointCount} points across {hrCalibrationFitResult.raceCount} run
-                {hrCalibrationFitResult.raceCount === 1 ? "" : "s"}.
-              </p>
-              {hrCalibrationFitResult.rSquared < MIN_HR_CALIBRATION_R_SQUARED && (
-                <p className="warning">
-                  R² is below {MIN_HR_CALIBRATION_R_SQUARED.toFixed(1)} -- heart rate doesn't track this athlete's effort
-                  very reliably yet (or this is too little/noisy data). Not a bug: some athletes' HR just isn't a strong
-                  effort proxy. Treat this calibration with real caution, or gather more runs with HR data.
-                </p>
-              )}
-              <button
-                type="button"
-                className="fatox-add"
-                onClick={() => onApplyHrCalibration(hrCalibrationFitResult.slope, hrCalibrationFitResult.intercept)}
-              >
-                Apply calibration
-              </button>
-              <p className="field-group-note">
-                {hrCalibrationFitResult.rSquared >= MIN_HR_CALIBRATION_R_SQUARED
-                  ? "Applied automatically -- R² cleared the bar for trusting HR as an effort proxy for this athlete."
-                  : "Not applied automatically -- see the note above; you can still apply it manually if you trust it."}
-              </p>
-            </div>
-          )}
-    
-          {pacingMarginFitResult && (
-            <div className="run-library__experimental-fit">
-              <p className="field-group-note">Pacing margin -- chosen effort vs. race length</p>
-              <p className="field-group-help">
-                How much of your fitted ceiling you actually hold, by race length -- fit from your confirmed races' own
-                heart rate. Drives the "Chosen pacing" number shown with your predicted finish time.
-              </p>
-              <p className="field-group-note">
-                Fit from {pacingMarginFitResult.raceCount} confirmed race{pacingMarginFitResult.raceCount === 1 ? "" : "s"}, spanning{" "}
-                {pacingMarginFitResult.minDurationHours.toFixed(1)}-{pacingMarginFitResult.maxDurationHours.toFixed(1)}h. Predictions
-                for a race outside that range are an extrapolation, not something any confirmed race actually tested.
-              </p>
-              <table className="run-library__race-tag-table">
-                <tbody>
-                  {pacingMarginFitResult.perRace.map((p) => (
-                    <tr key={p.name}>
-                      <td>{p.name}</td>
-                      <td className="run-library__race-tag-date">{p.durationHours.toFixed(2)}h</td>
-                      <td className="run-library__race-tag-date">
-                        {p.chosenTheta !== null ? `chosen ${(p.chosenTheta * 100).toFixed(0)}%` : "no HR data"}
-                      </td>
-                    </tr>
+                <ul className="help lab-list">
+                  {Object.entries(surfaceCostMultiplierFitResult.surfaceCostMultipliers).map(([category, multiplier]) => (
+                    <li key={category}>
+                      {category}: {multiplier!.toFixed(2)}x ({((multiplier! - 1) * 100).toFixed(0)}% slower at matched effort)
+                      {(surfaceCostMultiplierFitResult.variableInflationFactors[category as SurfaceCategory] ?? 0) > 5 && " -- shaky, high VIF"}
+                    </li>
                   ))}
-                </tbody>
-              </table>
-              <p className="field-group-note">Applied automatically -- {pacingMarginFitResult.raceCount} confirmed races cleared the minimum to fit this curve.</p>
-            </div>
-          )}
-    
-          {descentCapFitResult && (
-            <div className="run-library__experimental-fit">
-              <p className="field-group-note">Descent speed cap -- how fast you control a slope</p>
-              <p className="field-group-help">
-                The fastest you demonstrably descend at a given gradient, fitted as an envelope over every downhill
-                segment in your library -- the tightest curve that still allows what you have actually run. This is a
-                control limit, not an effort one: it is what stops a big power budget from implying a downhill speed
-                nobody could hold. The built-in default came from one other athlete's single 55 km ultra.
-              </p>
-              {descentCapFitResult.tier === "defaults" ? (
-                <p className="field-group-help">
-                  NOT APPLIED -- only {(descentCapFitResult.totalDescentM / 1000).toFixed(1)} km of descent across{" "}
-                  {descentCapFitResult.bandCount} gradient bands, below the{" "}
-                  {(MIN_DESCENT_CAP_DISTANCE_M / 1000).toFixed(0)} km minimum. Using the built-in curve.
-                </p>
-              ) : (
-                <>
-                  <p className="field-group-help">
-                    Fit from {(descentCapFitResult.totalDescentM / 1000).toFixed(0)} km of descent across{" "}
-                    {descentCapFitResult.bandCount} gradient bands:{" "}
-                    <strong>{paceFromMs(descentCapFitResult.curve.onsetSpeedMs)}/km at -10%</strong>, easing to{" "}
-                    <strong>{paceFromMs(descentCapFitResult.curve.clampSpeedMs)}/km at -45%</strong>
-                    {descentCapFitResult.bindingGradients.length > 0 && (
-                      <>
-                        {" "}
-                        -- set by your descending at{" "}
-                        {descentCapFitResult.bindingGradients
-                          .map((g) => `${(g * 100).toFixed(0)}%`)
-                          .join(", ")}
-                        .
-                      </>
-                    )}
+                </ul>
+                {surfaceCostMultiplierFitResult.runCount < MIN_SURFACE_FIT_RUNS && (
+                  <p className="help danger">
+                    Only {surfaceCostMultiplierFitResult.runCount} runs went into this fit -- with fewer than{" "}
+                    {MIN_SURFACE_FIT_RUNS}, treat these multipliers with real caution.
                   </p>
-                  {descentCapFitResult.tier === "onsetOnly" && (
-                    <p className="field-group-help">
-                      Only {(descentCapFitResult.steepDescentM / 1000).toFixed(1)} km of your descending is steeper than
-                      -20%, which is not enough to measure the steep end independently -- it is carried at the default
-                      curve's shape. Run more genuinely steep downhill to pin it down.
-                    </p>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-    
-          {durationCeilingFitResult && (
-            <div className="run-library__experimental-fit">
-              <p className="field-group-note">Duration ceiling -- how hard you can go, by race length</p>
-              <p className="field-group-help">
-                The upper bound on sustainable effort as a function of race duration, fit as an envelope over your
-                confirmed races -- the tightest curve that no race of yours sits above. Drives the "Theoretical ceiling"
-                finish time.
-              </p>
-              {durationCeilingFitResult.tier === "defaults" ? (
-                <p className="field-group-note">
-                  NOT APPLIED (needs at least {MIN_DURATION_CEILING_RACES} confirmed races; had{" "}
-                  {durationCeilingFitResult.raceCount}) -- using the built-in default curve.
+                )}
+                <button
+                  type="button"
+                  className="button-ghost button-small"
+                  onClick={() => onApplySurfaceCostMultipliers(surfaceCostMultiplierFitResult.surfaceCostMultipliers)}
+                >
+                  Apply per-category costs
+                </button>
+                <p className="help">
+                  {surfaceCostMultiplierFitResult.runCount >= MIN_SURFACE_FIT_RUNS
+                    ? "Applied automatically -- enough runs to trust this."
+                    : "Not applied automatically -- see the note above; you can still apply it manually if you trust it."}
                 </p>
-              ) : (
-                <>
-                  <p className="field-group-note">
-                    Fit from {durationCeilingFitResult.raceCount} confirmed races:{" "}
-                    {(durationCeilingFitResult.fraction60Min * 100).toFixed(1)}% of VO2max sustainable for an hour,
-                    falling with an exponent of {durationCeilingFitResult.exponent.toFixed(3)}.
-                    {durationCeilingFitResult.bindingRaceNames.length > 0 && (
-                      <> Your ceiling rests on {durationCeilingFitResult.bindingRaceNames.join(" and ")}.</>
-                    )}
+              </div>
+            )}
+
+            {hrCalibrationFitResult && (
+              <div className="lab__section">
+                <h4 className="lab__title">HR-effort calibration: from your training history</h4>
+                <p className="help">
+                  Maps heart rate to effort fraction, fit from each race's early portion (least cardiac drift). Doesn't
+                  affect pace/power predictions -- used for HR-based effort estimates elsewhere (e.g. Analysis mode).
+                </p>
+                <p className="help">
+                  Best fit: effort fraction ≈ {hrCalibrationFitResult.intercept.toFixed(3)} +{" "}
+                  {hrCalibrationFitResult.slope.toFixed(4)} × heart rate, R² = {hrCalibrationFitResult.rSquared.toFixed(2)},
+                  from {hrCalibrationFitResult.pointCount} points across {hrCalibrationFitResult.raceCount} run
+                  {hrCalibrationFitResult.raceCount === 1 ? "" : "s"}.
+                </p>
+                {hrCalibrationFitResult.rSquared < MIN_HR_CALIBRATION_R_SQUARED && (
+                  <p className="help danger">
+                    R² is below {MIN_HR_CALIBRATION_R_SQUARED.toFixed(1)} -- heart rate doesn't track this athlete's effort
+                    very reliably yet (or this is too little/noisy data). Not a bug: some athletes' HR just isn't a strong
+                    effort proxy. Treat this calibration with real caution, or gather more runs with HR data.
                   </p>
-                  {durationCeilingFitResult.tier === "anchorOnly" && (
-                    <p className="field-group-note">
-                      Your races are too close together in duration (longest / shortest ={" "}
-                      {durationCeilingFitResult.durationSpanRatio.toFixed(1)}x, want at least{" "}
-                      {MIN_DURATION_CEILING_SPAN_RATIO}x) to tell how steeply the curve falls, so the shape is held at the
-                      default and only its height is fit. Confirm a race of a very different length to pin the shape down.
+                )}
+                <button
+                  type="button"
+                  className="button-ghost button-small"
+                  onClick={() => onApplyHrCalibration(hrCalibrationFitResult.slope, hrCalibrationFitResult.intercept)}
+                >
+                  Apply calibration
+                </button>
+                <p className="help">
+                  {hrCalibrationFitResult.rSquared >= MIN_HR_CALIBRATION_R_SQUARED
+                    ? "Applied automatically -- R² cleared the bar for trusting HR as an effort proxy for this athlete."
+                    : "Not applied automatically -- see the note above; you can still apply it manually if you trust it."}
+                </p>
+              </div>
+            )}
+
+            {pacingMarginFitResult && (
+              <div className="lab__section">
+                <h4 className="lab__title">Pacing margin: chosen effort vs. race length</h4>
+                <p className="help">
+                  How much of your fitted ceiling you actually hold, by race length -- fit from your confirmed races' own
+                  heart rate. Drives the "Chosen pacing" number shown with your predicted finish time.
+                </p>
+                <p className="help">
+                  Fit from {pacingMarginFitResult.raceCount} confirmed race{pacingMarginFitResult.raceCount === 1 ? "" : "s"}, spanning{" "}
+                  {pacingMarginFitResult.minDurationHours.toFixed(1)}-{pacingMarginFitResult.maxDurationHours.toFixed(1)}h. Predictions
+                  for a race outside that range are an extrapolation, not something any confirmed race actually tested.
+                </p>
+                <table className="lab-table">
+                  <tbody>
+                    {pacingMarginFitResult.perRace.map((p) => (
+                      <tr key={p.name}>
+                        <td>{p.name}</td>
+                        <td className="muted">{p.durationHours.toFixed(2)}h</td>
+                        <td className="muted">
+                          {p.chosenTheta !== null ? `chosen ${(p.chosenTheta * 100).toFixed(0)}%` : "no HR data"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="help">Applied automatically -- {pacingMarginFitResult.raceCount} confirmed races cleared the minimum to fit this curve.</p>
+              </div>
+            )}
+
+            {descentCapFitResult && (
+              <div className="lab__section">
+                <h4 className="lab__title">Descent speed cap: how fast you control a slope</h4>
+                <p className="help">
+                  The fastest you demonstrably descend at a given gradient, fitted as an envelope over every downhill
+                  segment in your library -- the tightest curve that still allows what you have actually run. This is a
+                  control limit, not an effort one: it is what stops a big power budget from implying a downhill speed
+                  nobody could hold. The built-in default came from one other athlete's single 55 km ultra.
+                </p>
+                {descentCapFitResult.tier === "defaults" ? (
+                  <p className="help">
+                    NOT APPLIED -- only {(descentCapFitResult.totalDescentM / 1000).toFixed(1)} km of descent across{" "}
+                    {descentCapFitResult.bandCount} gradient bands, below the{" "}
+                    {(MIN_DESCENT_CAP_DISTANCE_M / 1000).toFixed(0)} km minimum. Using the built-in curve.
+                  </p>
+                ) : (
+                  <>
+                    <p className="help">
+                      Fit from {(descentCapFitResult.totalDescentM / 1000).toFixed(0)} km of descent across{" "}
+                      {descentCapFitResult.bandCount} gradient bands:{" "}
+                      <strong>{paceFromMs(descentCapFitResult.curve.onsetSpeedMs)}/km at -10%</strong>, easing to{" "}
+                      <strong>{paceFromMs(descentCapFitResult.curve.clampSpeedMs)}/km at -45%</strong>
+                      {descentCapFitResult.bindingGradients.length > 0 && (
+                        <>
+                          {" "}
+                          -- set by your descending at{" "}
+                          {descentCapFitResult.bindingGradients
+                            .map((g) => `${(g * 100).toFixed(0)}%`)
+                            .join(", ")}
+                          .
+                        </>
+                      )}
                     </p>
-                  )}
-                  {anaerobicFitResult && (
-                    <p className="field-group-note">
-                      {anaerobicFitResult.identifiable
-                        ? `Short-race (anaerobic) capacity fit to ${anaerobicFitResult.anaerobicCapacityMin.toFixed(1)} min of W'/CP.`
-                        : `Short-race (anaerobic) capacity left at its default -- your shortest confirmed race (${anaerobicFitResult.shortestRaceMin?.toFixed(0) ?? "?"} min) is long enough that your aerobic curve alone already explains it. Confirm a race under ~15 minutes to measure this.`}
+                    {descentCapFitResult.tier === "onsetOnly" && (
+                      <p className="help">
+                        Only {(descentCapFitResult.steepDescentM / 1000).toFixed(1)} km of your descending is steeper than
+                        -20%, which is not enough to measure the steep end independently -- it is carried at the default
+                        curve's shape. Run more genuinely steep downhill to pin it down.
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {durationCeilingFitResult && (
+              <div className="lab__section">
+                <h4 className="lab__title">Duration ceiling: how hard you can go, by race length</h4>
+                <p className="help">
+                  The upper bound on sustainable effort as a function of race duration, fit as an envelope over your
+                  confirmed races -- the tightest curve that no race of yours sits above. Drives the "Theoretical ceiling"
+                  finish time.
+                </p>
+                {durationCeilingFitResult.tier === "defaults" ? (
+                  <p className="help">
+                    NOT APPLIED (needs at least {MIN_DURATION_CEILING_RACES} confirmed races; had{" "}
+                    {durationCeilingFitResult.raceCount}) -- using the built-in default curve.
+                  </p>
+                ) : (
+                  <>
+                    <p className="help">
+                      Fit from {durationCeilingFitResult.raceCount} confirmed races:{" "}
+                      {(durationCeilingFitResult.fraction60Min * 100).toFixed(1)}% of VO2max sustainable for an hour,
+                      falling with an exponent of {durationCeilingFitResult.exponent.toFixed(3)}.
+                      {durationCeilingFitResult.bindingRaceNames.length > 0 && (
+                        <> Your ceiling rests on {durationCeilingFitResult.bindingRaceNames.join(" and ")}.</>
+                      )}
                     </p>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-    
-          {hrCalibrationFitResult &&
-            (() => {
-              const maxAerobic = maxAerobicPower(0, ceilingParams);
-              if (!(maxAerobic > 0)) return null;
-              const { lt1Fraction, lt2Fraction } = resolveLt1Lt2Fractions(formInputs);
-              const labAnchors: { label: string; enteredHr: number; powerWPerKg: number }[] = [];
-              if (formInputs.lt1HeartRateBpm !== null) {
-                labAnchors.push({ label: "LT1", enteredHr: formInputs.lt1HeartRateBpm, powerWPerKg: lt1Fraction * maxAerobic });
-              }
-              if (formInputs.lt2HeartRateBpm !== null) {
-                labAnchors.push({ label: "LT2", enteredHr: formInputs.lt2HeartRateBpm, powerWPerKg: lt2Fraction * maxAerobic });
-              }
-              if (labAnchors.length === 0) return null;
-              return (
-                <div className="run-library__experimental-fit">
-                  <p className="field-group-note">Derived vs. entered heart rate</p>
-                  <p className="field-group-help">Checks whether the calibration above agrees with your entered LT1/LT2 heart rate.</p>
-                  <ul className="run-library__fit-notes">
-                    {labAnchors.map((a) => {
-                      const derivedHr = predictHeartRateFromPower(a.powerWPerKg, hrCalibrationFitResult);
-                      const delta = derivedHr - a.enteredHr;
-                      return (
-                        <li key={a.label}>
-                          {a.label}: derived {derivedHr.toFixed(0)}bpm from training history vs. entered {a.enteredHr}bpm
-                          (Δ {delta >= 0 ? "+" : ""}
-                          {delta.toFixed(0)}bpm)
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              );
-            })()}
-    
-          {thresholdHrCalibrationFitResult && (
-            <div className="run-library__experimental-fit">
-              <p className="field-group-note">HR-effort calibration -- from your LT1/LT2/fat-ox thresholds</p>
-              <p className="field-group-help">
-                Same mapping as above, but fit from your lab-measured LT1/LT2/fat-ox thresholds instead of training runs.
-              </p>
-              <p className="field-group-note">
-                Best fit: effort fraction ≈ {thresholdHrCalibrationFitResult.intercept.toFixed(3)} +{" "}
-                {thresholdHrCalibrationFitResult.slope.toFixed(4)} × heart rate, from{" "}
-                {thresholdHrCalibrationFitResult.pointCount} lab point
-                {thresholdHrCalibrationFitResult.pointCount === 1 ? "" : "s"}
-                {thresholdHrCalibrationFitResult.pointCount <= 2
-                  ? " (only 2 points -- the line passes through both exactly, so this isn't a fit with real slack in it)"
-                  : `, R² = ${thresholdHrCalibrationFitResult.rSquared.toFixed(2)}`}
-                .
-              </p>
-              <button
-                type="button"
-                className="fatox-add"
-                onClick={() => onApplyHrCalibration(thresholdHrCalibrationFitResult.slope, thresholdHrCalibrationFitResult.intercept)}
-              >
-                Apply calibration
-              </button>
-              <p className="field-group-note">
-                Not applied automatically -- lab data is trustworthy but usually just a handful of points; compare it
-                against your training-history calibration above before choosing one to apply.
-              </p>
-            </div>
-          )}
-    
-    
-    
+                    {durationCeilingFitResult.tier === "anchorOnly" && (
+                      <p className="help">
+                        Your races are too close together in duration (longest / shortest ={" "}
+                        {durationCeilingFitResult.durationSpanRatio.toFixed(1)}x, want at least{" "}
+                        {MIN_DURATION_CEILING_SPAN_RATIO}x) to tell how steeply the curve falls, so the shape is held at the
+                        default and only its height is fit. Confirm a race of a very different length to pin the shape down.
+                      </p>
+                    )}
+                    {anaerobicFitResult && (
+                      <p className="help">
+                        {anaerobicFitResult.identifiable
+                          ? `Short-race (anaerobic) capacity fit to ${anaerobicFitResult.anaerobicCapacityMin.toFixed(1)} min of W'/CP.`
+                          : `Short-race (anaerobic) capacity left at its default -- your shortest confirmed race (${anaerobicFitResult.shortestRaceMin?.toFixed(0) ?? "?"} min) is long enough that your aerobic curve alone already explains it. Confirm a race under ~15 minutes to measure this.`}
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {hrCalibrationFitResult &&
+              (() => {
+                const maxAerobic = maxAerobicPower(0, ceilingParams);
+                if (!(maxAerobic > 0)) return null;
+                const { lt1Fraction, lt2Fraction } = resolveLt1Lt2Fractions(formInputs);
+                const labAnchors: { label: string; enteredHr: number; powerWPerKg: number }[] = [];
+                if (formInputs.lt1HeartRateBpm !== null) {
+                  labAnchors.push({ label: "LT1", enteredHr: formInputs.lt1HeartRateBpm, powerWPerKg: lt1Fraction * maxAerobic });
+                }
+                if (formInputs.lt2HeartRateBpm !== null) {
+                  labAnchors.push({ label: "LT2", enteredHr: formInputs.lt2HeartRateBpm, powerWPerKg: lt2Fraction * maxAerobic });
+                }
+                if (labAnchors.length === 0) return null;
+                return (
+                  <div className="lab__section">
+                    <h4 className="lab__title">Derived vs. entered heart rate</h4>
+                    <p className="help">Checks whether the calibration above agrees with your entered LT1/LT2 heart rate.</p>
+                    <ul className="help lab-list">
+                      {labAnchors.map((a) => {
+                        const derivedHr = predictHeartRateFromPower(a.powerWPerKg, hrCalibrationFitResult);
+                        const delta = derivedHr - a.enteredHr;
+                        return (
+                          <li key={a.label}>
+                            {a.label}: derived {derivedHr.toFixed(0)}bpm from training history vs. entered {a.enteredHr}bpm
+                            (Δ {delta >= 0 ? "+" : ""}
+                            {delta.toFixed(0)}bpm)
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                );
+              })()}
+
+            {thresholdHrCalibrationFitResult && (
+              <div className="lab__section">
+                <h4 className="lab__title">HR-effort calibration: from your LT1/LT2/fat-ox thresholds</h4>
+                <p className="help">
+                  Same mapping as above, but fit from your lab-measured LT1/LT2/fat-ox thresholds instead of training runs.
+                </p>
+                <p className="help">
+                  Best fit: effort fraction ≈ {thresholdHrCalibrationFitResult.intercept.toFixed(3)} +{" "}
+                  {thresholdHrCalibrationFitResult.slope.toFixed(4)} × heart rate, from{" "}
+                  {thresholdHrCalibrationFitResult.pointCount} lab point
+                  {thresholdHrCalibrationFitResult.pointCount === 1 ? "" : "s"}
+                  {thresholdHrCalibrationFitResult.pointCount <= 2
+                    ? " (only 2 points -- the line passes through both exactly, so this isn't a fit with real slack in it)"
+                    : `, R² = ${thresholdHrCalibrationFitResult.rSquared.toFixed(2)}`}
+                  .
+                </p>
+                <button
+                  type="button"
+                  className="button-ghost button-small"
+                  onClick={() => onApplyHrCalibration(thresholdHrCalibrationFitResult.slope, thresholdHrCalibrationFitResult.intercept)}
+                >
+                  Apply calibration
+                </button>
+                <p className="help">
+                  Not applied automatically -- lab data is trustworthy but usually just a handful of points; compare it
+                  against your training-history calibration above before choosing one to apply.
+                </p>
+              </div>
+            )}
+
             <button type="button" className="button-ghost button-danger" onClick={() => void clearAll()} disabled={clearing}>
               {clearing ? "Clearing…" : "Delete all stored runs"}
             </button>

@@ -19,7 +19,7 @@ export function AnalysisSummary({ result, totalDistanceM, summaryStats }: Analys
   const bonkSegment = result.bonkIndex !== null ? result.segments.find((s) => s.index === result.bonkIndex) : undefined;
 
   return (
-    <div className={`results-summary ${result.bonked ? "results-summary--warn" : "results-summary--ok"}`}>
+    <div className={`card results-summary ${result.bonked ? "results-summary--warn" : "results-summary--ok"}`}>
       <div
         className="results-summary__stat"
         title="The moving-time-weighted average of your actual power vs. your sustainable aerobic ceiling at each point in the run. Unlike Planning's Effort, this is descriptive, not a solved target -- it can read over 100% if you ran harder than the ceiling model says was sustainable for that duration (a hard push, or a sign your athlete settings don't quite match your current fitness)."
