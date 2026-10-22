@@ -125,7 +125,7 @@ export function CourseDebugChart({
               type="monotone"
               dataKey="elevationM"
               name="processed"
-              stroke="var(--accent)"
+              stroke="var(--brand)"
               dot={false}
               strokeWidth={2}
               isAnimationActive={false}

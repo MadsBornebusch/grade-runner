@@ -1,0 +1,215 @@
+/* App shell: bottom tab bar on phones, side rail from 900 px. */
+
+.app-shell {
+  min-height: 100svh;
+}
+
+.app-main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: var(--sp-4) var(--sp-4) calc(var(--tabbar-h) + env(safe-area-inset-bottom) + var(--sp-6));
+}
+
+.tab-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.tab-page[hidden] {
+  display: none;
+}
+
+.screen-title {
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--lh-tight);
+  margin: var(--sp-2) 0 0;
+}
+
+/* ---------- Tab bar ---------- */
+
+.tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  height: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  background: color-mix(in srgb, var(--surface-raised) 92%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--shadow-tabbar);
+}
+
+.tabbar__brand {
+  display: none;
+}
+
+.tabbar__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: var(--tap-min);
+  color: var(--text-muted);
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tabbar__item:focus-visible {
+  outline: none;
+}
+
+.tabbar__item:focus-visible .tabbar__pill {
+  box-shadow: var(--focus-ring);
+}
+
+.tabbar__pill {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 32px;
+  border-radius: var(--r-pill);
+  transition: background-color var(--dur-med) var(--ease-out);
+}
+
+.tabbar__label {
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-medium);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.tabbar__item--active {
+  color: var(--brand-ink);
+}
+
+.tabbar__item--active .tabbar__pill {
+  background: var(--brand-soft);
+}
+
+.tabbar__item--active .tabbar__label {
+  font-weight: var(--fw-bold);
+}
+
+.tabbar__badge {
+  position: absolute;
+  top: 2px;
+  right: 14px;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  border: 2px solid var(--surface-raised);
+}
+
+@media (min-width: 900px) {
+  .app-main {
+    margin-left: var(--rail-w);
+    padding: var(--sp-6) var(--sp-8) var(--sp-10);
+  }
+
+  .tabbar {
+    top: 0;
+    right: auto;
+    width: var(--rail-w);
+    height: auto;
+    padding: var(--sp-4) 0;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--sp-2);
+    box-shadow: 1px 0 0 var(--border);
+  }
+
+  .tabbar__brand {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    margin: 0 auto var(--sp-4);
+    border-radius: 14px;
+    background: var(--brand);
+    color: var(--on-brand);
+  }
+
+  .tabbar__item {
+    padding: var(--sp-2) 0;
+  }
+
+  /* Settings at the bottom of the rail, as in desktop apps. */
+  .tabbar__item--settings {
+    margin-top: auto;
+  }
+}
+
+/* ---------- Segmented control ---------- */
+
+.segmented {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  align-self: flex-start;
+  max-width: 100%;
+}
+
+.segmented__item {
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-radius: var(--r-pill);
+  padding: var(--sp-2) var(--sp-4);
+  min-height: 36px;
+  cursor: pointer;
+}
+
+.segmented__item--active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-1);
+}
+
+.segmented__item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* ---------- Race tab ---------- */
+
+.race-tab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.race-tab__page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+/* ---------- Settings ---------- */
+
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  max-width: var(--content-max);
+  /* A dense grid row (.fatox-row/.vo2max-row) refusing to shrink below its
+     content width on a narrow screen: clip rather than push the page
+     sideways, so the bug is visible instead of a page that scrolls
+     horizontally. */
+  overflow-x: hidden;
+}

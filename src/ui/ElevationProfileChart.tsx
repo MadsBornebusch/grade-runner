@@ -171,14 +171,14 @@ export function ElevationProfileChart({ points, highlightedDistanceKm, savedPoin
                 key={km}
                 yAxisId="elevation"
                 x={km}
-                stroke="#2d6a4f"
+                stroke="var(--success)"
                 strokeWidth={2}
                 strokeDasharray="4 4"
                 ifOverflow="extendDomain"
               />
             ))}
             {highlightedDistanceKm != null && (
-              <ReferenceLine yAxisId="elevation" x={highlightedDistanceKm} stroke="#e05252" strokeWidth={2} ifOverflow="extendDomain" />
+              <ReferenceLine yAxisId="elevation" x={highlightedDistanceKm} stroke="var(--danger)" strokeWidth={2} ifOverflow="extendDomain" />
             )}
             <Brush
               dataKey="distanceKm"

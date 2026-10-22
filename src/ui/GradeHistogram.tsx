@@ -91,7 +91,7 @@ export function GradeHistogram({ bins }: GradeHistogramProps) {
                   // in practice (walking is an uphill result, braking a
                   // descent one), but the precedence is stated rather than
                   // left to render order.
-                  fill={b.hasWalking ? "#b45309" : b.hasBraking ? "#2d6a4f" : "var(--accent-border)"}
+                  fill={b.hasWalking ? "#b45309" : b.hasBraking ? "var(--success)" : "var(--accent-border)"}
                 />
               ))}
             </Bar>

@@ -64,7 +64,7 @@ export function FatOxCurveChart({ points }: FatOxCurveChartProps) {
               type="monotone"
               dataKey="carbGPerMin"
               name="carb"
-              stroke="var(--accent)"
+              stroke="var(--brand)"
               dot={false}
               strokeWidth={2}
               isAnimationActive={false}

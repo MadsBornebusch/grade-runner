@@ -198,20 +198,20 @@ export function RouteMap({
           />
           <FitBounds positions={positions} />
           <MapClickHandler routePoints={routePoints} onHighlight={onHighlight} />
-          <Polyline positions={positions} pathOptions={{ color: "var(--accent)", weight: 4 }} />
+          <Polyline positions={positions} pathOptions={{ color: "var(--brand)", weight: 4 }} />
           {savedMapPoints.map(({ km, point }) => (
             <CircleMarker
               key={km}
               center={[point!.lat, point!.lon]}
               radius={6}
-              pathOptions={{ color: "#2d6a4f", fillColor: "#2d6a4f", fillOpacity: 1, weight: 2 }}
+              pathOptions={{ color: "var(--success)", fillColor: "var(--success)", fillOpacity: 1, weight: 2 }}
             />
           ))}
           {highlightedPoint && (
             <CircleMarker
               center={[highlightedPoint.lat, highlightedPoint.lon]}
               radius={8}
-              pathOptions={{ color: "#e05252", fillColor: "#e05252", fillOpacity: 1, weight: 2 }}
+              pathOptions={{ color: "var(--danger)", fillColor: "var(--danger)", fillOpacity: 1, weight: 2 }}
             />
           )}
         </MapContainer>

@@ -56,7 +56,7 @@ export function SubstrateChart({ points }: SubstrateChartProps) {
               type="monotone"
               dataKey="cumulativeCarbG"
               name="carb"
-              stroke="var(--accent)"
+              stroke="var(--brand)"
               dot={false}
               strokeWidth={2}
               isAnimationActive={false}

@@ -42,11 +42,11 @@ export function FuelChart({ points }: FuelChartProps) {
               formatter={(value) => [`${Number(value).toFixed(0)} g`, "glycogen"]}
               labelFormatter={(v) => `${Number(v).toFixed(2)} km`}
             />
-            <ReferenceLine y={0} stroke="#e05252" strokeDasharray="4 4" label="bonk" />
+            <ReferenceLine y={0} stroke="var(--danger)" strokeDasharray="4 4" label="bonk" />
             <Line
               type="monotone"
               dataKey="glycogenG"
-              stroke="var(--accent)"
+              stroke="var(--brand)"
               dot={false}
               strokeWidth={2}
               isAnimationActive={false}

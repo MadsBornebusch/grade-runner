@@ -1,115 +1,3 @@
-.app {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 16px 24px 48px;
-}
-
-.app__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.page-carousel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.page-carousel__track {
-  display: flex;
-  /* Without this, flex's default stretch would force every page to the
-     track's own height -- which is set (in JS) from the active page's
-     height, creating a feedback loop where pages can never shrink back
-     down. Each page must size to its own content instead. */
-  align-items: flex-start;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scroll-snap-type: x mandatory;
-  /* Hide the horizontal scrollbar; navigation is via swipe/dots/arrows, not
-     a visible scrollbar (which would also make the page look scrollable
-     sideways at rest, which reads as broken layout, not a carousel). */
-  scrollbar-width: none;
-  /* Height is set inline to match the active page's real content (see
-     PageCarousel.tsx) so a short page doesn't inherit a tall one's height;
-     transition it so switching pages doesn't jump abruptly. */
-  transition: height 0.2s ease;
-}
-
-.page-carousel__track::-webkit-scrollbar {
-  display: none;
-}
-
-.page-carousel__page {
-  flex: 0 0 100%;
-  min-width: 100%;
-  scroll-snap-align: start;
-  padding: 0 2px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.page-carousel__nav {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  /* Pages stretch to the height of the tallest one (flex row default), so a
-     short page's nav can land far below its own content once the page
-     scrolls natively. Sticking it to the viewport bottom keeps page
-     switching reachable without scrolling back up first. */
-  position: sticky;
-  bottom: 0;
-  background: var(--bg);
-  padding: 8px 0;
-  z-index: 5;
-}
-
-.page-carousel__arrow {
-  font: inherit;
-  font-size: 20px;
-  line-height: 1;
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: none;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.page-carousel__arrow:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
-.page-carousel__dots {
-  display: flex;
-  gap: 4px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 2px;
-}
-
-.page-carousel__dot {
-  font: inherit;
-  font-size: 13px;
-  padding: 6px 12px;
-  border: none;
-  border-radius: 6px;
-  background: none;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.page-carousel__dot.active {
-  background: var(--accent-bg);
-  color: var(--text-h);
-}
-
 .placeholder {
   color: var(--text);
   opacity: 0.7;
@@ -295,7 +183,7 @@
 
 .field-group-note {
   font-size: 13px;
-  color: var(--accent);
+  color: var(--brand-ink);
   margin: 0;
 }
 
@@ -409,7 +297,7 @@
 .button-primary {
   align-self: flex-start;
   border: none;
-  background: var(--accent);
+  background: var(--brand);
   color: var(--accent-fg);
   border-radius: 6px;
   padding: 8px 16px;
@@ -705,7 +593,7 @@
   font-size: 12px;
   border: 1px solid var(--border);
   background: none;
-  color: var(--accent);
+  color: var(--brand-ink);
   border-radius: 6px;
   padding: 4px 10px;
   cursor: pointer;
@@ -827,90 +715,6 @@
   font-size: 13px;
 }
 
-.app__settings-button {
-  position: relative;
-  font-size: 20px;
-  line-height: 1;
-  width: 36px;
-  height: 36px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: none;
-  color: var(--text);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.app__settings-badge {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: var(--accent);
-  border: 2px solid var(--bg);
-}
-
-.settings-modal__overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  z-index: 10;
-}
-
-.settings-modal__card {
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  width: min(640px, 100%);
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.settings-modal__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-}
-
-.settings-modal__header h2 {
-  margin: 0;
-  font-size: 18px;
-}
-
-.settings-modal__close {
-  font-size: 20px;
-  line-height: 1;
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: none;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.settings-modal__body {
-  overflow-y: auto;
-  /* Safety net against the exact bug fixed below (a dense grid row -- e.g.
-     .fatox-row/.vo2max-row -- refusing to shrink below its content width on
-     a narrow screen and bleeding out past the modal's edge): clip rather
-     than silently overflow, so a similar future layout bug is visually
-     obvious (content cut off) instead of invisible (content pushed off
-     past the visible viewport with no scrollbar). */
-  overflow-x: hidden;
-  padding: 16px;
-}
-
 /* Narrow phone screens: the dense multi-input rows below (.fatox-row's
    pace/fat/carb/HR inputs each with their own unit label, .vo2max-row's
    date/value/unit/source) were designed for desktop width and have no room
@@ -921,14 +725,6 @@
    handles this for free -- no JSX change needed, since these are flat
    lists of grid items in a fixed DOM order, not paired sub-containers). */
 @media (max-width: 480px) {
-  .settings-modal__overlay {
-    padding: 12px;
-  }
-
-  .settings-modal__body {
-    padding: 12px;
-  }
-
   .fatox-row {
     grid-template-columns: 1fr auto;
   }
@@ -954,7 +750,7 @@
   margin-right: 0.15rem;
 }
 .grade-histogram__swatch--walk { background: #b45309; }
-.grade-histogram__swatch--brake { background: #2d6a4f; }
+.grade-histogram__swatch--brake { background: var(--success); }
 .grade-histogram__swatch--plain { background: var(--accent-border); }
 
 /* Selected course. Deliberately several redundant cues -- a tinted

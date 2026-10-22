@@ -1,51 +1,3 @@
-:root {
-  --text: #3f3b45;
-  --text-h: #08060d;
-  --bg: #fff;
-  --bg-alt: #f7f6f4;
-  --border: #e5e4e7;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.12);
-  --accent-border: rgba(170, 59, 255, 0.6);
-  /* Text color for content placed ON TOP of a solid --accent fill (e.g. a
-     primary button) -- kept separate from --accent itself since dark mode's
-     accent is a light lavender chosen to read on a dark page background,
-     which would fail contrast if reused as a button fill with white text. */
-  --accent-fg: #fff;
-  --warn: #e05252;
-  --warn-bg: rgba(224, 82, 82, 0.1);
-  --terrain-bg: rgba(150, 100, 40, 0.14);
-
-  --sans: system-ui, "Segoe UI", Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
-
-  font: 16px/145% var(--sans);
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #c7c3cc;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --bg-alt: #1c1d24;
-    --border: #2e303a;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --accent-fg: #201229;
-    --warn: #f28b8b;
-    --warn-bg: rgba(242, 139, 139, 0.12);
-    --terrain-bg: rgba(210, 160, 90, 0.18);
-  }
-}
-
 * {
   box-sizing: border-box;
 }
@@ -94,13 +46,27 @@ input[type="number"] {
 }
 
 fieldset {
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: none;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
   margin: 0;
+  padding: var(--sp-4);
+  min-width: 0;
 }
 
+/* Floated so the legend sits inside the card as its title, not on the
+   (now absent) border line. */
 legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-lg);
   font-weight: 600;
-  color: var(--text-h);
-  padding: 0 6px;
+  color: var(--text);
+}
+
+legend + * {
+  clear: both;
 }

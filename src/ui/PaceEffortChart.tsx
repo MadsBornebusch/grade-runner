@@ -91,15 +91,15 @@ export function PaceEffortChart({ actual, planned, plannedThetaFraction, highlig
             <Legend />
             <ReferenceLine yAxisId="effort" y={100} stroke="var(--text)" strokeOpacity={0.4} strokeDasharray="3 3" />
             {highlightedDistanceKm != null && (
-              <ReferenceLine yAxisId="effort" x={highlightedDistanceKm} stroke="#e05252" strokeWidth={2} ifOverflow="extendDomain" />
+              <ReferenceLine yAxisId="effort" x={highlightedDistanceKm} stroke="var(--danger)" strokeWidth={2} ifOverflow="extendDomain" />
             )}
             {plannedThetaFraction !== null && (
               <ReferenceLine
                 yAxisId="effort"
                 y={plannedThetaFraction * 100}
-                stroke="var(--accent)"
+                stroke="var(--brand)"
                 strokeDasharray="3 3"
-                label={{ value: "planned", position: "insideTopLeft", fill: "var(--accent)", fontSize: 11 }}
+                label={{ value: "planned", position: "insideTopLeft", fill: "var(--brand)", fontSize: 11 }}
               />
             )}
             <Line
@@ -108,7 +108,7 @@ export function PaceEffortChart({ actual, planned, plannedThetaFraction, highlig
               type="monotone"
               dataKey="paceMinPerKm"
               name="Planned pace"
-              stroke="var(--accent)"
+              stroke="var(--brand)"
               strokeDasharray="4 4"
               dot={false}
               strokeWidth={1.5}
@@ -131,7 +131,7 @@ export function PaceEffortChart({ actual, planned, plannedThetaFraction, highlig
               type="monotone"
               dataKey="effortPct"
               name="Effort %"
-              stroke="#e05252"
+              stroke="var(--danger)"
               dot={false}
               strokeWidth={1.5}
               isAnimationActive={false}

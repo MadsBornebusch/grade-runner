@@ -112,7 +112,7 @@ export function PowerHrChart({ points, hasPower, hasHeartRate, hasCalibratedPowe
               type="monotone"
               dataKey="modeledPowerW"
               name="Modeled power"
-              stroke="var(--accent)"
+              stroke="var(--brand)"
               strokeDasharray="4 4"
               dot={false}
               strokeWidth={1.5}
@@ -138,7 +138,7 @@ export function PowerHrChart({ points, hasPower, hasHeartRate, hasCalibratedPowe
                 type="monotone"
                 dataKey="heartRateBpm"
                 name="Heart rate"
-                stroke="#e05252"
+                stroke="var(--danger)"
                 dot={false}
                 strokeWidth={1.5}
                 isAnimationActive={false}
