@@ -16,6 +16,9 @@ export interface GoalRaceSettings {
   /** The planner's finish-time prediction for the course, cached so the
    * plan doesn't wait for a long solve on every open. */
   predictedFinishS: number | null;
+  /** Race effort from the same prediction (solverInputs.ts's
+   * RacePrediction), for the long runs' steady block. */
+  raceEffortWPerKg?: number | null;
   /** The athlete's own expected finish, used instead of the prediction. */
   expectedHoursOverride: number | null;
   /** goalRace.ts's predictionKey of the settings the prediction used. */

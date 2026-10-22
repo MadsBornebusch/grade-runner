@@ -1,8 +1,9 @@
-import { CaretRight, CheckCircle, CircleHalf, Couch, ForkKnife, TrendDown, XCircle } from "@phosphor-icons/react";
+import { CaretRight, CheckCircle, CircleHalf, Couch, ForkKnife, Heartbeat, TrendDown, XCircle } from "@phosphor-icons/react";
 import { KIND_ICON } from "./kindIcons";
 import type { PlannedSession } from "../../plan/planGenerator";
 import type { SessionState } from "../../plan/matchSessions";
-import { KIND_TITLE, distanceLine, formatMinutes, formatMinutesExact } from "./planCopy";
+import { KIND_TITLE, distanceLine, effortChip, formatMinutes, formatMinutesExact } from "./planCopy";
+import type { IntensityTargets } from "./intensity";
 
 interface SessionCardProps {
   session: PlannedSession;
@@ -11,10 +12,12 @@ interface SessionCardProps {
   ranMin?: number;
   /** Bigger type, for Today's hero. */
   hero?: boolean;
+  /** Heart-rate targets for the effort chip. */
+  targets: IntensityTargets;
   onOpen?: () => void;
 }
 
-export function SessionCard({ session, state, ranMin, hero, onOpen }: SessionCardProps) {
+export function SessionCard({ session, state, ranMin, hero, targets, onOpen }: SessionCardProps) {
   const KindIcon = KIND_ICON[session.kind];
   const key = session.kind === "long" || session.kind === "race";
   const isRun = session.kind !== "strength" && session.kind !== "race";
@@ -26,6 +29,7 @@ export function SessionCard({ session, state, ranMin, hero, onOpen }: SessionCar
     state === "done" && "session-card--done",
     state === "skipped" && "session-card--missed",
   ].filter(Boolean).join(" ");
+  const effort = state === "done" ? null : effortChip(session, targets);
   return (
     <button type="button" className={cls} onClick={onOpen} disabled={!onOpen}>
       <span className="session-card__tile" aria-hidden="true">
@@ -44,8 +48,13 @@ export function SessionCard({ session, state, ranMin, hero, onOpen }: SessionCar
             {isRun && ` · ${distanceLine(session)}`}
           </span>
         )}
-        {(session.descentM >= 50 && isRun) || session.carbsGPerH ? (
+        {(session.descentM >= 50 && isRun) || session.carbsGPerH || effort ? (
           <span className="session-card__chips">
+            {effort && (
+              <span className={`chip chip--effort${session.steadyMinutes || session.kind === "quality" ? " chip--effort-up" : ""}`}>
+                <Heartbeat size={14} /> {effort}
+              </span>
+            )}
             {isRun && session.descentM >= 50 && (
               <span className="chip chip--descent">
                 <TrendDown size={14} /> {Math.round(session.descentM / 10) * 10} m down

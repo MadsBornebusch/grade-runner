@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { intensityTargets } from "../plan/intensity";
 import { dateOfDayNumber, dayNumberOf } from "../../plan/historyFromRuns";
 import { mondayOf, type PlannedSession } from "../../plan/planGenerator";
 import { expectedHoursOf, planSettingsStore } from "../../storage/planSettings";
@@ -28,6 +29,7 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
   const [moving, setMoving] = useState<number | null>(null);
   const race = settings.goalRace;
   const hours = race ? expectedHoursOf(race) : null;
+  const targets = useMemo(() => intensityTargets(formInputs, race?.raceEffortWPerKg), [formInputs, race?.raceEffortWPerKg]);
 
   if (rest[0] === "edit") {
     return (
@@ -123,6 +125,7 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
         history={history}
         today={plan.today}
         strengthDone={settings.strengthDone}
+        targets={targets}
         onOpen={setOpenSession}
         onPrev={index > 0 ? () => goWeek(index - 1) : undefined}
         onNext={index < p.weeks.length - 1 ? () => goWeek(index + 1) : undefined}
@@ -137,6 +140,7 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
           raceName={race!.name}
           raceGPerH={formInputs.intakeGPerH}
           strengthCounts={settings.schedule.strengthCountsInBudget}
+          targets={targets}
           strengthDone={!!settings.strengthDone[dateOfDayNumber(openSession.day)]}
           onToggleStrength={() => toggleStrength(openSession.day)}
           onMoveLongRun={openSession.kind === "long" && canMove ? () => setMoving(weekdayOf(openSession.day)) : undefined}

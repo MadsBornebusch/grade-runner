@@ -2,6 +2,7 @@
 // model's words: "chronic", "load", "mechanical", "guard".
 import type { Phase, PlannedSession, SessionKind } from "../../plan/planGenerator";
 import { dateOfDayNumber } from "../../plan/historyFromRuns";
+import type { IntensityTargets } from "./intensity";
 
 export const PHASE_LABEL: Record<Phase, string> = {
   recovery: "Recover",
@@ -32,16 +33,60 @@ export const KIND_TITLE: Record<SessionKind, string> = {
   race: "Race day",
 };
 
-export function howToRun(s: PlannedSession, raceName: string, strengthCounts: boolean): string {
+const NO_TARGETS: IntensityTargets = { easyMaxHr: null, steady: null, quality: null, raceAtLt1: false };
+
+const bpm = (lo: number, hi: number) => `${lo}–${hi} bpm`;
+
+/** Short effort label for a session card; null where the kind says it all. */
+export function effortChip(s: PlannedSession, t: IntensityTargets): string | null {
+  if (s.kind === "long") {
+    if (s.steadyMinutes) return `${s.steadyMinutes} min steady${t.steady ? ` · ${bpm(t.steady.lo, t.steady.hi)}` : ""}`;
+    return t.easyMaxHr ? `Easy · under ${t.easyMaxHr} bpm` : "Easy";
+  }
+  if (s.kind === "quality") return t.quality ? `Threshold · ${bpm(t.quality.lo, t.quality.hi)}` : "Comfortably hard";
+  return null;
+}
+
+/** The effort line of a session's detail sheet. */
+export function effortDetail(s: PlannedSession, t: IntensityTargets): string | null {
+  const easy = t.easyMaxHr ? `Easy, under ${t.easyMaxHr} bpm` : "Easy, conversational";
   switch (s.kind) {
     case "easy":
-      return "Relaxed. You can talk in full sentences.";
-    case "long":
-      return `Easy and steady, walk the steep climbs.${s.carbsGPerH ? ` Take carbs from the first 20 min, a little every 20 min: ${s.carbsGPerH} g/h today.` : ""}`;
-    case "quality":
-      return "Warm up, then 20–30 min comfortably hard (around your 1-hour race effort), then easy.";
     case "descent":
-      return `A hilly route with about ${Math.round(s.descentM / 10) * 10} m of descent. Run the downhills controlled; it trains your legs for the race's descents.`;
+      return easy;
+    case "long":
+      return s.steadyMinutes
+        ? `${easy}, with ${s.steadyMinutes} min steady${t.steady ? ` at ${bpm(t.steady.lo, t.steady.hi)}` : " at race effort"}`
+        : easy;
+    case "quality":
+      return t.quality ? `Threshold, ${bpm(t.quality.lo, t.quality.hi)}` : "Comfortably hard, around your 1-hour race effort";
+    default:
+      return null;
+  }
+}
+
+export function howToRun(s: PlannedSession, raceName: string, strengthCounts: boolean, t: IntensityTargets = NO_TARGETS): string {
+  const under = t.easyMaxHr ? ` (under ${t.easyMaxHr} bpm)` : "";
+  switch (s.kind) {
+    case "easy":
+      return `Relaxed${under}. You can talk in full sentences.`;
+    case "long": {
+      const carbs = s.carbsGPerH ? ` Take carbs from the first 20 min, a little every 20 min: ${s.carbsGPerH} g/h today.` : "";
+      if (!s.steadyMinutes) {
+        return `Easy and steady${under}, walk the steep climbs. On a long run heart rate creeps up, so treat it as a ceiling: slow down rather than push to stay in range.${carbs}`;
+      }
+      const range = t.steady ? `, ${bpm(t.steady.lo, t.steady.hi)}` : "";
+      const effort = t.raceAtLt1 ? "steady, just under the top of easy" : "race effort";
+      return (
+        `Easy${under} for the first ${formatMinutes(s.minutes - s.steadyMinutes - 15)}, then ${s.steadyMinutes} min ${effort}${range}: ` +
+        `steady, short sentences only. Finish with about 15 min easy. You're at your longest run, so it grows in effort now, not time: ` +
+        `running race effort on tired legs is what the race asks for. Keep it all easy if you slept badly or feel off.${carbs}`
+      );
+    }
+    case "quality":
+      return `Warm up, then 20–30 min comfortably hard${t.quality ? ` (${bpm(t.quality.lo, t.quality.hi)})` : ""}, around your 1-hour race effort, then easy.`;
+    case "descent":
+      return `A hilly route with about ${Math.round(s.descentM / 10) * 10} m of descent, easy effort on the climbs${under}. Run the downhills controlled; it trains your legs for the race's descents.`;
     case "strength":
       return `${Math.round(s.minutes)} min legs and core. ${strengthCounts ? "Counted in your hours." : "Not counted in your running hours."}`;
     case "race":

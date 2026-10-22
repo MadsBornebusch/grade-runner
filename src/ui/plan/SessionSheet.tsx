@@ -3,7 +3,8 @@ import type { DatedHistoryRun } from "../../plan/historyFromRuns";
 import type { PlannedSession } from "../../plan/planGenerator";
 import { GUARD_FLOORS, SESSION_GUARD_MULTIPLE } from "../../plan/sessionGuard";
 import { Sheet } from "./Sheet";
-import { KIND_TITLE, dayLabel, distanceLine, formatMinutes, formatMinutesExact, howToRun } from "./planCopy";
+import { KIND_TITLE, dayLabel, distanceLine, effortDetail, formatMinutes, formatMinutesExact, howToRun } from "./planCopy";
+import type { IntensityTargets } from "./intensity";
 
 interface SessionSheetProps {
   session: PlannedSession;
@@ -11,15 +12,17 @@ interface SessionSheetProps {
   raceName: string;
   raceGPerH: number;
   strengthCounts: boolean;
+  targets: IntensityTargets;
   strengthDone: boolean;
   onToggleStrength: () => void;
   onMoveLongRun?: () => void;
   onClose: () => void;
 }
 
-export function SessionSheet({ session: s, runs, raceName, raceGPerH, strengthCounts, strengthDone, onToggleStrength, onMoveLongRun, onClose }: SessionSheetProps) {
+export function SessionSheet({ session: s, runs, raceName, raceGPerH, strengthCounts, targets, strengthDone, onToggleStrength, onMoveLongRun, onClose }: SessionSheetProps) {
   const isRun = s.kind !== "strength" && s.kind !== "race";
   const ref = s.allowance;
+  const effort = effortDetail(s, targets);
   return (
     <Sheet title={`${dayLabel(s.day)} · ${KIND_TITLE[s.kind]}`} onClose={onClose}>
       {s.kind !== "race" && (
@@ -30,6 +33,17 @@ export function SessionSheet({ session: s, runs, raceName, raceGPerH, strengthCo
       )}
       {isRun && (
         <dl className="facts">
+          {effort && (
+            <>
+              <dt>Effort</dt>
+              <dd className="num">
+                {effort}
+                {targets.easyMaxHr === null && (
+                  <span className="facts__note">Add your LT1 heart rate in Settings, or lab stages with heart rate, for heart-rate targets.</span>
+                )}
+              </dd>
+            </>
+          )}
           {s.descentM >= 50 && (
             <>
               <dt>Descent</dt>
@@ -69,7 +83,7 @@ export function SessionSheet({ session: s, runs, raceName, raceGPerH, strengthCo
       ) : (
         <div className="how-block">
           <h3>How to run it</h3>
-          <p>{howToRun(s, raceName, strengthCounts)}</p>
+          <p>{howToRun(s, raceName, strengthCounts, targets)}</p>
         </div>
       )}
 

@@ -1,4 +1,5 @@
 import { CaretLeft, CaretRight, DotsThreeOutline, Path, PersonSimpleRun } from "@phosphor-icons/react";
+import type { IntensityTargets } from "./intensity";
 import { dateOfDayNumber, type DatedHistoryRun } from "../../plan/historyFromRuns";
 import { matchWeek } from "../../plan/matchSessions";
 import type { PlannedSession, PlanWeek } from "../../plan/planGenerator";
@@ -13,6 +14,7 @@ interface WeekViewProps {
   history: DatedHistoryRun[];
   today: number;
   strengthDone: Record<string, true>;
+  targets: IntensityTargets;
   onOpen: (session: PlannedSession) => void;
   onPrev?: () => void;
   onNext?: () => void;
@@ -21,7 +23,7 @@ interface WeekViewProps {
   onAllWeeks: () => void;
 }
 
-export function WeekView({ week, weekNumber, weekCount, history, today, strengthDone, onOpen, onPrev, onNext, onMoveLongRun, onEditSchedule, onAllWeeks }: WeekViewProps) {
+export function WeekView({ week, weekNumber, weekCount, history, today, strengthDone, targets, onOpen, onPrev, onNext, onMoveLongRun, onEditSchedule, onAllWeeks }: WeekViewProps) {
   const { doneMin, plannedMin, isCurrent } = weekProgress(week, history, today);
   const isPast = week.start + 7 <= today;
   const days = matchWeek(week.start, week.sessions, history, today);
@@ -117,6 +119,7 @@ export function WeekView({ week, weekNumber, weekCount, history, today, strength
                   session={s}
                   state={s.kind === "strength" ? (strengthDone[dateOfDayNumber(s.day)] ? "done" : null) : d.state}
                   ranMin={s.kind === "strength" ? undefined : runMin}
+                  targets={targets}
                   onOpen={() => onOpen(s)}
                 />
               ))}

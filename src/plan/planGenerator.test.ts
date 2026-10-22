@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  carbTargets, generatePlan, recoveryWeeks, slotsForWeek, strengthDaysOf, suggestLongRunMaxMinutes, type HistoryRun, type PlanOptions, type WeeklySchedule,
+  carbTargets, generatePlan, recoveryWeeks, slotsForWeek, steadyBlockMinutes, strengthDaysOf, suggestLongRunMaxMinutes, type HistoryRun, type PlanOptions, type WeeklySchedule,
 } from "./planGenerator";
 import { guardBreaches, referenceAt, runReferences } from "./sessionGuard";
 
@@ -199,5 +199,39 @@ describe("generatePlan structure", () => {
     const plan = generatePlan(hist, small, { name: "r", day: TODAY + 120, expectedHours: 6 }, TODAY, OPTIONS);
     expect(plan.warnings.some((w) => w.includes("below the level before comparable past races"))).toBe(true);
     expect(plan.budgetBindsFrom).not.toBeNull();
+  });
+});
+
+describe("steady block on capped long runs", () => {
+  it("starts at zero, grows 10 min per earlier capped run, and caps at a third and an hour", () => {
+    expect(steadyBlockMinutes(100, 150, 180, [86, 72])).toBe(0); // under the cap
+    expect(steadyBlockMinutes(100, 180, 180, [])).toBe(0); // first capped run
+    expect(steadyBlockMinutes(100, 180, 180, [86])).toBe(10);
+    expect(steadyBlockMinutes(100, 180, 180, [86, 72, 58])).toBe(30);
+    expect(steadyBlockMinutes(100, 120, 120, [90, 80, 70, 60, 50])).toBe(40); // a third of 120
+    expect(steadyBlockMinutes(400, 210, 210, Array.from({ length: 12 }, (_, k) => 386 - 14 * k))).toBe(60);
+  });
+
+  it("starts over after a gap of more than four weeks", () => {
+    expect(steadyBlockMinutes(100, 180, 180, [86, 72])).toBe(20);
+    expect(steadyBlockMinutes(100, 180, 180, [70, 56])).toBe(0);
+    expect(steadyBlockMinutes(100, 180, 180, [86, 50])).toBe(10);
+  });
+
+  it("only appears in build weeks once the long run is at the cap, growing and adding load", () => {
+    const schedule: WeeklySchedule = { weeklyMinutes: 360, longRunWeekday: 5, longRunMaxMinutes: 150 };
+    const plan = generatePlan(history(rng(11), 20, 3, 50, 120), schedule, { name: "r", day: TODAY + 150, expectedHours: 10 }, TODAY, OPTIONS);
+    const longs = plan.weeks.flatMap((w) => w.sessions.filter((x) => x.kind === "long").map((x) => ({ x, phase: w.phase })));
+    for (const { x, phase } of longs) {
+      if (!x.steadyMinutes) continue;
+      expect(["base", "specific"]).toContain(phase);
+      expect(x.minutes).toBeGreaterThanOrEqual(0.95 * 150);
+      expect(x.mechanical).toBeGreaterThan((x.minutes / 60) * OPTIONS.easyDensity);
+      expect(x.steadyMinutes).toBeLessThanOrEqual(x.minutes / 3);
+    }
+    const blocks = longs.map(({ x }) => x.steadyMinutes ?? 0).filter((m) => m > 0);
+    expect(blocks.length).toBeGreaterThan(2);
+    expect(Math.max(...blocks)).toBeGreaterThan(blocks[0]);
+    expect(longs.some(({ x, phase }) => (phase === "deload" || phase === "taper") && x.steadyMinutes)).toBe(false);
   });
 });

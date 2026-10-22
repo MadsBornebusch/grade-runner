@@ -15,7 +15,10 @@
 //     intensity (the intensity default leans polarized);
 //   - every session is checked against sessionGuard.ts's per-run reference,
 //     which includes the sessions planned in earlier weeks;
-//   - descent and steep descent progress as their own weekly targets.
+//   - descent and steep descent progress as their own weekly targets;
+//   - once the long run reaches the athlete's longest-run cap, it grows in
+//     intensity instead of time: a steady block at race effort near its
+//     end, a little longer each capped long run (steadyBlockMinutes).
 // Strength sessions are scheduled but carry no running load.
 //
 // Constants marked "assumption" are starting values to check, not
@@ -157,6 +160,9 @@ export interface PlannedSession {
   steepDescentM: number;
   /** Carbs to take, g per hour (runs of FUELLED_RUN_MINUTES or more). */
   carbsGPerH?: number;
+  /** Long runs at the time cap: minutes near the end at steady race effort
+   * (up to LT1) rather than easy. The rest of the run stays easy. */
+  steadyMinutes?: number;
   /** The session guard's limits on this day: show the session as "N min or
    * M km, whichever comes first" from these, not from the speed estimate. */
   allowance?: RunReference;
@@ -236,6 +242,43 @@ export function taperFractions(expectedHours: number): number[] {
   return expectedHours >= 3 ? [0.7, 0.5] : [0.6];
 }
 
+/** Assumption: a long run of at least this share of the athlete's
+ * longest-run cap counts as at the cap (planned runs are floored to whole
+ * minutes, done ones rarely land on the exact minute). */
+export const CAPPED_LONG_RUN_SHARE = 0.95;
+/** Assumption: capped long runs at most this many days apart form one
+ * progression; a longer gap (illness, a race, a break) starts it over.
+ * Long enough for a deload between two long-run weeks. */
+const STEADY_STREAK_GAP_DAYS = 28;
+/** Assumptions: the steady block grows 10 min per earlier capped long run
+ * in the streak, up to a third of the run and at most an hour, so the
+ * first capped long run is all easy. */
+const STEADY_STEP_MINUTES = 10;
+const STEADY_MAX_SHARE = 1 / 3;
+const STEADY_MAX_MINUTES = 60;
+/** Assumption: race effort sits a quarter of the way from easy to
+ * threshold density. For a long race it is at or below LT1, so the block
+ * adds little load; its point is race-specific running on tired legs. */
+const STEADY_DENSITY_SHARE = 0.25;
+
+/**
+ * Minutes of steady running in a long run of `minutes` on `day`, given the
+ * days of earlier capped long runs (done or planned). Zero below the cap:
+ * time on feet comes first, intensity only once time can't grow.
+ */
+export function steadyBlockMinutes(day: number, minutes: number, capMinutes: number, cappedDays: number[]): number {
+  if (minutes < CAPPED_LONG_RUN_SHARE * capMinutes) return 0;
+  let streak = 0;
+  let after = day;
+  for (const d of [...cappedDays].filter((x) => x < day).sort((a, b) => b - a)) {
+    if (after - d > STEADY_STREAK_GAP_DAYS) break;
+    streak++;
+    after = d;
+  }
+  const block = Math.min(STEADY_STEP_MINUTES * streak, STEADY_MAX_SHARE * minutes, STEADY_MAX_MINUTES);
+  return Math.floor(block / 5) * 5;
+}
+
 export const mondayOf = (day: number) => day - ((((day + 3) % 7) + 7) % 7); // 1970-01-01 was a Thursday
 
 export function generatePlan(
@@ -260,6 +303,9 @@ export function generatePlan(
   const firstDay = past[0]?.day ?? today;
   const planned: HistoryRun[] = [];
   const nonRace = () => [...past.filter((_, i) => !isRace[i]), ...planned];
+  // Long runs at the time cap so far, done then planned, for the steady
+  // block's progression.
+  const cappedDays = past.filter((r, i) => !isRace[i] && r.movingMin >= CAPPED_LONG_RUN_SHARE * schedule.longRunMaxMinutes).map((r) => r.day);
 
   // Daily mechanical series from the first run to `upTo` (exclusive),
   // history plus planned sessions, capped like the ledger.
@@ -350,6 +396,7 @@ export function generatePlan(
     const sessions = planWeek(start, phase, target, referenceAt(runsSoFar, start), allowOn, availability, longRunWeekday, race, options, {
       lastWeekDescent, lastWeekSteep, strengthSessions, strengthMinutes, budgetMinutes: Math.max(0, budgetPerWeek - doneMinutes), fromDay: today,
       prevLongDay, nextLongDay: start + 7 + (schedule.longRunWeekdayByWeek?.get(start + 7) ?? schedule.longRunWeekday),
+      longRunCapMinutes: schedule.longRunMaxMinutes, cappedDays,
     });
     const plannedMech = sessions.reduce((s, x) => s + x.mechanical, 0);
     const plannedMin = sessions
@@ -369,7 +416,9 @@ export function generatePlan(
     const runs = sessions.filter((s) => s.kind !== "strength" && s.kind !== "race");
     lastWeekDescent = runs.reduce((s, x) => s + x.descentM, 0);
     lastWeekSteep = runs.reduce((s, x) => s + x.steepDescentM, 0);
-    prevLongDay = sessions.find((x) => x.kind === "long")?.day ?? null;
+    const long = sessions.find((x) => x.kind === "long");
+    prevLongDay = long?.day ?? null;
+    if (long && long.minutes >= CAPPED_LONG_RUN_SHARE * schedule.longRunMaxMinutes) cappedDays.push(long.day);
     weeks.push({
       start, phase, chronicAtStart: chronic, targetMechanical: target, plannedMechanical: plannedMech, plannedMinutes: plannedMin,
       budgetMinutes: budgetPerWeek, budgetBinds: binds, longRunWeek, sessions, notes,
@@ -427,6 +476,8 @@ interface WeekState {
    * so "the day after / before the long run" works across week ends. */
   prevLongDay: number | null;
   nextLongDay: number;
+  longRunCapMinutes: number;
+  cappedDays: number[];
 }
 
 /** Assumption: weekly descent and steep descent grow at most 10% a week
@@ -494,6 +545,12 @@ function planWeek(
     const minutes = Math.floor(Math.min(free.get(longRunWeekday)!, weekLeft, allow.movingMin, maxByDistance) * lighter);
     if (minutes >= MIN_RUN_MINUTES) {
       const s = session(start + longRunWeekday, "long", minutes, o.easyDensity);
+      // Build weeks only: lighter weeks and the taper keep it all easy.
+      const steady = phase === "base" || phase === "specific" ? steadyBlockMinutes(s.day, minutes, state.longRunCapMinutes, state.cappedDays) : 0;
+      if (steady > 0) {
+        s.steadyMinutes = steady;
+        s.mechanical += (steady / 60) * STEADY_DENSITY_SHARE * (o.maxDensity - o.easyDensity);
+      }
       runs.push(s);
       remaining -= s.mechanical;
       weekLeft -= minutes;

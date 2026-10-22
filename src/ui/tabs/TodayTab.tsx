@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { intensityTargets } from "../plan/intensity";
 import { ArrowsClockwise, CaretRight, CheckCircle, FlagCheckered, Moon, XCircle } from "@phosphor-icons/react";
 import { useSyncExternalStore } from "react";
 import { runsNeedingFuelLog } from "../../plan/carbLadder";
@@ -32,6 +33,7 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
   const backfill = useSyncExternalStore(subscribeToBackfill, getBackfillStatus);
   const [openSession, setOpenSession] = useState<PlannedSession | null>(null);
   const race = settings.goalRace;
+  const targets = useMemo(() => intensityTargets(formInputs, race?.raceEffortWPerKg), [formInputs, race?.raceEffortWPerKg]);
   const today = plan.today;
   const now = new Date();
   const header = (
@@ -111,6 +113,7 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
               key={s.kind}
               session={s}
               hero={s === runToday}
+              targets={targets}
               state={s.kind === "strength" ? (settings.strengthDone[dateOfDayNumber(today)] ? "done" : null) : match.state === "today" ? null : match.state}
               ranMin={match.runs.reduce((a, r) => a + r.movingMin, 0) || undefined}
               onOpen={() => setOpenSession(s)}
@@ -176,6 +179,7 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
           raceName={race?.name ?? "Race"}
           raceGPerH={formInputs.intakeGPerH}
           strengthCounts={settings.schedule.strengthCountsInBudget}
+          targets={targets}
           strengthDone={!!settings.strengthDone[dateOfDayNumber(openSession.day)]}
           onToggleStrength={() =>
             planSettingsStore.set((st) => {

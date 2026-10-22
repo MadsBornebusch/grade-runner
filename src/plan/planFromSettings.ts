@@ -32,8 +32,10 @@ export function planInputsKey(settings: PlanSettings, carbs: CarbInputs): string
   const race = settings.goalRace;
   const hours = race && expectedHoursOf(race);
   if (!race || !hours) return null;
+  // The leading version bumps when the generator's output changes shape,
+  // so stored snapshots regenerate.
   return JSON.stringify([
-    race.courseId, race.date, race.descentM, race.steepDescentM, roundedExpectedHours(hours),
+    2, race.courseId, race.date, race.descentM, race.steepDescentM, roundedExpectedHours(hours),
     settings.schedule, settings.longRunMoves, carbs.raceGPerH, settings.carbsStartGPerH,
   ]);
 }

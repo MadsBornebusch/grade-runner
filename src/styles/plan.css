@@ -335,6 +335,7 @@
 
 .chip--descent { background: var(--kind-descent-soft); color: var(--kind-descent-ink); }
 .chip--long { background: var(--kind-long-soft); color: var(--kind-long-ink); }
+.chip--effort-up { background: var(--kind-quality-soft); color: var(--kind-quality-ink); }
 .chip--info { background: var(--info-soft); color: var(--info); cursor: pointer; list-style: none; }
 .chip--info::-webkit-details-marker { display: none; }
 

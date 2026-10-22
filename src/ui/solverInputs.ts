@@ -32,16 +32,35 @@ export function buildSolverInputs(segments: CourseSegment[], formInputs: FormInp
   };
 }
 
+export interface RacePrediction {
+  finishS: number;
+  /** Time-weighted gross power (W/kg) off the descents: the effort the
+   * plan calls "race effort" (descents run below it, capped by the legs). */
+  effortWPerKg: number | null;
+}
+
 /** The headline finish time the Pacing view shows without a target: the
  * athlete's own pacing-margin curve when fitted, else the zero-margin
  * ceiling. No surface lookup (a network call), so it can differ slightly
  * from the Pacing view on courses with much unpaved ground. */
-export function predictFinishS(segments: CourseSegment[], formInputs: FormInputs, intakeGPerH = formInputs.intakeGPerH): number | null {
+export function predictRace(segments: CourseSegment[], formInputs: FormInputs, intakeGPerH = formInputs.intakeGPerH): RacePrediction | null {
   if (segments.length === 0) return null;
   const inputs = buildSolverInputs(segments, { ...formInputs, intakeGPerH });
   const margin = formInputs.pacingMargin;
-  const result = margin
+  const { result } = margin
     ? findFlatPacedFinishTime(inputs, { marginCurve: (h) => predictMarginTheta(h, margin) })
     : findFlatPacedFinishTime(inputs);
-  return Number.isFinite(result.result.finishTimeS) ? result.result.finishTimeS : null;
+  if (!Number.isFinite(result.finishTimeS)) return null;
+  let time = 0;
+  let work = 0;
+  for (const r of result.segments) {
+    if ((segments[r.index]?.gradient ?? 0) < -0.02) continue;
+    time += r.timeS;
+    work += r.timeS * r.grossPowerWPerKg;
+  }
+  return { finishS: result.finishTimeS, effortWPerKg: time > 0 ? work / time : null };
+}
+
+export function predictFinishS(segments: CourseSegment[], formInputs: FormInputs, intakeGPerH = formInputs.intakeGPerH): number | null {
+  return predictRace(segments, formInputs, intakeGPerH)?.finishS ?? null;
 }
