@@ -392,13 +392,6 @@
   margin-bottom: 12px;
 }
 
-.generic-course {
-  border: 1px dashed var(--border);
-  border-radius: 8px;
-  padding: 12px;
-  margin: 12px 0;
-}
-
 .generic-course__control {
   display: flex;
   flex-direction: column;

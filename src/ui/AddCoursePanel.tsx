@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { GpxPoint, PipelineResult, RawCourseStats } from "../gpx/pipeline";
 import { createFlatCourse } from "../gpx/genericCourse";
 import { CourseDebugChart, type ProcessedDebugPoint } from "./CourseDebugChart";
@@ -6,6 +6,7 @@ import { CourseProcessingFields } from "./InputsPanel";
 import { GpxUpload } from "./GpxUpload";
 import { StravaImport } from "./StravaImport";
 import type { FormInputs } from "./formInputs";
+import { Sheet } from "./plan/Sheet";
 
 /** Plain distance-in, flat-course-out form -- the third "add course" source
  * alongside GPX upload and Strava import, for planning against a generic
@@ -21,7 +22,6 @@ function GenericCourseForm({ onCreate }: { onCreate: (points: GpxPoint[], name: 
   return (
     <div className="generic-course">
       <label className="generic-course__control">
-        <span>Generic flat course</span>
         <div className="generic-course__row">
           <input
             type="number"
@@ -34,7 +34,7 @@ function GenericCourseForm({ onCreate }: { onCreate: (points: GpxPoint[], name: 
           <span>km</span>
           <button
             type="button"
-            className="fatox-add"
+            className="button-ghost"
             disabled={!valid}
             onClick={() => {
               if (!valid) return;
@@ -62,13 +62,9 @@ interface AddCoursePanelProps {
 }
 
 /**
- * Everything to do with GETTING a course loaded, in one card: the three
- * source options (GPX upload, Strava import, generic flat distance), plus
- * -- once a course is active -- its name/stats, processing settings, and
- * the raw-vs-processed debug chart. Mirrors SettingsModal's own shell
- * (overlay/card/header/body, unmounts when closed, Escape closes, focus
- * moves to the close button) for visual and behavioral consistency with
- * the one other modal this app has.
+ * Everything to do with getting a course loaded, in one sheet: the three
+ * sources (GPX upload, Strava import, a flat distance), then the loaded
+ * course's stats. Processing settings and the debug chart sit under Lab.
  */
 export function AddCoursePanel({
   open,
@@ -81,49 +77,31 @@ export function AddCoursePanel({
   rawStats,
   debugProcessedPoints,
 }: AddCoursePanelProps) {
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
-
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
-  useEffect(() => {
-    if (!open) return;
-    closeButtonRef.current?.focus();
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCloseRef.current();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open]);
-
   if (!open) return null;
-
   return (
-    <div className="settings-modal__overlay" onClick={onClose}>
-      <div
-        className="settings-modal__card"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Add course"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="settings-modal__header">
-          <h2>Add course</h2>
-          <button type="button" ref={closeButtonRef} className="settings-modal__close" onClick={onClose} aria-label="Close">
-            ×
-          </button>
-        </div>
-        <div className="settings-modal__body">
+    <Sheet title="Add course" onClose={onClose}>
+      <div className="add-course">
+        <section className="add-course__source">
+          <h3>From a GPX file</h3>
           <GpxUpload onLoaded={(points, name) => onCourseLoaded(points, name)} />
+        </section>
+        <section className="add-course__source">
+          <h3>From Strava</h3>
           <StravaImport onImport={(points, name, stravaId) => onCourseLoaded(points, name, stravaId)} />
+        </section>
+        <section className="add-course__source">
+          <h3>A flat distance</h3>
           <GenericCourseForm onCreate={(points, name) => onCourseLoaded(points, name)} />
-          {courseResult && (
-            <>
-              {fileName && <p className="course-name">{fileName}</p>}
-              {!courseResult.hasElevation && <p className="warning">No elevation data found — treating the course as flat.</p>}
-              <p className="course-stats">
-                {(courseResult.totalDistance3D / 1000).toFixed(1)} km &middot; {courseResult.totalElevationGain.toFixed(0)} m gain
-              </p>
+        </section>
+        {courseResult && (
+          <section className="add-course__loaded">
+            {fileName && <p className="add-course__name">{fileName}</p>}
+            <p className="num muted">
+              {(courseResult.totalDistance3D / 1000).toFixed(1)} km · {courseResult.totalElevationGain.toFixed(0)} m up
+            </p>
+            {!courseResult.hasElevation && <p className="help">No elevation in this file, so the course counts as flat.</p>}
+            <details className="lab">
+              <summary>Lab: course processing</summary>
               <CourseProcessingFields values={formInputs} onChange={onFormInputsChange} />
               {formInputs.showCourseDebug && rawStats && (
                 <CourseDebugChart
@@ -135,10 +113,10 @@ export function AddCoursePanel({
                   smoothingWindowM={formInputs.smoothingWindowM}
                 />
               )}
-            </>
-          )}
-        </div>
+            </details>
+          </section>
+        )}
       </div>
-    </div>
+    </Sheet>
   );
 }

@@ -1441,3 +1441,50 @@ button.list-row {
   margin-left: var(--sp-1);
   vertical-align: -1px;
 }
+
+/* ---------- Add course ---------- */
+
+.add-course {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.add-course__source,
+.add-course__loaded {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.add-course__source h3 {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.add-course__name {
+  margin: 0;
+  font-weight: var(--fw-semibold);
+}
+
+.add-course__loaded p {
+  margin: 0;
+}
+
+/* Expert settings, out of the way: a quiet disclosure. */
+details.lab {
+  border-top: 1px solid var(--border);
+  padding-top: var(--sp-2);
+}
+
+details.lab > summary {
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--text-muted);
+  padding: var(--sp-2) 0;
+}
