@@ -208,7 +208,7 @@ function FatOxRows({ points, speedUnit, rateUnit, onSpeedUnitChange, onRateUnitC
           <label>
             Pace unit
             <select
-              className="field__unit-select"
+              className="unit-select"
               value={speedUnit}
               onChange={(e) => onSpeedUnitChange(e.target.value as WalkSpeedUnit)}
             >
@@ -220,7 +220,7 @@ function FatOxRows({ points, speedUnit, rateUnit, onSpeedUnitChange, onRateUnitC
           <label>
             Fat/carb unit
             <select
-              className="field__unit-select"
+              className="unit-select"
               value={rateUnit}
               onChange={(e) => onRateUnitChange(e.target.value as FatOxRateUnit)}
             >

@@ -45,28 +45,3 @@ input[type="number"] {
   width: 100%;
 }
 
-fieldset {
-  border: none;
-  border-radius: var(--r-md);
-  background: var(--surface);
-  box-shadow: var(--shadow-1);
-  margin: 0;
-  padding: var(--sp-4);
-  min-width: 0;
-}
-
-/* Floated so the legend sits inside the card as its title, not on the
-   (now absent) border line. */
-legend {
-  float: left;
-  width: 100%;
-  padding: 0;
-  margin-bottom: var(--sp-2);
-  font-size: var(--fs-lg);
-  font-weight: 600;
-  color: var(--text);
-}
-
-legend + * {
-  clear: both;
-}

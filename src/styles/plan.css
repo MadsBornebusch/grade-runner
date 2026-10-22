@@ -1699,3 +1699,11 @@ details.lab .run-library__experimental-fit .field-group-note:first-child {
   color: var(--text);
   font-weight: var(--fw-semibold);
 }
+
+.target-card .input-unit input {
+  width: 7em;
+}
+
+.target-card .help {
+  margin-bottom: 0;
+}
