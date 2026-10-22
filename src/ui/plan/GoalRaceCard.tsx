@@ -102,7 +102,7 @@ function Prediction({ formInputs, plan, course }: { formInputs: FormInputs; plan
     <div className="race-hero__panel">
       <div className="race-hero__finish">
         <span className="overline">
-          <Timer size={14} /> {race.expectedHoursOverride ? "Your expected finish" : "Predicted finish"}
+          <Timer size={14} /> {race.expectedHoursOverride ? "Your expected finish" : formInputs.pacingMargin ? "Predicted finish" : "Best-case finish"}
         </span>
         {overrideText === null ? (
           <button type="button" className="race-hero__time num" onClick={() => setOverrideText(used ? formatDuration(used).slice(0, -3) : "")} title="Change">
@@ -128,7 +128,9 @@ function Prediction({ formInputs, plan, course }: { formInputs: FormInputs; plan
       <p className="race-hero__note">
         {race.expectedHoursOverride && predicted
           ? `Plan uses your time. Prediction from your fitness today: ${formatDuration(predicted).slice(0, -3)}.`
-          : "From your fitness today. Sizes your long runs; tap to use your own time."}
+          : formInputs.pacingMargin
+            ? "From your fitness today and how you pace races. Sizes your long runs; tap to use your own time."
+            : "Your ceiling: a perfect day. Confirm 4 or more races on Runs for a realistic prediction, or tap to use your own time."}
         {race.expectedHoursOverride && (
           <button
             type="button"

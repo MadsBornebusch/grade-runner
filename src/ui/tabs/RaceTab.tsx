@@ -343,12 +343,17 @@ export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentC
   useEffect(() => {
     if (!currentCourseId) return;
     void updateStoredCourseCheckpoints(currentCourseId, { targetTimeS });
-    planSettingsStore.set((st) => {
-      const goal = st.goalRace;
-      if (!goal || goal.courseId !== currentCourseId) return st;
-      const hours = targetTimeS ? targetTimeS / 3600 : null;
-      return Math.round((goal.expectedHoursOverride ?? 0) * 3600) === Math.round((hours ?? 0) * 3600) ? st : { ...st, goalRace: { ...goal, expectedHoursOverride: hours } };
-    });
+    // The goal race's time (which re-plans) follows once typing pauses,
+    // not on every keystroke: "12:" already parses as 12 h.
+    const timer = setTimeout(() => {
+      planSettingsStore.set((st) => {
+        const goal = st.goalRace;
+        if (!goal || goal.courseId !== currentCourseId) return st;
+        const hours = targetTimeS ? targetTimeS / 3600 : null;
+        return Math.round((goal.expectedHoursOverride ?? 0) * 3600) === Math.round((hours ?? 0) * 3600) ? st : { ...st, goalRace: { ...goal, expectedHoursOverride: hours } };
+      });
+    }, 800);
+    return () => clearTimeout(timer);
   }, [currentCourseId, targetTimeS]);
 
   const targetTimeResult = useMemo(() => {
