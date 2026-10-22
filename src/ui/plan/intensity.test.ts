@@ -22,17 +22,16 @@ describe("intensity targets", () => {
     expect(intensityTargets({ ...base, lt2HeartRateBpm: 170 }, null).quality).toEqual({ lo: 165, hi: 172 });
   });
 
-  it("puts the steady block between race effort and LT1, from the line through both thresholds", () => {
+  it("puts steady between race effort and LT1, and ends easy where steady starts", () => {
     const f = { ...base, lt1HeartRateBpm: 140, lt2HeartRateBpm: 170 };
     const hrAt = heartRateAtPower(f)!;
-    const lt1Power = [...Array(400).keys()].map((k) => k / 20).find((x) => hrAt(x) >= 140)!;
-    const t = intensityTargets(f, lt1Power - 1);
-    expect(t.easyMaxHr).toBe(140);
-    expect(t.steady!.hi).toBe(140);
-    expect(t.steady!.lo).toBeLessThan(135);
-    expect(t.raceAtLt1).toBe(false);
-    // Race effort at or above LT1: steady is just under it.
-    expect(intensityTargets(f, lt1Power + 1)).toMatchObject({ raceAtLt1: true, steady: { lo: 130, hi: 140 } });
+    const powerAt = (hr: number) => [...Array(4000).keys()].map((k) => k / 200).find((x) => hrAt(x) >= hr)!;
+    // Race effort at 132 bpm: steady 132-140, easy under 132.
+    expect(intensityTargets(f, powerAt(132))).toMatchObject({ easyMaxHr: 132, steady: { lo: 132, hi: 140 }, raceAtLt1: false });
+    // Far below LT1 (a very long race): held to 15 bpm under.
+    expect(intensityTargets(f, powerAt(110)).steady).toEqual({ lo: 125, hi: 140 });
+    // At or above LT1: the narrow band just under it.
+    expect(intensityTargets(f, powerAt(141))).toMatchObject({ raceAtLt1: true, easyMaxHr: 135, steady: { lo: 135, hi: 140 } });
   });
 
   it("reads heart rate from test stages, interpolating between them", () => {

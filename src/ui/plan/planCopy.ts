@@ -27,7 +27,7 @@ export const PHASE_EXPLAINER: Record<Phase, string> = {
 export const KIND_TITLE: Record<SessionKind, string> = {
   long: "Long run",
   easy: "Easy run",
-  quality: "Quality run",
+  quality: "Threshold run",
   descent: "Downhill run",
   strength: "Strength",
   race: "Race day",
@@ -43,7 +43,7 @@ export function effortChip(s: PlannedSession, t: IntensityTargets): string | nul
     if (s.steadyMinutes) return `${s.steadyMinutes} min steady${t.steady ? ` · ${bpm(t.steady.lo, t.steady.hi)}` : ""}`;
     return t.easyMaxHr ? `Easy · under ${t.easyMaxHr} bpm` : "Easy";
   }
-  if (s.kind === "quality") return t.quality ? `Threshold · ${bpm(t.quality.lo, t.quality.hi)}` : "Comfortably hard";
+  if (s.kind === "quality") return t.quality ? bpm(t.quality.lo, t.quality.hi) : "Comfortably hard";
   return null;
 }
 
@@ -59,7 +59,7 @@ export function effortDetail(s: PlannedSession, t: IntensityTargets): string | n
         ? `${easy}, with ${s.steadyMinutes} min steady${t.steady ? ` at ${bpm(t.steady.lo, t.steady.hi)}` : " at race effort"}`
         : easy;
     case "quality":
-      return t.quality ? `Threshold, ${bpm(t.quality.lo, t.quality.hi)}` : "Comfortably hard, around your 1-hour race effort";
+      return t.quality ? `Around LT2, ${bpm(t.quality.lo, t.quality.hi)}` : "Comfortably hard, around your 1-hour race effort";
     default:
       return null;
   }
@@ -83,8 +83,12 @@ export function howToRun(s: PlannedSession, raceName: string, strengthCounts: bo
         `running race effort on tired legs is what the race asks for. Keep it all easy if you slept badly or feel off.${carbs}`
       );
     }
-    case "quality":
-      return `Warm up, then 20–30 min comfortably hard${t.quality ? ` (${bpm(t.quality.lo, t.quality.hi)})` : ""}, around your 1-hour race effort, then easy.`;
+    case "quality": {
+      // About half the run at threshold, 10-30 min, inside a warm-up and
+      // an easy finish.
+      const hard = Math.max(10, Math.min(30, Math.round(s.minutes / 2 / 5) * 5));
+      return `Warm up easy, then ${hard} min comfortably hard${t.quality ? ` (${bpm(t.quality.lo, t.quality.hi)})` : ""}, around your 1-hour race effort, then easy to finish. One block or two with a short jog between.`;
+    }
     case "descent":
       return `A hilly route with about ${Math.round(s.descentM / 10) * 10} m of descent, easy effort on the climbs${under}. Run the downhills controlled; it trains your legs for the race's descents.`;
     case "strength":
