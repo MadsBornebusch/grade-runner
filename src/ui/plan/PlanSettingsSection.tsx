@@ -8,8 +8,9 @@ import { planSnapshotStore } from "../usePlan";
 export function PlanSettingsSection({ plan, formInputs }: { plan: PlanState; formInputs: FormInputs }) {
   const settings = planSettingsStore.use();
   return (
-    <fieldset>
-      <legend>Training plan</legend>
+    <section>
+      <h3 className="section-title">Training plan</h3>
+      <div className="card">
       <label className="form-row">
         <span>Long runs start at</span>
         <span className="input-unit">
@@ -45,6 +46,7 @@ export function PlanSettingsSection({ plan, formInputs }: { plan: PlanState; for
           Reset plan
         </button>
       </div>
-    </fieldset>
+      </div>
+    </section>
   );
 }

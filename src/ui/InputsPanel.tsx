@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { Plus, X } from "@phosphor-icons/react";
 import { useNumberField } from "./useNumberField";
 import {
   displayToPaceMinPerKm,
@@ -30,7 +31,8 @@ interface FieldsProps {
 
 interface FieldProps {
   label: string;
-  hint?: string;
+  /** Short unit after the input ("kg", "bpm"). */
+  unit?: string;
   value: number;
   step?: number;
   min?: number;
@@ -39,13 +41,56 @@ interface FieldProps {
   onChange: (value: number) => void;
 }
 
-function NumberField({ label, hint, value, step = 1, min, max, disabled, onChange }: FieldProps) {
+function NumberField({ label, unit, value, step = 1, min, max, disabled, onChange }: FieldProps) {
   const field = useNumberField(value, onChange);
   return (
-    <label className="field">
-      <span className="field__label">{label}</span>
-      <input type="number" step={step} min={min} max={max} disabled={disabled} {...field} />
-      {hint && <span className="field__hint">{hint}</span>}
+    <label className="form-row">
+      <span>{label}</span>
+      <span className="input-unit">
+        <input type="number" step={step} min={min} max={max} disabled={disabled} {...field} />
+        {unit}
+      </span>
+    </label>
+  );
+}
+
+/** "4:57" <-> 4.95 min/km. */
+const formatPace = (min: number) => {
+  const total = Math.round(min * 60);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+};
+function parsePace(text: string): number | null {
+  const m = text.trim().match(/^(\d{1,2})(?::(\d{1,2}))?$/);
+  if (!m) return null;
+  const min = Number(m[1]) + Number(m[2] ?? 0) / 60;
+  return min >= 2 && min <= 20 ? min : null;
+}
+
+function PaceField({ label, value, onChange }: { label: string; value: number; onChange: (min: number) => void }) {
+  const [text, setText] = useState(formatPace(value));
+  const [editing, setEditing] = useState(false);
+  const shown = editing ? text : formatPace(value);
+  return (
+    <label className="form-row">
+      <span>{label}</span>
+      <span className="input-unit">
+        <input
+          type="text"
+          inputMode="numeric"
+          value={shown}
+          onFocus={() => {
+            setText(formatPace(value));
+            setEditing(true);
+          }}
+          onBlur={() => setEditing(false)}
+          onChange={(e) => {
+            setText(e.target.value);
+            const next = parsePace(e.target.value);
+            if (next !== null) onChange(next);
+          }}
+        />
+        min/km
+      </span>
     </label>
   );
 }
@@ -64,19 +109,16 @@ function SpeedField({ label, valueMs, unit, onUnitChange, onChange }: SpeedField
   const displayValue = Math.round(speedFromMs(valueMs, unit) * 100) / 100;
   const field = useNumberField(displayValue, (next) => onChange(Math.max(MIN_WALK_SPEED_MS, speedToMs(next, unit))));
   return (
-    <label className="field">
-      <span className="field__label">{label}</span>
-      <input type="number" step={0.1} min={0} {...field} />
-      <select
-        className="field__unit-select"
-        value={unit}
-        onChange={(e) => onUnitChange(e.target.value as WalkSpeedUnit)}
-        aria-label={`${label} unit`}
-      >
-        <option value="ms">m/s</option>
-        <option value="kmh">km/h</option>
-        <option value="minkm">min/km</option>
-      </select>
+    <label className="form-row">
+      <span>{label}</span>
+      <span className="input-unit">
+        <input type="number" step={0.1} min={0} {...field} />
+        <select className="unit-select" value={unit} onChange={(e) => onUnitChange(e.target.value as WalkSpeedUnit)} aria-label={`${label} unit`}>
+          <option value="kmh">km/h</option>
+          <option value="minkm">min/km</option>
+          <option value="ms">m/s</option>
+        </select>
+      </span>
     </label>
   );
 }
@@ -221,29 +263,18 @@ interface Vo2MaxRowProps {
 function Vo2MaxRow({ entry, onChange, onRemove }: Vo2MaxRowProps) {
   const valueField = useNumberField(entry.value, (v) => onChange({ value: v }));
   return (
-    <div className="vo2max-row">
-      <input
-        type="date"
-        value={entry.date}
-        onChange={(e) => onChange({ date: e.target.value })}
-        aria-label="Measurement date"
-      />
+    <div className="entry-row">
+      <input type="date" value={entry.date} onChange={(e) => onChange({ date: e.target.value })} aria-label="Measurement date" />
       <input type="number" step={1} min={20} {...valueField} aria-label="VO2max, ml/kg/min" />
-      <span className="fatox-row__unit">ml/kg/min</span>
-      <select
-        className="field__unit-select"
-        value={entry.source}
-        onChange={(e) => onChange({ source: e.target.value as Vo2MaxSource })}
-        aria-label="Source"
-      >
+      <select value={entry.source} onChange={(e) => onChange({ source: e.target.value as Vo2MaxSource })} aria-label="Source">
         {Object.entries(VO2MAX_SOURCE_LABELS).map(([value, label]) => (
           <option key={value} value={value}>
             {label}
           </option>
         ))}
       </select>
-      <button type="button" className="fatox-row__remove" onClick={onRemove} aria-label="Remove entry">
-        &times;
+      <button type="button" className="icon-button entry-row__remove" onClick={onRemove} aria-label="Remove entry">
+        <X size={16} />
       </button>
     </div>
   );
@@ -255,22 +286,17 @@ interface Vo2MaxRowsProps {
 }
 
 function Vo2MaxRows({ history, onChange }: Vo2MaxRowsProps) {
-  const update = (i: number, patch: Partial<Vo2MaxEntry>) =>
-    onChange(history.map((e, idx) => (idx === i ? { ...e, ...patch } : e)));
+  const update = (i: number, patch: Partial<Vo2MaxEntry>) => onChange(history.map((e, idx) => (idx === i ? { ...e, ...patch } : e)));
   const remove = (i: number) => onChange(history.filter((_, idx) => idx !== i));
   const add = () =>
-    onChange([
-      ...history,
-      { date: new Date().toISOString().slice(0, 10), value: Math.round(resolveVo2Max(history) ?? 50), source: "manual" },
-    ]);
-
+    onChange([...history, { date: new Date().toISOString().slice(0, 10), value: Math.round(resolveVo2Max(history) ?? 50), source: "manual" }]);
   return (
-    <div className="fatox-rows">
+    <div className="entry-rows">
       {history.map((entry, i) => (
         <Vo2MaxRow key={i} entry={entry} onChange={(patch) => update(i, patch)} onRemove={() => remove(i)} />
       ))}
-      <button type="button" className="fatox-add" onClick={add}>
-        + Add entry
+      <button type="button" className="link-button" onClick={add}>
+        <Plus size={14} /> Add a measurement
       </button>
     </div>
   );
@@ -294,8 +320,8 @@ interface LtThresholdFieldProps {
 }
 
 /**
- * LT1/LT2 as either a raw %VO2max fraction (the base representation) or a
- * pace + heart rate the athlete actually knows -- pace converts to the
+ * LT1/LT2 as either a %VO2max (the base representation, shown as a
+ * percentage) or a pace the athlete knows -- pace converts to the
  * equivalent fraction via the same Minetti pace->power conversion the fat-ox
  * curve uses (paceToVo2MaxFraction). Heart rate is entered in either mode:
  * the ceiling model is power/pace-based and ignores it, but the training
@@ -317,250 +343,201 @@ function LtThresholdField({
 }: LtThresholdFieldProps) {
   const usingPace = paceMinPerKm !== null;
   return (
-    <>
-      <label className="field field--checkbox">
-        <input
-          type="checkbox"
-          checked={usingPace}
-          onChange={(e) => onPaceChange(e.target.checked ? defaultPaceMinPerKm : null)}
-        />
-        <span>Enter {label} as pace instead</span>
-      </label>
-      <NumberField
-        label={`${label} heart rate`}
-        hint="bpm, sets the plan's heart-rate targets"
-        value={heartRateBpm ?? 0}
-        step={1}
-        min={0}
-        onChange={(v) => onHeartRateChange(v > 0 ? v : null)}
-      />
-      {!usingPace && (
-        <NumberField
-          label={label}
-          hint="fraction of VO2max"
-          value={fraction}
-          step={0.01}
-          min={fractionMin}
-          max={fractionMax}
-          onChange={onFractionChange}
-        />
-      )}
-      {usingPace && (
-        <>
-          <NumberField
-            label={`${label} pace`}
-            hint="min/km"
-            value={paceMinPerKm}
-            step={0.05}
-            min={2}
-            onChange={onPaceChange}
+    <div className="threshold">
+      <h4 className="threshold__title">{label}</h4>
+      <label className="form-row">
+        <span>Heart rate</span>
+        <span className="input-unit">
+          <input
+            type="number"
+            step={1}
+            min={0}
+            placeholder="not set"
+            value={heartRateBpm ?? ""}
+            onChange={(e) => onHeartRateChange(e.target.value === "" || !(Number(e.target.value) > 0) ? null : Number(e.target.value))}
           />
-          <p className="field-group-note">
-            ≈ {(paceToVo2MaxFraction(paceMinPerKm, walkMaxMs, vo2Max) * 100).toFixed(0)}% of VO2max
-          </p>
+          bpm
+        </span>
+      </label>
+      {usingPace ? (
+        <>
+          <PaceField label="Pace" value={paceMinPerKm} onChange={onPaceChange} />
+          <p className="help num">About {(paceToVo2MaxFraction(paceMinPerKm, walkMaxMs, vo2Max) * 100).toFixed(0)}% of VO2max on the flat.</p>
         </>
+      ) : (
+        <NumberField
+          label="Effort"
+          unit="% of VO2max"
+          value={Math.round(fraction * 1000) / 10}
+          step={1}
+          min={fractionMin * 100}
+          max={fractionMax * 100}
+          onChange={(v) => onFractionChange(v / 100)}
+        />
       )}
-    </>
+      <label className="switch-row">
+        <input type="checkbox" checked={usingPace} onChange={(e) => onPaceChange(e.target.checked ? defaultPaceMinPerKm : null)} />
+        <span>I know my {label} pace</span>
+      </label>
+    </div>
   );
 }
 
-/** Athlete physiology, fueling, pacing fade, and walk/run settings (Page 2). */
+/** Athlete settings: body and VO2max, thresholds, walking, and the lab
+ * corner (fat-ox curve, manual terrain cost). Fitted values (aerobic
+ * ceiling, terrain cost) show on the Runs tab, where they're learned. */
 export function AthleteFields({ values, onChange }: FieldsProps) {
-  const set = <K extends keyof FormInputs>(key: K, value: FormInputs[K]) =>
-    onChange({ ...values, [key]: value });
-
+  const set = <K extends keyof FormInputs>(key: K, value: FormInputs[K]) => onChange({ ...values, [key]: value });
+  const vo2Max = resolveVo2Max(values.vo2MaxHistory);
   const usingFatOxCurve = values.fatOxPoints.length > 0;
   const equivalentThresholds = useMemo(() => equivalentLT1LT2(values), [values]);
-  const theoreticalFatOxCurve = useMemo(() => {
-    const { lt1Fraction, lt2Fraction } = resolveLt1Lt2Fractions(values);
-    return generateTheoreticalFatOxCurve({
-      lt1Fraction,
-      lt2Fraction,
-      vo2MaxMlPerKgPerMin: resolveVo2Max(values.vo2MaxHistory) ?? 50,
-      bodyMassKg: values.bodyMassKg,
-      foPeakGPerMin: values.foPeakGPerMin,
-      walkMaxMs: values.walkMaxMs,
-    });
-  }, [
-    values.lt1Fraction,
-    values.lt2Fraction,
-    values.lt1PaceMinPerKm,
-    values.lt2PaceMinPerKm,
-    values.vo2MaxHistory,
-    values.bodyMassKg,
-    values.foPeakGPerMin,
-    values.walkMaxMs,
-  ]);
+  const { lt1Fraction, lt2Fraction } = resolveLt1Lt2Fractions(values);
+  const theoreticalFatOxCurve = useMemo(
+    () =>
+      generateTheoreticalFatOxCurve({
+        lt1Fraction,
+        lt2Fraction,
+        vo2MaxMlPerKgPerMin: vo2Max ?? 50,
+        bodyMassKg: values.bodyMassKg,
+        foPeakGPerMin: values.foPeakGPerMin,
+        walkMaxMs: values.walkMaxMs,
+      }),
+    [lt1Fraction, lt2Fraction, vo2Max, values.bodyMassKg, values.foPeakGPerMin, values.walkMaxMs],
+  );
 
   return (
-    <div className="inputs-panel">
-      <fieldset>
-        <legend>Athlete</legend>
-        <p className="field-group-help">Body mass, VO2max, and LT2 are the minimum for a working plan.</p>
-        <NumberField
-          label="Body mass"
-          hint="kg"
-          value={values.bodyMassKg}
-          step={0.5}
-          min={30}
-          onChange={(v) => set("bodyMassKg", v)}
-        />
-        <p className="field-group-note">
-          Current effective VO2max: {(resolveVo2Max(values.vo2MaxHistory) ?? 50).toFixed(1)} ml/kg/min, combining{" "}
-          {values.vo2MaxHistory.length} entr{values.vo2MaxHistory.length === 1 ? "y" : "ies"}.
-        </p>
-        <p className="field-group-help">Add every VO2max measurement you have, dated and sourced.</p>
-        <Vo2MaxRows history={values.vo2MaxHistory} onChange={(vo2MaxHistory) => set("vo2MaxHistory", vo2MaxHistory)} />
-        <LtThresholdField
-          label="LT2"
-          paceMinPerKm={values.lt2PaceMinPerKm}
-          heartRateBpm={values.lt2HeartRateBpm}
-          fraction={values.lt2Fraction}
-          fractionMin={values.lt1Fraction + 0.01}
-          fractionMax={0.99}
-          walkMaxMs={values.walkMaxMs}
-          vo2Max={resolveVo2Max(values.vo2MaxHistory)}
-          defaultPaceMinPerKm={5.0}
-          onFractionChange={(v) => set("lt2Fraction", v)}
-          onPaceChange={(v) => set("lt2PaceMinPerKm", v)}
-          onHeartRateChange={(v) => set("lt2HeartRateBpm", v)}
-        />
-      </fieldset>
+    <>
+      <section>
+        <h3 className="section-title">You</h3>
+        <div className="card">
+          <NumberField label="Body mass" unit="kg" value={values.bodyMassKg} step={0.5} min={30} onChange={(v) => set("bodyMassKg", v)} />
+          <div className="form-row">
+            <span>VO2max</span>
+            <span className="num">{(vo2Max ?? 50).toFixed(1)} ml/kg/min</span>
+          </div>
+          <p className="help">
+            From the measurements below; recent ones and lab tests count most. Races on the Runs tab can add estimates.
+          </p>
+          <Vo2MaxRows history={values.vo2MaxHistory} onChange={(vo2MaxHistory) => set("vo2MaxHistory", vo2MaxHistory)} />
+        </div>
+      </section>
 
-      <fieldset>
-        <legend>Fuel split</legend>
-        <p className="field-group-help">
-          Sets your fat-vs-carb split by effort. Enter LT1 below, or add a real fat-ox curve for fewer assumptions.
-        </p>
-        <LtThresholdField
-          label="LT1"
-          paceMinPerKm={values.lt1PaceMinPerKm}
-          heartRateBpm={values.lt1HeartRateBpm}
-          fraction={values.lt1Fraction}
-          fractionMin={0.1}
-          fractionMax={0.95}
-          walkMaxMs={values.walkMaxMs}
-          vo2Max={resolveVo2Max(values.vo2MaxHistory)}
-          defaultPaceMinPerKm={6.0}
-          onFractionChange={(v) => set("lt1Fraction", v)}
-          onPaceChange={(v) => set("lt1PaceMinPerKm", v)}
-          onHeartRateChange={(v) => set("lt1HeartRateBpm", v)}
-        />
-        {usingFatOxCurve && (
-          <p className="field-group-note">
-            LT1/LT2 unused — your fat-ox curve is active instead.
-            {equivalentThresholds && (
-              <>
-                {" "}
-                (≈LT1 {(equivalentThresholds.lt1Fraction * 100).toFixed(0)}%, LT2{" "}
-                {(equivalentThresholds.lt2Fraction * 100).toFixed(0)}% of VO2max, for reference.)
-              </>
-            )}
+      <section>
+        <h3 className="section-title">Thresholds</h3>
+        <div className="card">
+          <p className="help">
+            LT1 is where fat burning starts to drop (the top of easy); LT2 is about your 1-hour race effort. They set the fuel model and your
+            heart-rate targets.
           </p>
-        )}
-        {!usingFatOxCurve && <FatOxCurveChart points={theoreticalFatOxCurve} />}
-        <details>
-          <summary>Advanced: full fat-ox curve (overrides LT1/LT2 above)</summary>
-          <p className="field-group-help">
-            Enter fat and carb oxidation rates from a metabolic test. Add 2-3+ points across a range of paces,
-            measured on flat ground.
-          </p>
-          <FatOxRows
-            points={values.fatOxPoints}
-            speedUnit={values.fatOxSpeedDisplayUnit}
-            rateUnit={values.fatOxRateDisplayUnit}
-            onSpeedUnitChange={(unit) => set("fatOxSpeedDisplayUnit", unit)}
-            onRateUnitChange={(unit) => set("fatOxRateDisplayUnit", unit)}
-            onChange={(fatOxPoints) => {
-              const peak = suggestedFoPeakGPerMin(fatOxPoints);
-              onChange({ ...values, fatOxPoints, ...(peak !== null ? { foPeakGPerMin: peak } : {}) });
-            }}
+          <LtThresholdField
+            label="LT1"
+            paceMinPerKm={values.lt1PaceMinPerKm}
+            heartRateBpm={values.lt1HeartRateBpm}
+            fraction={values.lt1Fraction}
+            fractionMin={0.1}
+            fractionMax={0.95}
+            walkMaxMs={values.walkMaxMs}
+            vo2Max={vo2Max}
+            defaultPaceMinPerKm={6.0}
+            onFractionChange={(v) => set("lt1Fraction", v)}
+            onPaceChange={(v) => set("lt1PaceMinPerKm", v)}
+            onHeartRateChange={(v) => set("lt1HeartRateBpm", v)}
           />
-          <NumberField
-            label="Fat oxidation peak"
-            hint={RATE_UNIT_LABELS[values.fatOxRateDisplayUnit]}
-            value={Math.round(rateFromGPerMin(values.foPeakGPerMin, values.fatOxRateDisplayUnit) * 1000) / 1000}
-            step={values.fatOxRateDisplayUnit === "ghour" ? 3 : 0.05}
-            min={values.fatOxRateDisplayUnit === "ghour" ? 6 : 0.1}
-            onChange={(v) => set("foPeakGPerMin", rateToGPerMin(v, values.fatOxRateDisplayUnit))}
+          <LtThresholdField
+            label="LT2"
+            paceMinPerKm={values.lt2PaceMinPerKm}
+            heartRateBpm={values.lt2HeartRateBpm}
+            fraction={values.lt2Fraction}
+            fractionMin={values.lt1Fraction + 0.01}
+            fractionMax={0.99}
+            walkMaxMs={values.walkMaxMs}
+            vo2Max={vo2Max}
+            defaultPaceMinPerKm={5.0}
+            onFractionChange={(v) => set("lt2Fraction", v)}
+            onPaceChange={(v) => set("lt2PaceMinPerKm", v)}
+            onHeartRateChange={(v) => set("lt2HeartRateBpm", v)}
           />
           {usingFatOxCurve && (
-            <p className="field-group-note">Auto-filled from your highest measured rate above — override if your true peak is higher.</p>
+            <p className="help num">
+              Your lab fat-oxidation curve sets the fuel split instead of these
+              {equivalentThresholds &&
+                ` (it puts LT1 at ${(equivalentThresholds.lt1Fraction * 100).toFixed(0)}% and LT2 at ${(equivalentThresholds.lt2Fraction * 100).toFixed(0)}% of VO2max)`}
+              .
+            </p>
           )}
-        </details>
-      </fieldset>
+        </div>
+      </section>
 
-      <fieldset>
-        <legend>Aerobic ceiling</legend>
-        <p className="field-group-help">Fit automatically from your confirmed races below.</p>
-        <p className="field-group-note">
-          <strong>{(values.powerLawFraction60Min * 100).toFixed(1)}%</strong> of VO2max sustainable for an hour,
-          falling with an exponent of <strong>{values.powerLawExponent.toFixed(3)}</strong>.
+      <section>
+        <h3 className="section-title">Walking</h3>
+        <div className="card">
+          <SpeedField
+            label="Fastest walk"
+            valueMs={values.walkMaxMs}
+            unit={values.walkSpeedDisplayUnit}
+            onUnitChange={(unit) => set("walkSpeedDisplayUnit", unit)}
+            onChange={(ms) => set("walkMaxMs", ms)}
+          />
+          <p className="help">The planner walks wherever walking is faster than running at the same effort.</p>
+          <label className="switch-row">
+            <input type="checkbox" checked={values.forceWalkAboveGrade !== null} onChange={(e) => set("forceWalkAboveGrade", e.target.checked ? 0.25 : null)} />
+            <span>Always walk climbs steeper than a set grade</span>
+          </label>
+          {values.forceWalkAboveGrade !== null && (
+            <NumberField
+              label="Steeper than"
+              unit="%"
+              value={Math.round(values.forceWalkAboveGrade * 100)}
+              step={1}
+              min={5}
+              max={50}
+              onChange={(v) => set("forceWalkAboveGrade", v / 100)}
+            />
+          )}
+        </div>
+      </section>
+
+      <details className="lab card">
+        <summary>Lab: fuel curve and manual overrides</summary>
+        <h4 className="threshold__title">Fat and carb burning by pace</h4>
+        <p className="help">
+          {usingFatOxCurve ? "From your lab test." : "Estimated from your thresholds. Enter a metabolic test below to replace it."}
         </p>
-      </fieldset>
-
-      <fieldset>
-        <legend>Terrain surface cost</legend>
-        <p className="field-group-help">Fit automatically from your past runs below.</p>
-        {values.surfaceCostMultipliers && Object.keys(values.surfaceCostMultipliers).length > 0 && (
-          <p className="field-group-note">
-            Current per-category fit:{" "}
-            {Object.entries(values.surfaceCostMultipliers)
-              .map(([category, multiplier]) => `${category} ${multiplier!.toFixed(2)}x`)
-              .join(", ")}
-            .
-          </p>
-        )}
-        <details>
-          <summary>Advanced: flat fallback / manual override</summary>
-          <p className="field-group-help">Only change if you don't want to rely on the fit above.</p>
-          <p className="field-group-note">
-            Current: {values.unpavedCostMultiplier.toFixed(2)}x (
-            {((values.unpavedCostMultiplier - 1) * 100).toFixed(0)}% slower on unpaved terrain).
-          </p>
-          <NumberField
-            label="Cost multiplier"
-            hint="e.g. 1.5 = 50% slower on unpaved"
-            value={values.unpavedCostMultiplier}
-            step={0.05}
-            min={1}
-            max={4}
-            onChange={(v) => set("unpavedCostMultiplier", v)}
-          />
-        </details>
-      </fieldset>
-
-      <fieldset>
-        <legend>Walk / run</legend>
-        <p className="field-group-help">Your fastest sustainable walk. Force-walk overrides it for grades you'd never run.</p>
-        <SpeedField
-          label="Max walk speed"
-          valueMs={values.walkMaxMs}
-          unit={values.walkSpeedDisplayUnit}
-          onUnitChange={(unit) => set("walkSpeedDisplayUnit", unit)}
-          onChange={(ms) => set("walkMaxMs", ms)}
+        {!usingFatOxCurve && <FatOxCurveChart points={theoreticalFatOxCurve} />}
+        <p className="help">Fat and carb oxidation from a metabolic test: 2–3 or more stages on the flat. Heart rate per stage sharpens the targets.</p>
+        <FatOxRows
+          points={values.fatOxPoints}
+          speedUnit={values.fatOxSpeedDisplayUnit}
+          rateUnit={values.fatOxRateDisplayUnit}
+          onSpeedUnitChange={(unit) => set("fatOxSpeedDisplayUnit", unit)}
+          onRateUnitChange={(unit) => set("fatOxRateDisplayUnit", unit)}
+          onChange={(fatOxPoints) => {
+            const peak = suggestedFoPeakGPerMin(fatOxPoints);
+            onChange({ ...values, fatOxPoints, ...(peak !== null ? { foPeakGPerMin: peak } : {}) });
+          }}
         />
-        <label className="field field--checkbox">
-          <input
-            type="checkbox"
-            checked={values.forceWalkAboveGrade !== null}
-            onChange={(e) => set("forceWalkAboveGrade", e.target.checked ? 0.25 : null)}
-          />
-          <span>Force walk above grade</span>
-        </label>
-        {values.forceWalkAboveGrade !== null && (
-          <NumberField
-            label="Grade threshold"
-            hint="fraction, e.g. 0.25 = 25%"
-            value={values.forceWalkAboveGrade}
-            step={0.01}
-            min={0.05}
-            max={0.5}
-            onChange={(v) => set("forceWalkAboveGrade", v)}
-          />
-        )}
-      </fieldset>
-    </div>
+        <NumberField
+          label="Peak fat burning"
+          unit={RATE_UNIT_LABELS[values.fatOxRateDisplayUnit]}
+          value={Math.round(rateFromGPerMin(values.foPeakGPerMin, values.fatOxRateDisplayUnit) * 1000) / 1000}
+          step={values.fatOxRateDisplayUnit === "ghour" ? 3 : 0.05}
+          min={values.fatOxRateDisplayUnit === "ghour" ? 6 : 0.1}
+          onChange={(v) => set("foPeakGPerMin", rateToGPerMin(v, values.fatOxRateDisplayUnit))}
+        />
+        {usingFatOxCurve && <p className="help">Filled from your highest measured rate; raise it if your true peak is higher.</p>}
+        <h4 className="threshold__title">Trail cost without a fit</h4>
+        <NumberField
+          label="Unpaved ground costs"
+          unit="× paved"
+          value={values.unpavedCostMultiplier}
+          step={0.05}
+          min={1}
+          max={4}
+          onChange={(v) => set("unpavedCostMultiplier", v)}
+        />
+        <p className="help">Only used until the Runs tab has learned your own terrain costs.</p>
+      </details>
+    </>
   );
 }
 
@@ -600,49 +577,23 @@ export function FuelingFields({ values, onChange }: FieldsProps) {
   );
 }
 
-/** GPX processing settings: segment length, smoothing window, and the debug chart toggle (Page 1). */
+/** Course processing (Add course › Lab): resample spacing, elevation
+ * smoothing, altitude, and the raw-vs-processed debug chart toggle. */
 export function CourseProcessingFields({ values, onChange }: FieldsProps) {
-  const set = <K extends keyof FormInputs>(key: K, value: FormInputs[K]) =>
-    onChange({ ...values, [key]: value });
-
+  const set = <K extends keyof FormInputs>(key: K, value: FormInputs[K]) => onChange({ ...values, [key]: value });
   return (
-    <div className="inputs-panel">
-      <fieldset>
-        <legend>Course processing</legend>
-        <p className="field-group-help">Cleans up noisy GPS data. Leave at defaults unless your course is unusually sparse/noisy.</p>
-        <NumberField
-          label="Segment length"
-          hint="m, resample spacing"
-          value={values.segmentLengthM}
-          step={5}
-          min={5}
-          onChange={(v) => set("segmentLengthM", v)}
-        />
-        <NumberField
-          label="Smoothing window"
-          hint="m, elevation smoothing"
-          value={values.smoothingWindowM}
-          step={5}
-          min={5}
-          onChange={(v) => set("smoothingWindowM", v)}
-        />
-        <label className="field field--checkbox">
-          <input
-            type="checkbox"
-            checked={values.altitudeAdjustment}
-            onChange={(e) => set("altitudeAdjustment", e.target.checked)}
-          />
-          <span>Altitude adjustment</span>
-        </label>
-        <label className="field field--checkbox">
-          <input
-            type="checkbox"
-            checked={values.showCourseDebug}
-            onChange={(e) => set("showCourseDebug", e.target.checked)}
-          />
-          <span>Show raw-vs-processed debug chart</span>
-        </label>
-      </fieldset>
+    <div className="lab__body">
+      <p className="help">Cleans up noisy GPS. Leave as is unless the course is unusually sparse or noisy.</p>
+      <NumberField label="Segment length" unit="m" value={values.segmentLengthM} step={5} min={5} onChange={(v) => set("segmentLengthM", v)} />
+      <NumberField label="Elevation smoothing" unit="m" value={values.smoothingWindowM} step={5} min={5} onChange={(v) => set("smoothingWindowM", v)} />
+      <label className="switch-row">
+        <input type="checkbox" checked={values.altitudeAdjustment} onChange={(e) => set("altitudeAdjustment", e.target.checked)} />
+        <span>Slow down for altitude</span>
+      </label>
+      <label className="switch-row">
+        <input type="checkbox" checked={values.showCourseDebug} onChange={(e) => set("showCourseDebug", e.target.checked)} />
+        <span>Show the raw vs processed chart</span>
+      </label>
     </div>
   );
 }

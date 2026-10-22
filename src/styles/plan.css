@@ -1531,3 +1531,109 @@ details.lab > summary {
   color: var(--brand-ink);
   font-weight: var(--fw-semibold);
 }
+
+/* ---------- Athlete settings ---------- */
+
+.threshold {
+  padding-top: var(--sp-3);
+  margin-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+
+.threshold__title {
+  margin: var(--sp-3) 0 var(--sp-2);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.threshold .threshold__title {
+  margin-top: 0;
+}
+
+.entry-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+/* Date and value on one line, the source under them, remove on the right. */
+.entry-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5em auto;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.entry-row select {
+  grid-column: 1 / 3;
+}
+
+.entry-row__remove {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+}
+
+.entry-row + .entry-row {
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border);
+}
+
+.entry-row input,
+.entry-row select,
+.unit-select {
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  padding: var(--sp-2);
+  min-height: var(--tap-min);
+  min-width: 0;
+  width: 100%;
+}
+
+.unit-select {
+  width: auto;
+}
+
+.entry-row__remove {
+  background: none;
+  box-shadow: none;
+  color: var(--text-muted);
+}
+
+.link-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  align-self: flex-start;
+}
+
+details.lab.card > summary {
+  padding: 0;
+}
+
+details.lab.card[open] > summary {
+  margin-bottom: var(--sp-3);
+}
+
+details.lab.card {
+  border-top: none;
+}
+
+.lab__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.switch-row + .switch-row,
+.help + .switch-row {
+  margin-top: var(--sp-2);
+}
+
+.card .help {
+  margin: 0 0 var(--sp-3);
+}
