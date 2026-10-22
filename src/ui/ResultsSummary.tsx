@@ -24,6 +24,9 @@ interface ResultsSummaryProps {
    * closest the solver could actually produce (may not match targetTimeS
    * exactly -- see the sublabel logic below). */
   target: { result: SimulationResult; theta: number; targetTimeS: number } | null;
+  /** The goal race card above already shows the headline number: leave it
+   * out here, unless it's a target the course can't actually hit. */
+  headlineShownAbove?: boolean;
 }
 
 function formatOrBonk(r: SimulationResult): string {
@@ -57,6 +60,7 @@ export function ResultsSummary({
   bestDemonstrated,
   summaryStats,
   target,
+  headlineShownAbove = false,
 }: ResultsSummaryProps) {
   const reachedKm = result.segments.length
     ? result.segments[result.segments.length - 1].cumulativeDistance3D / 1000
@@ -81,6 +85,7 @@ export function ResultsSummary({
   // and one nobody has ever actually run. Which stat is "first and biggest"
   // changes; its own meaning/tooltip never does.
   const headline: "target" | "chosen" | "ceiling" = target ? "target" : chosenPacing ? "chosen" : "ceiling";
+  const hideHeadline = headlineShownAbove && !(headline === "target" && !targetMatched);
 
   const ceilingStat = (
     <Stat
@@ -137,9 +142,9 @@ export function ResultsSummary({
 
   return (
     <div className={`card results-summary ${result.feasible ? "results-summary--ok" : "results-summary--warn"}`}>
-      {headline === "target" && targetStat}
-      {headline === "chosen" && chosenStat}
-      {headline === "ceiling" && ceilingStat}
+      {!hideHeadline && headline === "target" && targetStat}
+      {!hideHeadline && headline === "chosen" && chosenStat}
+      {!hideHeadline && headline === "ceiling" && ceilingStat}
 
       {headline !== "target" && targetStat}
       {headline !== "chosen" && chosenStat}

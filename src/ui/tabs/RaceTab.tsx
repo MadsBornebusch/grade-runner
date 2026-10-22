@@ -623,6 +623,7 @@ export function RaceTab({ formInputs, setFormInputs, active, rest, navigate, pla
         bestDemonstrated={bestDemonstratedResult}
         summaryStats={planSummaryStats}
         target={targetTimeResult && targetTimeS !== null ? { result: targetTimeResult.result, theta: targetTimeResult.theta, targetTimeS } : null}
+        headlineShownAbove={view.kind === "goal"}
       />
       {courseResult.hasTimestamps && view.kind === "course" && (
         <button type="button" className="card list-row" onClick={() => navigate("race", "courses", view.id, "review")}>
