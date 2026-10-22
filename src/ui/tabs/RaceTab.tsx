@@ -9,7 +9,8 @@ import { attachSurfaceData, type ValhallaSurfaceEdge } from "../../model/surface
 import { fetchSurfaceEdges } from "../surfaceLookup";
 import { AddCoursePanel } from "../AddCoursePanel";
 import { CourseLibraryPanel } from "../CourseLibraryPanel";
-import { saveCourse, updateStoredCourseCheckpoints } from "../../storage/courseLibrary";
+import { listStoredCourses, saveCourse, updateStoredCourseCheckpoints } from "../../storage/courseLibrary";
+import { planSettingsStore } from "../../storage/planSettings";
 import { FuelingFields } from "../InputsPanel";
 import { ElevationProfileChart } from "../ElevationProfileChart";
 import { GradeHistogram } from "../GradeHistogram";
@@ -125,8 +126,38 @@ export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentC
     setCurrentCourseId(id);
     setHighlightedDistanceKm(null);
     setSavedPointsKm(savedKm ?? []);
-    setTargetTimeInput(targetS != null ? formatDuration(targetS) : "");
+    // The goal course's target is the goal race's own expected time.
+    const goal = planSettingsStore.get().goalRace;
+    const target = goal?.courseId === id ? (goal.expectedHoursOverride ? goal.expectedHoursOverride * 3600 : null) : targetS;
+    setTargetTimeInput(target != null ? formatDuration(target) : "");
   }
+
+  // One target time per race (user request, 2026-10-22): on the goal
+  // course, the Pacing target and the Goal race card's "your time" are the
+  // same setting, so changing either changes both (and sizes the plan).
+  const goalRace = planSettingsStore.use().goalRace;
+  const isGoalCourse = !!goalRace && goalRace.courseId === currentCourseId;
+  // Pacing opened with nothing loaded (a fresh app open): show the goal
+  // race's course rather than an empty page.
+  useEffect(() => {
+    if (segment !== "pacing" || currentCourseId || rawPoints || !goalRace) return;
+    let cancelled = false;
+    void listStoredCourses().then((courses) => {
+      const c = courses.find((x) => x.id === goalRace.courseId);
+      if (c && !cancelled) loadCourse(c.points, c.name, c.id, c.savedPointsKm, c.targetTimeS);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // loadCourse only sets state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segment, currentCourseId, rawPoints, goalRace?.courseId]);
+  const goalTargetS = isGoalCourse && goalRace.expectedHoursOverride ? Math.round(goalRace.expectedHoursOverride * 3600) : null;
+  useEffect(() => {
+    if (!isGoalCourse) return;
+    // Only when it differs, so a half-typed time isn't rewritten.
+    setTargetTimeInput((text) => (parseDurationToSeconds(text) === goalTargetS ? text : goalTargetS ? formatDuration(goalTargetS) : ""));
+  }, [isGoalCourse, goalTargetS]);
 
   const pipelineOptions = useMemo(
     () => ({
@@ -312,6 +343,12 @@ export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentC
   useEffect(() => {
     if (!currentCourseId) return;
     void updateStoredCourseCheckpoints(currentCourseId, { targetTimeS });
+    planSettingsStore.set((st) => {
+      const goal = st.goalRace;
+      if (!goal || goal.courseId !== currentCourseId) return st;
+      const hours = targetTimeS ? targetTimeS / 3600 : null;
+      return Math.round((goal.expectedHoursOverride ?? 0) * 3600) === Math.round((hours ?? 0) * 3600) ? st : { ...st, goalRace: { ...goal, expectedHoursOverride: hours } };
+    });
   }, [currentCourseId, targetTimeS]);
 
   const targetTimeResult = useMemo(() => {
@@ -529,28 +566,32 @@ export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentC
             id: "pacing",
             content: (
               <>
-                {!courseResult && <p className="placeholder">Upload a course GPX on the Course page to get started.</p>}
+                {!courseResult && <p className="placeholder">Pick or add a course on the Course page.</p>}
                 {courseResult && solverResult && (
                   <>
-                    <div className="target-time-input">
-                      <label>
-                        Target finish time
-                        <input
-                          type="text"
-                          placeholder="H:MM"
-                          value={targetTimeInput}
-                          onChange={(e) => setTargetTimeInput(e.target.value)}
-                        />
+                    <div className="card target-card">
+                      <label className="form-row">
+                        <span>{isGoalCourse ? "Your finish time" : "Target finish"}</span>
+                        <span className="input-unit">
+                          <input type="text" inputMode="numeric" placeholder="H:MM" value={targetTimeInput} onChange={(e) => setTargetTimeInput(e.target.value)} />
+                          {targetTimeInput && (
+                            <button type="button" className="link-button" onClick={() => setTargetTimeInput("")}>
+                              Clear
+                            </button>
+                          )}
+                        </span>
                       </label>
-                      {targetTimeInput && (
-                        <button type="button" onClick={() => setTargetTimeInput("")}>
-                          Clear
-                        </button>
+                      {targetTimeInput && targetTimeS === null ? (
+                        <p className="help danger">Enter a time as H:MM or H:MM:SS.</p>
+                      ) : (
+                        <p className="help">
+                          {isGoalCourse
+                            ? "Pacing, splits and fuel below follow it, and it sizes your training plan (same as the time on the race card)."
+                            : "Pacing, splits and fuel below follow it."}
+                        </p>
                       )}
-                      {targetTimeInput && targetTimeS === null && <p className="warning">Enter a time as H:MM or H:MM:SS.</p>}
                     </div>
                     <ResultsSummary
-                      theta={solverResult.theta}
                       result={solverResult.result}
                       totalDistanceM={courseResult.totalDistance3D}
                       chosenPacing={chosenPacingResult}
@@ -612,7 +653,7 @@ export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentC
             id: "analyze",
             content: (
               <>
-                {!courseResult && <p className="placeholder">Upload a course GPX on the Course page to get started.</p>}
+                {!courseResult && <p className="placeholder">Pick or add a course on the Course page.</p>}
                 {courseResult && !courseResult.hasTimestamps && (
                   <p className="warning">
                     This GPX has no timestamps — Analyze needs a recorded run, not a course. Upload a run with a

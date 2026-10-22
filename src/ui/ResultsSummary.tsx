@@ -3,7 +3,6 @@ import type { FlatPacedResult, SimulationResult } from "../model/solver";
 import { formatDuration, formatMinPerKm } from "./format";
 
 interface ResultsSummaryProps {
-  theta: number;
   result: SimulationResult;
   totalDistanceM: number;
   /** findFlatPacedFinishTime with the athlete's own fitted pacing-margin
@@ -52,7 +51,6 @@ function Stat({ label, value, sublabel, title, headline }: StatProps) {
 }
 
 export function ResultsSummary({
-  theta,
   result,
   totalDistanceM,
   chosenPacing,
@@ -88,9 +86,9 @@ export function ResultsSummary({
     <Stat
       key="ceiling"
       headline={headline === "ceiling"}
-      label="Theoretical ceiling"
+      label="Ceiling"
       value={formatOrBonk(result)}
-      sublabel={`${(theta * 100).toFixed(0)}% effort — never actually achieved`}
+      sublabel="if everything goes perfectly"
       title="Theoretical upper bound, not a realistic target — you've never come within 15% of it, even on your best race."
     />
   );
@@ -99,13 +97,15 @@ export function ResultsSummary({
     <Stat
       key="target"
       headline={headline === "target"}
-      label="Target"
+      label="Your time"
       value={formatOrBonk(target.result)}
       sublabel={
         targetMatched
-          ? `${(target.theta * 100).toFixed(0)}% effort`
+          ? target.theta > 1
+            ? "faster than your ceiling"
+            : "the pacing for it is below"
           : targetAboveCeilingAttempt
-            ? `still not achievable — closest is ${(target.theta * 100).toFixed(0)}% effort, beyond your ceiling`
+            ? "out of reach, even beyond your ceiling"
             : targetTooFast
               ? "not achievable — showing fastest sustainable pace"
               : "closest achievable pace"
@@ -128,9 +128,9 @@ export function ResultsSummary({
     <Stat
       key="chosen"
       headline={headline === "chosen"}
-      label="Chosen pacing"
+      label="Likely"
       value={formatOrBonk(chosenPacing.result)}
-      sublabel="from your own race history"
+      sublabel="how you pace your races"
       title="What you'd likely run, based on your heart rate in past confirmed races."
     />
   );
@@ -148,9 +148,9 @@ export function ResultsSummary({
       {bestDemonstrated && (
         <Stat
           headline={false}
-          label="Best demonstrated"
+          label="Best day"
           value={formatOrBonk(bestDemonstrated.result)}
-          sublabel="your best day, this duration"
+          sublabel="like your best race"
           title="What's possible if you execute like your best confirmed race, this length."
         />
       )}
@@ -197,8 +197,7 @@ export function ResultsSummary({
           ) : (
             result.feasible && (
               <>
-                Margin: {formatDuration(chosenPacing.result.finishTimeS - result.finishTimeS)} slower than the theoretical
-                ceiling.
+                {formatDuration(chosenPacing.result.finishTimeS - result.finishTimeS)} slower than the ceiling.
               </>
             )
           )}
