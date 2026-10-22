@@ -1637,3 +1637,65 @@ details.lab.card {
 .card .help {
   margin: 0 0 var(--sp-3);
 }
+
+/* ---------- Runs tab ---------- */
+
+.help.danger {
+  color: var(--danger);
+}
+
+.race-checklist {
+  display: flex;
+  flex-direction: column;
+}
+
+.race-checklist__row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: var(--tap-min);
+  padding: var(--sp-1) 0;
+  cursor: pointer;
+}
+
+.race-checklist__row + .race-checklist__row {
+  border-top: 1px solid var(--border);
+}
+
+.race-checklist__row input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--brand);
+}
+
+.race-checklist__row .muted {
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.learned dd {
+  margin-bottom: var(--sp-2);
+}
+
+.list-help {
+  padding: var(--sp-2) var(--sp-4) 0;
+}
+
+details.lab .field-group-note,
+details.lab .field-group-help,
+details.lab .warning {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin: 0 0 var(--sp-2);
+}
+
+details.lab .run-library__experimental-fit {
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+
+details.lab .run-library__experimental-fit .field-group-note:first-child {
+  color: var(--text);
+  font-weight: var(--fw-semibold);
+}

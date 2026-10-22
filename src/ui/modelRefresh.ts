@@ -83,9 +83,22 @@ function loadFitKey(): string | null {
   }
 }
 
+const FIT_AT_STORAGE_KEY = "grade-runner:lastFitAt";
+
+/** When the model was last refitted (epoch ms), on this device. */
+export function loadLastFitAt(): number | null {
+  try {
+    const at = Number(localStorage.getItem(FIT_AT_STORAGE_KEY));
+    return at > 0 ? at : null;
+  } catch {
+    return null;
+  }
+}
+
 function saveFitKey(key: string): void {
   try {
     localStorage.setItem(FIT_KEY_STORAGE_KEY, key);
+    localStorage.setItem(FIT_AT_STORAGE_KEY, String(Date.now()));
   } catch {
     // Worst case the next open refits once more.
   }
