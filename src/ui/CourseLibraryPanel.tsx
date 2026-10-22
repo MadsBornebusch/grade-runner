@@ -1,69 +1,61 @@
 import { useEffect, useState } from "react";
+import { CaretRight, FlagCheckered, MapTrifold, Plus, Trash } from "@phosphor-icons/react";
 import { deleteStoredCourse, listStoredCourses, type StoredCourse } from "../storage/courseLibrary";
+import { planSettingsStore } from "../storage/planSettings";
 
 interface CourseLibraryPanelProps {
-  /** Passes the FULL stored course, not just points/name -- App.tsx needs
-   * its id (to know which row to write future checkpoint/target-time
-   * changes back to) and its saved savedPointsKm/targetTimeS to restore
-   * them. */
+  /** Opens a course in the race plan (Pacing). Passes the full stored
+   * course: the caller needs its id and saved checkpoints/target time. */
   onSelect: (course: StoredCourse) => void;
-  /** Id of the course currently loaded into the plan, so the list can show
-   * which one you're looking at. Null when none is loaded (a fresh upload
-   * that hasn't been saved, or nothing selected yet). */
-  selectedCourseId: string | null;
-  /** Bump to force a reload after a new course is saved elsewhere (a fresh
-   * upload/import) -- this panel doesn't own the save itself, since App.tsx
-   * already has the points/name in hand right where the upload/import
-   * callbacks fire. */
+  onAdd: () => void;
+  /** Bump to reload after a course is saved elsewhere. */
   refreshKey: number;
 }
 
-export function CourseLibraryPanel({ onSelect, selectedCourseId, refreshKey }: CourseLibraryPanelProps) {
+/** Your saved courses: tap one for its race plan. The goal race is
+ * marked; deleting asks first. */
+export function CourseLibraryPanel({ onSelect, onAdd, refreshKey }: CourseLibraryPanelProps) {
   const [courses, setCourses] = useState<StoredCourse[] | null>(null);
+  const goalCourseId = planSettingsStore.use().goalRace?.courseId;
 
   useEffect(() => {
     void listStoredCourses().then(setCourses);
   }, [refreshKey]);
 
-  const handleDelete = async (id: string) => {
-    await deleteStoredCourse(id);
-    setCourses((prev) => prev?.filter((c) => c.id !== id) ?? null);
+  const handleDelete = async (course: StoredCourse) => {
+    const goal = course.id === goalCourseId ? " It's your goal race; the plan keeps its saved numbers." : "";
+    if (!window.confirm(`Delete ${course.name}?${goal}`)) return;
+    await deleteStoredCourse(course.id);
+    setCourses((prev) => prev?.filter((c) => c.id !== course.id) ?? null);
   };
 
-  if (!courses || courses.length === 0) return null;
-
   return (
-    <div className="course-library">
-      <h3>Saved courses</h3>
-      <div className="course-library__rows">
-        {courses.map((c) => (
-          <div
-            key={c.id}
-            className={`course-library__row${c.id === selectedCourseId ? " course-library__row--selected" : ""}`}
-          >
-            <button
-              type="button"
-              className="course-library__select"
-              onClick={() => onSelect(c)}
-              // Communicates the selection to assistive tech too, not just
-              // to the eye -- the visual treatment alone isn't reachable
-              // for a screen-reader user.
-              aria-current={c.id === selectedCourseId ? "true" : undefined}
-            >
-              {c.id === selectedCourseId && <span className="course-library__selected-tick">✓</span>}
-              {c.name} &middot; {(c.distanceM / 1000).toFixed(1)} km &middot; {c.elevationGainM.toFixed(0)} m gain
+    <section>
+      <h3 className="section-title">Your courses</h3>
+      <div className="card list course-list">
+        {courses?.map((c) => (
+          <div key={c.id} className="course-list__row">
+            <button type="button" className="list-row" onClick={() => onSelect(c)}>
+              {c.id === goalCourseId ? <FlagCheckered size={20} weight="duotone" className="brand-ink" /> : <MapTrifold size={20} weight="duotone" className="muted" />}
+              <span>
+                <span className="course-list__name">{c.name}</span>
+                <span className="num muted course-list__facts">
+                  {(c.distanceM / 1000).toFixed(1)} km · {Math.round(c.elevationGainM).toLocaleString()} m up
+                  {c.id === goalCourseId && " · goal race"}
+                </span>
+              </span>
+              <CaretRight size={16} />
             </button>
-            <button
-              type="button"
-              className="course-library__delete"
-              onClick={() => void handleDelete(c.id)}
-              aria-label={`Delete ${c.name}`}
-            >
-              ×
+            <button type="button" className="icon-button course-list__delete" onClick={() => void handleDelete(c)} aria-label={`Delete ${c.name}`}>
+              <Trash size={18} />
             </button>
           </div>
         ))}
+        <button type="button" className="list-row course-list__add" onClick={onAdd}>
+          <Plus size={20} />
+          <span>Add a course</span>
+        </button>
       </div>
-    </div>
+    </section>
   );
 }

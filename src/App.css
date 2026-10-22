@@ -361,37 +361,6 @@
   flex: 1;
 }
 
-.course-library {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 14px;
-  margin-bottom: 12px;
-}
-
-.course-library h3 {
-  margin: 0 0 6px;
-  font-size: 13px;
-  opacity: 0.7;
-}
-
-.course-library__rows {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.course-library__row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.add-course-button {
-  width: 100%;
-  text-align: center;
-  margin-bottom: 12px;
-}
-
 .generic-course__control {
   display: flex;
   flex-direction: column;
@@ -412,37 +381,6 @@
   border-radius: 6px;
   background: none;
   color: var(--text);
-}
-
-.course-library__select {
-  flex: 1;
-  text-align: left;
-  border: none;
-  background: none;
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  padding: 4px 6px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.course-library__select:hover {
-  background: var(--bg-alt);
-}
-
-.course-library__delete {
-  border: none;
-  background: none;
-  color: var(--text-m);
-  font-size: 15px;
-  line-height: 1;
-  padding: 4px 6px;
-  cursor: pointer;
-}
-
-.course-library__delete:hover {
-  color: var(--warn);
 }
 
 .course-name {
@@ -745,32 +683,6 @@
 .grade-histogram__swatch--walk { background: #b45309; }
 .grade-histogram__swatch--brake { background: var(--success); }
 .grade-histogram__swatch--plain { background: var(--accent-border); }
-
-/* Selected course. Deliberately several redundant cues -- a tinted
-   background, an accent bar down the left edge, bolder text and a tick --
-   because a single subtle background tint was reported as barely visible,
-   and it has to survive both light and dark themes. */
-.course-library__row--selected {
-  background: var(--accent-bg);
-  border-left: 3px solid var(--accent-border);
-  border-radius: 6px;
-  margin-left: -3px;
-}
-
-.course-library__row--selected .course-library__select {
-  font-weight: 600;
-  color: var(--text-h);
-}
-
-.course-library__row--selected .course-library__select:hover {
-  background: none;
-}
-
-.course-library__selected-tick {
-  color: var(--accent-border);
-  font-weight: 700;
-  margin-right: 6px;
-}
 
 /* The Plan/Analyze stat strip. Without wrapping, the added climb/descent
    and run-vs-walk figures run off the side of a phone screen. */

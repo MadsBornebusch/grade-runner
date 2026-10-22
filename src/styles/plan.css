@@ -1488,3 +1488,46 @@ details.lab > summary {
   color: var(--text-muted);
   padding: var(--sp-2) 0;
 }
+
+/* ---------- Course list ---------- */
+
+.brand-ink {
+  color: var(--brand-ink);
+}
+
+.course-list__row {
+  display: flex;
+  align-items: center;
+  padding-right: var(--sp-2);
+}
+
+.course-list__row + .course-list__row,
+.course-list__add {
+  border-top: 1px solid var(--border);
+}
+
+.course-list__row .list-row > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.course-list__name {
+  font-weight: var(--fw-medium);
+}
+
+.course-list__facts {
+  font-size: var(--fs-sm);
+}
+
+.course-list__delete {
+  color: var(--text-muted);
+  background: none;
+  box-shadow: none;
+  flex-shrink: 0;
+}
+
+.course-list__add {
+  color: var(--brand-ink);
+  font-weight: var(--fw-semibold);
+}

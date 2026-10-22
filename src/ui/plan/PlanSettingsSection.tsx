@@ -5,18 +5,11 @@ import { planSnapshotStore } from "../usePlan";
 
 /** Settings › Training plan: carbs, check-ins, re-plan and reset. The
  * weekly schedule itself is edited from Schedule › Your week. */
-export function PlanSettingsSection({ plan, formInputs, onChange }: { plan: PlanState; formInputs: FormInputs; onChange: (v: FormInputs) => void }) {
+export function PlanSettingsSection({ plan, formInputs }: { plan: PlanState; formInputs: FormInputs }) {
   const settings = planSettingsStore.use();
   return (
     <fieldset>
       <legend>Training plan</legend>
-      <label className="form-row">
-        <span>Race-day carbs</span>
-        <span className="input-unit">
-          <input type="number" min={0} max={150} step={5} value={formInputs.intakeGPerH} onChange={(e) => onChange({ ...formInputs, intakeGPerH: Number(e.target.value) || 0 })} />
-          g/h
-        </span>
-      </label>
       <label className="form-row">
         <span>Long runs start at</span>
         <span className="input-unit">
@@ -31,7 +24,7 @@ export function PlanSettingsSection({ plan, formInputs, onChange }: { plan: Plan
           g/h
         </span>
       </label>
-      <p className="help">Long runs of 90 min or more step up 5 g/h at a time toward race day. Once you log what you took, the steps start from what your stomach handled.</p>
+      <p className="help">Long runs of 90 min or more step up 5 g/h at a time toward your race's {formInputs.intakeGPerH} g/h (set under Goal race › Race fuelling). Once you log what you took, the steps start from what your stomach handled.</p>
       <label className="switch-row">
         <input type="checkbox" checked={settings.checkinsEnabled} onChange={(e) => planSettingsStore.set((s) => ({ ...s, checkinsEnabled: e.target.checked }))} />
         <span>Ask for sleep and morning HRV on Today</span>

@@ -568,42 +568,35 @@ export function AthleteFields({ values, onChange }: FieldsProps) {
  * genuinely race-specific (carb-loaded or not, aid-station plan or not),
  * unlike the one-time athlete physiology in AthleteFields above. */
 export function FuelingFields({ values, onChange }: FieldsProps) {
-  const set = <K extends keyof FormInputs>(key: K, value: FormInputs[K]) =>
-    onChange({ ...values, [key]: value });
-
+  const set = <K extends keyof FormInputs>(key: K, value: FormInputs[K]) => onChange({ ...values, [key]: value });
   return (
-    <div className="inputs-panel">
-      <fieldset>
-        <legend>Fueling</legend>
-        <p className="field-group-help">
-          Assumes everything you enter gets absorbed -- don't exceed ~60 g/h (glucose-only) or ~90 g/h
-          (glucose+fructose), a real gut's limit.
+    <section>
+      <h3 className="section-title">Race fuelling</h3>
+      <div className="card">
+        <label className="form-row">
+          <span>Carbs during the race</span>
+          <span className="input-unit">
+            <input type="number" min={0} max={150} step={5} value={values.intakeGPerH} onChange={(e) => set("intakeGPerH", Number(e.target.value) || 0)} />
+            g/h
+          </span>
+        </label>
+        <p className="help">
+          What you plan to take. A trained gut can take 90–120 g/h of glucose with fructose; your long runs practise toward it. It also sets the
+          prediction.
         </p>
-        <NumberField
-          label="Carb intake"
-          hint="g/h"
-          value={values.intakeGPerH}
-          step={5}
-          min={0}
-          onChange={(v) => set("intakeGPerH", v)}
-        />
-        <NumberField
-          label="Glycogen store"
-          hint="g/kg body mass"
-          value={values.glycogenGPerKg}
-          step={0.1}
-          min={0}
-          onChange={(v) => set("glycogenGPerKg", v)}
-        />
-        <p className="field-group-note">
-          ≈ {resolveGlycogenStoreG(values).toFixed(0)} g total at {values.bodyMassKg} kg body mass.
+        <label className="form-row">
+          <span>Glycogen at the start</span>
+          <span className="input-unit">
+            <input type="number" min={0} max={15} step={0.5} value={values.glycogenGPerKg} onChange={(e) => set("glycogenGPerKg", Number(e.target.value) || 0)} />
+            g/kg
+          </span>
+        </label>
+        <p className="help num">
+          About {Math.round(resolveGlycogenStoreG(values))} g at {values.bodyMassKg} kg. 7–8 g/kg is typical when fed and rested; carb-loading
+          raises it.
         </p>
-        <p className="field-group-help">
-          ~7-8 g/kg is typical for a fed, trained athlete. Carb-loading pushes it higher; fasted or fatigued pushes
-          it lower.
-        </p>
-      </fieldset>
-    </div>
+      </div>
+    </section>
   );
 }
 

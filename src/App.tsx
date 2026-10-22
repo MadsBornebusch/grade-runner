@@ -151,7 +151,7 @@ function App() {
           <SettingsTab
             formInputs={formInputs}
             onChange={setFormInputs}
-            planSection={<PlanSettingsSection plan={plan} formInputs={formInputs} onChange={setFormInputs} />}
+            planSection={<PlanSettingsSection plan={plan} formInputs={formInputs} />}
           />
         </div>
       </main>

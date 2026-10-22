@@ -514,13 +514,13 @@ export function RaceTab({ formInputs, setFormInputs, active, segment, onSegmentC
                   }}
                 />
                 <CourseLibraryPanel
-                  selectedCourseId={currentCourseId}
                   refreshKey={courseLibraryVersion}
-                  onSelect={(course) => loadCourse(course.points, course.name, course.id, course.savedPointsKm, course.targetTimeS)}
+                  onSelect={(course) => {
+                    loadCourse(course.points, course.name, course.id, course.savedPointsKm, course.targetTimeS);
+                    onSegmentChange("pacing");
+                  }}
+                  onAdd={() => setAddCourseOpen(true)}
                 />
-                <button type="button" className="button-primary add-course-button" onClick={() => setAddCourseOpen(true)}>
-                  + Add course
-                </button>
                 <FuelingFields values={formInputs} onChange={setFormInputs} />
               </>
             ),
