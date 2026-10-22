@@ -1321,6 +1321,8 @@ button.list-row {
 
 .race-hero h2 {
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: #fff;
   font-size: var(--fs-2xl);
   letter-spacing: var(--tracking-tight);
@@ -1506,6 +1508,14 @@ details.lab > summary {
   border-top: 1px solid var(--border);
 }
 
+/* A long course name (often a GPX file name with no spaces) wraps
+   instead of pushing the delete button off the screen. */
+.course-list__row .list-row {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
 .course-list__row .list-row > span {
   display: flex;
   flex-direction: column;
@@ -1514,6 +1524,7 @@ details.lab > summary {
 
 .course-list__name {
   font-weight: var(--fw-medium);
+  overflow-wrap: anywhere;
 }
 
 .course-list__facts {
