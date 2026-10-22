@@ -22,10 +22,10 @@ export function AnalysisSummary({ result, totalDistanceM, summaryStats }: Analys
     <div className={`card results-summary ${result.bonked ? "results-summary--warn" : "results-summary--ok"}`}>
       <div
         className="results-summary__stat"
-        title="The moving-time-weighted average of your actual power vs. your sustainable aerobic ceiling at each point in the run. Unlike a planned effort on Pacing, this is descriptive, not a solved target -- it can read over 100% if you ran harder than the ceiling model says was sustainable for that duration (a hard push, or a sign your athlete settings don't quite match your current fitness)."
+        title="Your power against the ceiling for a race as long as this run, averaged over moving time. An all-out race paced evenly reads about 100%; it can read over 100% if you ran harder than your settings say you can hold for this long (a hard push, or settings that lag your fitness)."
       >
         <span className="results-summary__label">Effort</span>
-        <span className="results-summary__value">{(result.avgEffortFraction * 100).toFixed(0)}%</span>
+        <span className="results-summary__value">{(result.raceEffortFraction * 100).toFixed(0)}%</span>
       </div>
       <div className="results-summary__stat">
         <span className="results-summary__label">Elapsed time</span>

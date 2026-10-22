@@ -91,6 +91,12 @@ export interface AnalysisResult {
    * Paused segments are excluded -- resting metabolism isn't a pacing choice.
    */
   avgEffortFraction: number;
+  /** Actual gross power against the ceiling for a race as long as this
+   * whole run, time-weighted over moving segments. Unlike
+   * avgEffortFraction (ceiling at the time elapsed so far, so 100% of
+   * VO2max in the opening minutes), an evenly paced all-out run reads a
+   * constant ~100% here: it's the basis vo2MaxEstimate.ts inverts. */
+  raceEffortFraction: number;
 }
 
 /** No FormInputs field feeds this in production -- glycogen simply depletes
@@ -121,6 +127,9 @@ export function analyzeRun(segments: CourseSegment[], inputs: AnalysisInputs): A
   let bonkIndex: number | null = null;
   let effortWeightedSum = 0;
   let effortWeightS = 0;
+  let raceEffortWeightedSum = 0;
+  // The whole run's moving time, for raceEffortFraction's ceiling.
+  const raceMin = segments.reduce((sum, seg) => (seg.dtS && seg.dtS > 0 && !seg.paused ? sum + seg.dtS : sum), 0) / 60;
 
   const results: AnalysisSegmentResult[] = [];
 
@@ -150,9 +159,14 @@ export function analyzeRun(segments: CourseSegment[], inputs: AnalysisInputs): A
         { tMin: elapsedBeforeS / 60, altitudeM, elapsedHours: elapsedBeforeS / 3600 },
         inputs.ceilingParams,
       );
-      if (ceilingGross > 0) {
+      const raceCeilingGross = ceilingPower(
+        { tMin: raceMin, altitudeM, elapsedHours: elapsedBeforeS / 3600 },
+        inputs.ceilingParams,
+      );
+      if (ceilingGross > 0 && raceCeilingGross > 0) {
         effortFraction = grossPower / ceilingGross;
         effortWeightedSum += effortFraction * dt;
+        raceEffortWeightedSum += (grossPower / raceCeilingGross) * dt;
         effortWeightS += dt;
       }
     }
@@ -196,5 +210,6 @@ export function analyzeRun(segments: CourseSegment[], inputs: AnalysisInputs): A
     bonked: bonkIndex !== null,
     bonkIndex,
     avgEffortFraction: effortWeightS > 0 ? effortWeightedSum / effortWeightS : 0,
+    raceEffortFraction: effortWeightS > 0 ? raceEffortWeightedSum / effortWeightS : 0,
   };
 }

@@ -3,24 +3,25 @@
 // (e.g. Daniels-Gilbert) that was never validated against this app's own
 // Minetti-based cost model. See PLAN.md §12.
 //
-// ceilingPower(t; vo2max) is exactly linear in vo2max at every instant (the
-// duration curve, altitude factor, and durability drift don't depend on
-// vo2max at all), so if this run was executed as a genuine near-ceiling
-// effort for its own duration -- i.e. grossPower(t) ~= ceilingPower(t;
-// trueVo2max) throughout -- then analyzeRun's avgEffortFraction (computed
-// against whatever vo2max is currently assumed) equals trueVo2max /
-// assumedVo2max at every instant, constant regardless of how the duration
-// curve, altitude, or drift vary within the run. Multiplying back out:
+// ceilingPower(t; vo2max) is exactly linear in vo2max (the duration curve,
+// altitude factor and durability drift don't depend on it), so if this run
+// was a genuine all-out effort for its own length -- gross power ~= the
+// ceiling for a race this long, with the true vo2max -- then analyzeRun's
+// raceEffortFraction (against whatever vo2max is assumed) equals
+// trueVo2max / assumedVo2max:
 //
-//   trueVo2max = assumedVo2max * avgEffortFraction
+//   trueVo2max = assumedVo2max * raceEffortFraction
 //
-// This only holds if the run really was paced at a roughly constant
-// %-of-ceiling near-maximal effort for its own length -- an easy run that
-// happens to be 40 minutes long would just underestimate vo2max, not
-// reveal anything. That's a pacing assumption GPS data alone can't verify;
-// callers should only offer this for runs already flagged as likely hard
-// efforts (see suggestRunsForFit), and treat the result as a "race"-sourced
-// estimate the athlete reviews before adding, not an automatic overwrite.
+// It has to be the ceiling for the run's whole duration, not for the time
+// elapsed so far (avgEffortFraction): that one is 100% of VO2max in the
+// opening minutes, so an evenly paced race reads low early and the
+// estimate came out several ml/kg/min short.
+//
+// This only holds if the run really was a near-maximal effort for its
+// length -- an easy run that happens to be 40 minutes long would just
+// underestimate vo2max. GPS data alone can't verify that, so callers only
+// offer this for runs flagged as likely hard efforts (see
+// suggestRunsForFit), as an estimate the athlete reviews before adding.
 
 import type { AnalysisResult } from "./analysis";
 import type { CeilingParams } from "./ceiling";
@@ -42,7 +43,7 @@ export function isEstimableEffort(durationMin: number): boolean {
 export function estimateVo2MaxFromRun(analysis: AnalysisResult, ceilingParams: CeilingParams): number | null {
   const durationMin = analysis.totalMovingTimeS / 60;
   if (!isEstimableEffort(durationMin)) return null;
-  if (analysis.avgEffortFraction <= 0) return null;
+  if (analysis.raceEffortFraction <= 0) return null;
   const assumedVo2Max = ceilingParams.vo2MaxMlPerKgPerMin ?? 50;
-  return assumedVo2Max * analysis.avgEffortFraction;
+  return assumedVo2Max * analysis.raceEffortFraction;
 }
