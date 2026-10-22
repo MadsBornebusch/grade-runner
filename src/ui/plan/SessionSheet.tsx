@@ -1,4 +1,5 @@
 import { Info } from "@phosphor-icons/react";
+import type { StrengthDone } from "../../plan/strengthDone";
 import type { DatedHistoryRun } from "../../plan/historyFromRuns";
 import type { PlannedSession } from "../../plan/planGenerator";
 import { GUARD_FLOORS, SESSION_GUARD_MULTIPLE } from "../../plan/sessionGuard";
@@ -13,7 +14,7 @@ interface SessionSheetProps {
   raceGPerH: number;
   strengthCounts: boolean;
   targets: IntensityTargets;
-  strengthDone: boolean;
+  strengthDone: StrengthDone | null;
   onToggleStrength: () => void;
   onMoveLongRun?: () => void;
   onClose: () => void;
@@ -103,7 +104,8 @@ export function SessionSheet({ session: s, runs, raceName, raceGPerH, strengthCo
       )}
 
       <div className="sheet__actions">
-        {s.kind === "strength" && (
+        {s.kind === "strength" && strengthDone?.source === "strava" && <p className="help">Done: {strengthDone.name}, from Strava.</p>}
+        {s.kind === "strength" && strengthDone?.source !== "strava" && (
           <button type="button" className={strengthDone ? "button-ghost" : "button-primary"} onClick={onToggleStrength}>
             {strengthDone ? "Mark not done" : "Did it"}
           </button>

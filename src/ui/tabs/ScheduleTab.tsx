@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useStrengthDone } from "../plan/useStrengthDone";
 import { intensityTargets } from "../plan/intensity";
 import { dateOfDayNumber, dayNumberOf } from "../../plan/historyFromRuns";
 import { mondayOf, type PlannedSession } from "../../plan/planGenerator";
@@ -25,6 +26,7 @@ interface ScheduleTabProps {
  * (all weeks), #/schedule/edit (your week). */
 export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabProps) {
   const settings = planSettingsStore.use();
+  const strengthDone = useStrengthDone(plan.snapshot);
   const [openSession, setOpenSession] = useState<PlannedSession | null>(null);
   const [moving, setMoving] = useState<number | null>(null);
   const race = settings.goalRace;
@@ -124,7 +126,7 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
         weekCount={p.weeks.length}
         history={history}
         today={plan.today}
-        strengthDone={settings.strengthDone}
+        strengthDone={strengthDone}
         targets={targets}
         onOpen={setOpenSession}
         onPrev={index > 0 ? () => goWeek(index - 1) : undefined}
@@ -141,7 +143,7 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
           raceGPerH={formInputs.intakeGPerH}
           strengthCounts={settings.schedule.strengthCountsInBudget}
           targets={targets}
-          strengthDone={!!settings.strengthDone[dateOfDayNumber(openSession.day)]}
+          strengthDone={strengthDone[dateOfDayNumber(openSession.day)] ?? null}
           onToggleStrength={() => toggleStrength(openSession.day)}
           onMoveLongRun={openSession.kind === "long" && canMove ? () => setMoving(weekdayOf(openSession.day)) : undefined}
           onClose={() => setOpenSession(null)}

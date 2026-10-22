@@ -4590,6 +4590,17 @@ for what it can't get:
   the goal race screen can show what under-trained fuelling costs in
   finish time.
 
+### To do
+
+- **Suggest what to do in the strength sessions** (user request,
+  2026-10-22). The plan only places strength sessions; it should say what
+  to do in them, by phase: heavy, low-rep lower-body work in base
+  (the durability and running-economy evidence is for heavy resistance,
+  see Zanini et al. and the heavy-vs-plyometrics meta-analysis below),
+  maintenance volume in the specific block, and lighter or none in the
+  taper. Strength sessions logged on Strava already tick themselves off
+  (strengthDone.ts).
+
 ### Open questions
 
 - Is the per-run fitness index noise low enough (stage 2's gate)? This decides

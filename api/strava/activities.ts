@@ -7,6 +7,7 @@ interface StravaActivitySummary {
   name: string;
   sport_type: string;
   start_date: string;
+  start_date_local: string;
   distance: number;
   moving_time: number;
   total_elevation_gain: number;
@@ -15,6 +16,8 @@ interface StravaActivitySummary {
 }
 
 const RUN_SPORT_TYPES = new Set(["Run", "TrailRun", "VirtualRun"]);
+/** Logged on Strava, these tick off the plan's strength sessions. */
+const STRENGTH_SPORT_TYPES = new Set(["WeightTraining", "Crossfit", "Workout", "HighIntensityIntervalTraining"]);
 
 export default handleErrors(async (req: IncomingMessage, res: ServerResponse) => {
   const auth = await requireValidAccessToken(req, res);
@@ -51,9 +54,13 @@ export default handleErrors(async (req: IncomingMessage, res: ServerResponse) =>
       avgHeartRate: a.average_heartrate ?? null,
       avgWatts: a.average_watts ?? null,
     }));
+  // The athlete's local calendar day, which is what the plan is laid out in.
+  const strength = activities
+    .filter((a) => STRENGTH_SPORT_TYPES.has(a.sport_type))
+    .map((a) => ({ id: a.id, name: a.name, localDate: a.start_date_local.slice(0, 10) }));
   // A full page of raw activities (before the run-type filter) means there's
   // likely another page; a short page means we've hit the end of history --
   // this has to be judged on the raw count, since filtering can otherwise
   // shrink even a "full" page down to look empty.
-  sendJson(res, 200, { runs, hasMore: activities.length === perPage });
+  sendJson(res, 200, { runs, strength, hasMore: activities.length === perPage });
 });

@@ -16,8 +16,17 @@ export interface StravaRunSummaryDTO {
   avgWatts: number | null;
 }
 
+export interface StravaStrengthDTO {
+  id: number;
+  name: string;
+  /** YYYY-MM-DD in the athlete's own time zone. */
+  localDate: string;
+}
+
 export interface BackfillPage {
   runs: StravaRunSummaryDTO[];
+  /** Strength activities on the same page (absent from older servers). */
+  strength?: StravaStrengthDTO[];
   hasMore: boolean;
 }
 

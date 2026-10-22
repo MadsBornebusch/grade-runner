@@ -1,4 +1,5 @@
 import { CaretLeft, CaretRight, DotsThreeOutline, Path, PersonSimpleRun } from "@phosphor-icons/react";
+import type { StrengthDone } from "../../plan/strengthDone";
 import type { IntensityTargets } from "./intensity";
 import { dateOfDayNumber, type DatedHistoryRun } from "../../plan/historyFromRuns";
 import { matchWeek } from "../../plan/matchSessions";
@@ -13,7 +14,7 @@ interface WeekViewProps {
   weekCount: number;
   history: DatedHistoryRun[];
   today: number;
-  strengthDone: Record<string, true>;
+  strengthDone: Record<string, StrengthDone>;
   targets: IntensityTargets;
   onOpen: (session: PlannedSession) => void;
   onPrev?: () => void;

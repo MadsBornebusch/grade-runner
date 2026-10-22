@@ -7,6 +7,7 @@
 // instead of resuming or no-opping. Moving the loop here means it keeps
 // running (and stays visible) across any number of mounts/unmounts.
 
+import { planSettingsStore } from "../storage/planSettings";
 import { filterRunsSinceDate, shouldFetchNextBackfillPage, toStoredRunSummaryInput, type BackfillPage } from "../model/stravaBackfill";
 import { upsertStoredRunSummary } from "../storage/runLibrary";
 
@@ -62,6 +63,11 @@ export async function runBackfillBatch(fromDateInput: string, onDone: (importedC
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "Sync failed.");
       const pageResult = body as BackfillPage;
+
+      const strength = pageResult.strength ?? [];
+      if (strength.length > 0) {
+        planSettingsStore.set((s) => ({ ...s, strengthFromStrava: { ...s.strengthFromStrava, ...Object.fromEntries(strength.map((a) => [a.localDate, a.name])) } }));
+      }
 
       for (const run of filterRunsSinceDate(pageResult.runs, targetStartDate)) {
         await upsertStoredRunSummary(toStoredRunSummaryInput(run));
