@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { useStrengthDone } from "../plan/useStrengthDone";
+import { toggleSessionDone, useSessionDone } from "../plan/useSessionDone";
+import { isTickedSession } from "../../plan/matchSessions";
 import { intensityTargets } from "../plan/intensity";
 import { dateOfDayNumber, dayNumberOf } from "../../plan/historyFromRuns";
 import { mondayOf, type PlannedSession } from "../../plan/planGenerator";
@@ -26,7 +27,7 @@ interface ScheduleTabProps {
  * (all weeks), #/schedule/edit (your week). */
 export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabProps) {
   const settings = planSettingsStore.use();
-  const strengthDone = useStrengthDone(plan.snapshot);
+  const doneOf = useSessionDone(plan.snapshot);
   const [openSession, setOpenSession] = useState<PlannedSession | null>(null);
   const [moving, setMoving] = useState<number | null>(null);
   const race = settings.goalRace;
@@ -109,14 +110,6 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
     setMoving(null);
     setOpenSession(null);
   };
-  const toggleStrength = (day: number) =>
-    planSettingsStore.set((s) => {
-      const key = dateOfDayNumber(day);
-      const strengthDone = { ...s.strengthDone };
-      if (strengthDone[key]) delete strengthDone[key];
-      else strengthDone[key] = true;
-      return { ...s, strengthDone };
-    });
 
   return (
     <>
@@ -126,7 +119,7 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
         weekCount={p.weeks.length}
         history={history}
         today={plan.today}
-        strengthDone={strengthDone}
+        doneOf={doneOf}
         targets={targets}
         onOpen={setOpenSession}
         onPrev={index > 0 ? () => goWeek(index - 1) : undefined}
@@ -138,13 +131,14 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
       {openSession && (
         <SessionSheet
           session={openSession}
-          runs={openSession.kind === "strength" ? [] : history.filter((r) => r.day === openSession.day)}
+          runs={isTickedSession(openSession.kind) ? [] : history.filter((r) => r.day === openSession.day)}
           raceName={race!.name}
           raceGPerH={formInputs.intakeGPerH}
           strengthCounts={settings.schedule.strengthCountsInBudget}
           targets={targets}
-          strengthDone={strengthDone[dateOfDayNumber(openSession.day)] ?? null}
-          onToggleStrength={() => toggleStrength(openSession.day)}
+          bodyMassKg={formInputs.bodyMassKg}
+          done={doneOf(openSession)}
+          onToggleDone={() => toggleSessionDone(openSession)}
           onMoveLongRun={openSession.kind === "long" && canMove ? () => setMoving(weekdayOf(openSession.day)) : undefined}
           onClose={() => setOpenSession(null)}
         />

@@ -119,6 +119,7 @@
   --kind-easy: #4C9A3A;      --kind-easy-soft: #E6F3DF;      --kind-easy-ink: #2F6A22;
   --kind-quality: #E0582E;   --kind-quality-soft: #FCE7DE;   --kind-quality-ink: #A83A16;
   --kind-descent: #A9732B;   --kind-descent-soft: #F5EBDA;   --kind-descent-ink: #7A5018;
+  --kind-hike: #737A1C;      --kind-hike-soft: #EFF1D9;      --kind-hike-ink: #535912;
   --kind-strength: #8E52B8;  --kind-strength-soft: #F1E6F8;  --kind-strength-ink: #6A3590;
   --kind-race: #C9264F;      --kind-race-soft: #FBE2E8;      --kind-race-ink: #9E1A3B;
   --kind-rest: #8A918D;      --kind-rest-soft: #EEEFEC;      --kind-rest-ink: #555C58;
@@ -173,6 +174,7 @@
     --kind-easy: #78C266;     --kind-easy-soft: #1A2E16;     --kind-easy-ink: #A3D896;
     --kind-quality: #F27F55;  --kind-quality-soft: #3A1E14;  --kind-quality-ink: #F8AA8C;
     --kind-descent: #D19E55;  --kind-descent-soft: #33261A;  --kind-descent-ink: #E3BE85;
+    --kind-hike: #BCC456;     --kind-hike-soft: #2A2C14;     --kind-hike-ink: #D6DB8C;
     --kind-strength: #B98BDE; --kind-strength-soft: #2B1E37; --kind-strength-ink: #D2B3EC;
     --kind-race: #F0668A;     --kind-race-soft: #3A1622;     --kind-race-ink: #F79AB2;
     --kind-rest: #8F9894;     --kind-rest-soft: #232A28;     --kind-rest-ink: #B5BDB9;
@@ -221,6 +223,7 @@
   --kind-easy: #78C266;     --kind-easy-soft: #1A2E16;     --kind-easy-ink: #A3D896;
   --kind-quality: #F27F55;  --kind-quality-soft: #3A1E14;  --kind-quality-ink: #F8AA8C;
   --kind-descent: #D19E55;  --kind-descent-soft: #33261A;  --kind-descent-ink: #E3BE85;
+  --kind-hike: #BCC456;     --kind-hike-soft: #2A2C14;     --kind-hike-ink: #D6DB8C;
   --kind-strength: #B98BDE; --kind-strength-soft: #2B1E37; --kind-strength-ink: #D2B3EC;
   --kind-race: #F0668A;     --kind-race-soft: #3A1622;     --kind-race-ink: #F79AB2;
   --kind-rest: #8F9894;     --kind-rest-soft: #232A28;     --kind-rest-ink: #B5BDB9;

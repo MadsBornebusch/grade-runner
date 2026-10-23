@@ -1,9 +1,10 @@
-import { CaretRight, CheckCircle, CircleHalf, Couch, ForkKnife, Heartbeat, TrendDown, XCircle } from "@phosphor-icons/react";
+import { Backpack, CaretRight, CheckCircle, CircleHalf, Couch, ForkKnife, Heartbeat, TrendDown, XCircle } from "@phosphor-icons/react";
 import { KIND_ICON } from "./kindIcons";
 import type { PlannedSession } from "../../plan/planGenerator";
 import type { SessionState } from "../../plan/matchSessions";
 import { KIND_TITLE, distanceLine, effortChip, formatMinutes, formatMinutesExact } from "./planCopy";
 import type { IntensityTargets } from "./intensity";
+import { STRENGTH_FOCUS_TITLE } from "./strengthCopy";
 
 interface SessionCardProps {
   session: PlannedSession;
@@ -20,7 +21,9 @@ interface SessionCardProps {
 export function SessionCard({ session, state, ranMin, hero, targets, onOpen }: SessionCardProps) {
   const KindIcon = KIND_ICON[session.kind];
   const key = session.kind === "long" || session.kind === "race";
-  const isRun = session.kind !== "strength" && session.kind !== "race";
+  // Runs show a distance; hikes and strength only their time.
+  const isRun = session.kind !== "strength" && session.kind !== "race" && session.kind !== "hike";
+  const focus = session.kind === "strength" && session.strengthFocus ? ` · ${STRENGTH_FOCUS_TITLE[session.strengthFocus]}` : "";
   const cls = [
     "session-card",
     `kind-${session.kind}`,
@@ -41,18 +44,25 @@ export function SessionCard({ session, state, ranMin, hero, targets, onOpen }: S
           <>
             <span className="session-card__big num">{formatMinutes(session.minutes)}</span>
             {isRun && <span className="session-card__sub num">{distanceLine(session)}</span>}
+            {focus && <span className="session-card__sub">{focus.slice(3)}</span>}
           </>
         ) : (
           <span className="session-card__sub num">
             {formatMinutes(session.minutes)}
             {isRun && ` · ${distanceLine(session)}`}
+            {focus}
           </span>
         )}
-        {(session.descentM >= 50 && isRun) || session.carbsGPerH || effort ? (
+        {(session.descentM >= 50 && isRun) || session.carbsGPerH || effort || session.packPct ? (
           <span className="session-card__chips">
             {effort && (
               <span className={`chip chip--effort${session.steadyMinutes || session.kind === "quality" ? " chip--effort-up" : ""}`}>
                 <Heartbeat size={14} /> {effort}
+              </span>
+            )}
+            {session.kind === "hike" && session.packPct && (
+              <span className="chip chip--hike">
+                <Backpack size={14} /> {session.packPct}% pack
               </span>
             )}
             {isRun && session.descentM >= 50 && (

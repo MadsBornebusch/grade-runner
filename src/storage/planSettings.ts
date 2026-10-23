@@ -48,6 +48,9 @@ export interface PlanSettings {
   /** Strength activities logged on Strava, by local day (YYYY-MM-DD) ->
    * activity name. They tick off the plan's sessions (strengthDone.ts). */
   strengthFromStrava: Record<string, string>;
+  /** The same two for the weighted uphill hikes: Strava "Hike" activities. */
+  hikeDone: Record<string, true>;
+  hikeFromStrava: Record<string, string>;
   /** Carbs per hour the long-run ladder starts from before any log. */
   carbsStartGPerH: number;
   checkinsEnabled: boolean;
@@ -70,6 +73,8 @@ export const DEFAULT_PLAN_SETTINGS: PlanSettings = {
   longRunMoves: {},
   strengthDone: {},
   strengthFromStrava: {},
+  hikeDone: {},
+  hikeFromStrava: {},
   carbsStartGPerH: 30,
   checkinsEnabled: true,
 };

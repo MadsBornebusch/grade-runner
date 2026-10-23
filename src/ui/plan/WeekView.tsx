@@ -1,8 +1,8 @@
 import { CaretLeft, CaretRight, DotsThreeOutline, Path, PersonSimpleRun } from "@phosphor-icons/react";
-import type { StrengthDone } from "../../plan/strengthDone";
+import type { SessionDone } from "./useSessionDone";
 import type { IntensityTargets } from "./intensity";
-import { dateOfDayNumber, type DatedHistoryRun } from "../../plan/historyFromRuns";
-import { matchWeek } from "../../plan/matchSessions";
+import type { DatedHistoryRun } from "../../plan/historyFromRuns";
+import { isTickedSession, matchWeek } from "../../plan/matchSessions";
 import type { PlannedSession, PlanWeek } from "../../plan/planGenerator";
 import { RestRow, SessionCard } from "./SessionCard";
 import { weekProgress } from "./planViewModel";
@@ -14,7 +14,7 @@ interface WeekViewProps {
   weekCount: number;
   history: DatedHistoryRun[];
   today: number;
-  strengthDone: Record<string, StrengthDone>;
+  doneOf: SessionDone;
   targets: IntensityTargets;
   onOpen: (session: PlannedSession) => void;
   onPrev?: () => void;
@@ -24,7 +24,7 @@ interface WeekViewProps {
   onAllWeeks: () => void;
 }
 
-export function WeekView({ week, weekNumber, weekCount, history, today, strengthDone, targets, onOpen, onPrev, onNext, onMoveLongRun, onEditSchedule, onAllWeeks }: WeekViewProps) {
+export function WeekView({ week, weekNumber, weekCount, history, today, doneOf, targets, onOpen, onPrev, onNext, onMoveLongRun, onEditSchedule, onAllWeeks }: WeekViewProps) {
   const { doneMin, plannedMin, isCurrent } = weekProgress(week, history, today);
   const isPast = week.start + 7 <= today;
   const days = matchWeek(week.start, week.sessions, history, today);
@@ -114,12 +114,12 @@ export function WeekView({ week, weekNumber, weekCount, history, today, strength
                 <span>{dayLabel(d.day)}</span>
                 {isToday && <span className="today-pill">Today</span>}
               </div>
-              {[...d.sessions].sort((a, b) => Number(a.kind === "strength") - Number(b.kind === "strength")).map((s) => (
+              {[...d.sessions].sort((a, b) => Number(isTickedSession(a.kind)) - Number(isTickedSession(b.kind))).map((s) => (
                 <SessionCard
                   key={s.kind}
                   session={s}
-                  state={s.kind === "strength" ? (strengthDone[dateOfDayNumber(s.day)] ? "done" : null) : d.state}
-                  ranMin={s.kind === "strength" ? undefined : runMin}
+                  state={isTickedSession(s.kind) ? (doneOf(s) ? "done" : null) : d.state}
+                  ranMin={isTickedSession(s.kind) ? undefined : runMin}
                   targets={targets}
                   onOpen={() => onOpen(s)}
                 />

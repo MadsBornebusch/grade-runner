@@ -4590,16 +4590,40 @@ for what it can't get:
   the goal race screen can show what under-trained fuelling costs in
   finish time.
 
-### To do
+### Strength sessions and the weighted hike (built 2026-10-23)
 
-- **Suggest what to do in the strength sessions** (user request,
-  2026-10-22). The plan only places strength sessions; it should say what
-  to do in them, by phase: heavy, low-rep lower-body work in base
-  (the durability and running-economy evidence is for heavy resistance,
-  see Zanini et al. and the heavy-vs-plyometrics meta-analysis below),
-  maintenance volume in the specific block, and lighter or none in the
-  taper. Strength sessions logged on Strava already tick themselves off
-  (strengthDone.ts).
+What the plan prescribes in its strength sessions, and a weighted uphill
+hike in the last weeks (user request, 2026-10-22). Code:
+`strengthBlockOf`, `strengthFocuses` and `hikePackPct` in planGenerator.ts;
+the exercises in ui/plan/strengthCopy.ts (a barbell and a few dumbbells,
+no trap bar).
+
+- **Blocks, by weeks to race** (not plan weeks, since the plan is
+  regenerated weekly): general strength more than 24 weeks out, heavy
+  from 24 to 13, leg endurance (ME) in the last 12. Uphill Athlete's order
+  is general, then max strength, then 8-16 weeks of ME; Scott Johnston,
+  who coached both 2025 UTMB winners (Evans, Croft), has most athletes add
+  ME in the last 10-16 weeks.
+- **Heavy**: 4-6 reps at about 85% 1RM. The best evidence for running
+  economy: near-maximal loads beat lighter ones and jumps alone (Eihara et
+  al. 2022), and heavy plus jumps improved economy late in a 90 min run
+  (Zanini et al.). Combining methods may add a little, low certainty
+  (Llanos-Lagos et al. 2024). The second weekly session adds jumps.
+- **ME block**: one easy run a week becomes a weighted hike (counts as
+  running; a gym circuit counts as strength). Pack from 5% of body weight,
+  +1% every two weeks, capped at 10% (iRunFar on Johnston: beginners 5%,
+  elites 12-15%; a 2023 study found more than 10% changed trail runners'
+  biomechanics). Strength in hike weeks is maintenance (2 heavy sets,
+  Spiering et al. 2021) plus jumps; weeks without a hike get the gym ME
+  circuit instead. No peer-reviewed trial of ME work for trail running
+  was found: it rests on coaching practice.
+- **Counts**: two sessions in build weeks (the athlete's setting), one in a
+  deload or Hold week, one short session early in the taper week, none in
+  race week or the easy weeks after a race.
+- **Spacing**: the quality run avoids the day after strength when it can;
+  the hike avoids the days next to the long run, then strength days.
+- **Done**: strength and hikes tick off by hand or from Strava
+  (WeightTraining etc., and Hike); hikes stay out of the run library.
 
 ### Open questions
 
@@ -4615,4 +4639,4 @@ for what it can't get:
 - Units shown to the athlete: own load units, or something familiar (time,
   grade-adjusted km)?
 
-Sources: [HRV-guided training and VO2max meta-analysis](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7663087/), [HRV-guided training meta-analysis 2021](https://pubmed.ncbi.nlm.nih.gov/34489178/), [Heikura 2015, HRV-guided training in recreational runners](https://jyx.jyu.fi/handle/123456789/45036), [Plews-group thesis on rolling ln rMSSD](https://openrepository.aut.ac.nz/handle/10292/7122), [Frandsen et al. 2025, single-session spikes](https://pmc.ncbi.nlm.nih.gov/articles/PMC12421110), [Kontro et al. 2025, three-dimensional impulse-response](https://arxiv.org/abs/2503.14841v2), [Imbach et al. 2022, dose-response vs ML](https://pmc.ncbi.nlm.nih.gov/articles/PMC8799698), [Smyth & Lawlor 2021, marathon tapers](https://pmc.ncbi.nlm.nih.gov/articles/PMC8506252), [Taper summary incl. Bosquet 2007 (secondary)](https://thresholdlab.beehiiv.com/p/issue-19-the-science-of-tapering), [Strava API changes (TechRadar)](https://www.techradar.com/health-fitness/strava-could-soon-stop-working-with-some-of-your-third-party-apps-heres-what-you-need-to-know), [Strava API changes (TechRepublic)](https://techrepublic.com/article/news-strava-api-scraping-crackdown), [Spiering et al. 2021, minimal dose to maintain performance](https://pubmed.ncbi.nlm.nih.gov/33629972/), [Recreational 24 h ultra runners vs marathoners (2012)](https://doaj.org/article/ca79d520a7254fec87c26c7a14a4cb2d), [Training volume in elite 100 km runners](https://iris.unige.it/retrieve/e268c4cb-e0ee-a6b7-e053-3a05fe0adea1/2015OAJSM.pdf), [Polarized vs pyramidal in recreational marathoners](https://observatorio-cientifico.ua.es/documentos/6a81a772926b1d60e686fd55), [Downhill-running muscle damage in trail runners (2026)](https://pmc.ncbi.nlm.nih.gov/articles/PMC12846201), [Repeated bout effect, downhill running](https://pmc.ncbi.nlm.nih.gov/articles/PMC9189713), [Hoffman et al. 2015, ultramarathon health and finishing](https://sportsmedicine-open.springeropen.com/track/pdf/10.1186/s40798-015-0040-x), [Factors in completing a 161 km ultra](https://lida.sport-iat.de/ta/Record/4025226?lng=de), [Muscle, neuromuscular and cardiac damage in trail running: systematic review](https://zaguan.unizar.es/record/170428?ln=en), [Heavy resistance vs plyometrics meta-analysis 2022](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9653533/), [Zanini et al., strength training and durability RCT](https://www.citedrive.com/en/discovery/strength-training-improves-running-economy-durability-and-fatigued-high-intensity-performance-in-well-trained-male-runners-a-randomized-control-trial), [Strength and ultra running (review summary)](https://runningmagazine.ca/trail-running/is-muscle-damage-the-biggest-obstacle-for-your-upcoming-ultra/)
+Sources: [HRV-guided training and VO2max meta-analysis](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7663087/), [HRV-guided training meta-analysis 2021](https://pubmed.ncbi.nlm.nih.gov/34489178/), [Heikura 2015, HRV-guided training in recreational runners](https://jyx.jyu.fi/handle/123456789/45036), [Plews-group thesis on rolling ln rMSSD](https://openrepository.aut.ac.nz/handle/10292/7122), [Frandsen et al. 2025, single-session spikes](https://pmc.ncbi.nlm.nih.gov/articles/PMC12421110), [Kontro et al. 2025, three-dimensional impulse-response](https://arxiv.org/abs/2503.14841v2), [Imbach et al. 2022, dose-response vs ML](https://pmc.ncbi.nlm.nih.gov/articles/PMC8799698), [Smyth & Lawlor 2021, marathon tapers](https://pmc.ncbi.nlm.nih.gov/articles/PMC8506252), [Taper summary incl. Bosquet 2007 (secondary)](https://thresholdlab.beehiiv.com/p/issue-19-the-science-of-tapering), [Strava API changes (TechRadar)](https://www.techradar.com/health-fitness/strava-could-soon-stop-working-with-some-of-your-third-party-apps-heres-what-you-need-to-know), [Strava API changes (TechRepublic)](https://techrepublic.com/article/news-strava-api-scraping-crackdown), [Spiering et al. 2021, minimal dose to maintain performance](https://pubmed.ncbi.nlm.nih.gov/33629972/), [Recreational 24 h ultra runners vs marathoners (2012)](https://doaj.org/article/ca79d520a7254fec87c26c7a14a4cb2d), [Training volume in elite 100 km runners](https://iris.unige.it/retrieve/e268c4cb-e0ee-a6b7-e053-3a05fe0adea1/2015OAJSM.pdf), [Polarized vs pyramidal in recreational marathoners](https://observatorio-cientifico.ua.es/documentos/6a81a772926b1d60e686fd55), [Downhill-running muscle damage in trail runners (2026)](https://pmc.ncbi.nlm.nih.gov/articles/PMC12846201), [Repeated bout effect, downhill running](https://pmc.ncbi.nlm.nih.gov/articles/PMC9189713), [Hoffman et al. 2015, ultramarathon health and finishing](https://sportsmedicine-open.springeropen.com/track/pdf/10.1186/s40798-015-0040-x), [Factors in completing a 161 km ultra](https://lida.sport-iat.de/ta/Record/4025226?lng=de), [Muscle, neuromuscular and cardiac damage in trail running: systematic review](https://zaguan.unizar.es/record/170428?ln=en), [Heavy resistance vs plyometrics meta-analysis 2022](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9653533/), [Llanos-Lagos et al. 2024, strength methods and running economy](https://link.springer.com/article/10.1007/s40279-023-01978-y), [iRunFar: Scott Johnston's focus on muscular endurance](https://www.irunfar.com/coaching-the-2025-utmb-champions-scott-johnstons-focus-on-muscular-endurance), [Uphill Athlete: muscular endurance](https://uphillathlete.com/strength-training/muscular-endurance-for-mountain-athletes/), [Zanini et al., strength training and durability RCT](https://www.citedrive.com/en/discovery/strength-training-improves-running-economy-durability-and-fatigued-high-intensity-performance-in-well-trained-male-runners-a-randomized-control-trial), [Strength and ultra running (review summary)](https://runningmagazine.ca/trail-running/is-muscle-damage-the-biggest-obstacle-for-your-upcoming-ultra/)

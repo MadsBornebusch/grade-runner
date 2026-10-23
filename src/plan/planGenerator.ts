@@ -148,7 +148,10 @@ export interface PlanOptions {
 }
 
 export type Phase = "recovery" | "maintenance" | "base" | "specific" | "deload" | "taper" | "race";
-export type SessionKind = "long" | "easy" | "quality" | "descent" | "strength" | "race";
+export type SessionKind = "long" | "easy" | "quality" | "descent" | "hike" | "strength" | "race";
+
+/** What a strength session works on (copy in ui/plan/strengthCopy.ts). */
+export type StrengthFocus = "general" | "heavy" | "heavyJumps" | "maintenance" | "power" | "circuit" | "deload" | "sharpen";
 
 export interface PlannedSession {
   day: number;
@@ -166,6 +169,10 @@ export interface PlannedSession {
   /** The session guard's limits on this day: show the session as "N min or
    * M km, whichever comes first" from these, not from the speed estimate. */
   allowance?: RunReference;
+  /** Strength sessions: what to work on. */
+  strengthFocus?: StrengthFocus;
+  /** Weighted uphill hikes: pack weight, % of body weight. */
+  packPct?: number;
 }
 
 /** Runs this long or longer get a carb target. */
@@ -246,6 +253,61 @@ export function taperFractions(expectedHours: number): number[] {
  * longest-run cap counts as at the cap (planned runs are floored to whole
  * minutes, done ones rarely land on the exact minute). */
 export const CAPPED_LONG_RUN_SHARE = 0.95;
+/**
+ * Strength blocks by weeks to race (PLAN.md §15, strength sessions).
+ * Uphill Athlete's order: general strength, then max strength, then
+ * muscular endurance (ME) for 8-16 weeks before the race; Scott Johnston
+ * has most athletes add ME in the last 10-16 weeks. Heavy loads (>= 85%
+ * 1RM) improve running economy more than lighter ones or jumps alone
+ * (Eihara et al. 2022), and heavy plus jumps improved economy late in a
+ * 90 min run (Zanini et al.). The week counts are this design's
+ * assumption. Keyed on weeks to race, not plan weeks, so a plan that is
+ * regenerated every week still moves through the blocks.
+ */
+export const ME_WEEKS = 12;
+export const GENERAL_STRENGTH_ABOVE_WEEKS = 24;
+export type StrengthBlock = "general" | "heavy" | "me";
+export function strengthBlockOf(weeksToRace: number): StrengthBlock {
+  if (weeksToRace > GENERAL_STRENGTH_ABOVE_WEEKS) return "general";
+  return weeksToRace > ME_WEEKS ? "heavy" : "me";
+}
+
+/** Assumption: the weighted hike's pack starts at 5% of body weight (iRunFar
+ * on Johnston: beginners about 5%, elites 12-15%) and grows 1% every two
+ * weeks of the ME block, capped at 10% (a 2023 study cited there found
+ * more than 10% changed trail runners' biomechanics). */
+export function hikePackPct(weeksToRace: number): number {
+  const into = Math.max(0, ME_WEEKS - weeksToRace);
+  return Math.min(10, 5 + Math.floor(into / 2));
+}
+
+/** Strength focus of each of the week's sessions, in day order. Uphill
+ * Athlete does ME once a week, so a week with the hike doesn't also get
+ * the gym circuit; one heavy set a week keeps strength (Spiering et al.
+ * 2021). Nothing in race week, one short session in the taper week before
+ * it, one in a deload, none in the easy weeks after a race. */
+export function strengthFocuses(phase: Phase, block: StrengthBlock, count: number, hasHike: boolean): StrengthFocus[] {
+  let list: StrengthFocus[];
+  switch (phase) {
+    case "race":
+    case "recovery":
+      return [];
+    case "taper":
+      list = ["sharpen"];
+      break;
+    case "maintenance":
+      list = ["maintenance"];
+      break;
+    case "deload":
+      list = [block === "general" ? "general" : "deload"];
+      break;
+    default:
+      list = block === "general" ? ["general", "general"] : block === "heavy" ? ["heavy", "heavyJumps"] : hasHike ? ["maintenance", "power"] : ["circuit", "maintenance"];
+      return Array.from({ length: count }, (_, i) => list[i % list.length]);
+  }
+  return list.slice(0, Math.min(count, list.length));
+}
+
 /** Assumption: capped long runs at most this many days apart form one
  * progression; a longer gap (illness, a race, a break) starts it over.
  * Long enough for a deload between two long-run weeks. */
@@ -396,7 +458,7 @@ export function generatePlan(
     const sessions = planWeek(start, phase, target, referenceAt(runsSoFar, start), allowOn, availability, longRunWeekday, race, options, {
       lastWeekDescent, lastWeekSteep, strengthSessions, strengthMinutes, budgetMinutes: Math.max(0, budgetPerWeek - doneMinutes), fromDay: today,
       prevLongDay, nextLongDay: start + 7 + (schedule.longRunWeekdayByWeek?.get(start + 7) ?? schedule.longRunWeekday),
-      longRunCapMinutes: schedule.longRunMaxMinutes, cappedDays,
+      longRunCapMinutes: schedule.longRunMaxMinutes, cappedDays, weeksToRace,
     });
     const plannedMech = sessions.reduce((s, x) => s + x.mechanical, 0);
     const plannedMin = sessions
@@ -478,6 +540,7 @@ interface WeekState {
   nextLongDay: number;
   longRunCapMinutes: number;
   cappedDays: number[];
+  weeksToRace: number;
 }
 
 /** Assumption: weekly descent and steep descent grow at most 10% a week
@@ -515,19 +578,27 @@ function planWeek(
     .filter((s) => (phase !== "race" || start + s.weekday < race.day - 1) && start + s.weekday >= state.fromDay)
     .sort((a, b) => (a.weekday === longRunWeekday ? -1 : b.weekday === longRunWeekday ? 1 : b.minutes - a.minutes));
 
-  // Strength first: every week but race week, never on the long-run day
-  // or the day before it, spread through the week. Outside the budget (the
-  // default) it can go on any such day; inside it, only on slot days, and
-  // it takes slot time.
+  // Strength first: as many sessions as the phase wants (strengthFocuses),
+  // never on the long-run day or the day before it, spread through the
+  // week. Outside the budget (the default) it can go on any such day;
+  // inside it, only on slot days, and it takes slot time. The focus of
+  // each is set at the end, once it's known whether the week has a hike.
+  const block = strengthBlockOf(state.weeksToRace);
+  const isBuild = phase === "base" || phase === "specific";
+  const hikeWeek = isBuild && block === "me";
+  const strengthCount = strengthFocuses(phase, block, state.strengthSessions, hikeWeek).length;
   const dayBeforeNextLong = state.nextLongDay - 1 - start;
+  // The taper's one session goes early in the week, away from the race.
   const strengthWeekdays =
-    phase === "race"
-      ? []
-      : strengthDaysOf(slots, longRunWeekday, state.strengthSessions, !!o.strengthCountsInBudget, dayBeforeNextLong >= 0 && dayBeforeNextLong < 7 ? [dayBeforeNextLong] : []);
+    phase === "taper"
+      ? strengthDaysOf(slots, longRunWeekday, 7, !!o.strengthCountsInBudget, [dayBeforeNextLong]).slice(0, strengthCount)
+      : strengthDaysOf(slots, longRunWeekday, strengthCount, !!o.strengthCountsInBudget, dayBeforeNextLong >= 0 && dayBeforeNextLong < 7 ? [dayBeforeNextLong] : []);
+  const strengthSessions: PlannedSession[] = [];
   for (const wd of strengthWeekdays) {
     if (start + wd < state.fromDay) continue;
-    out.push({ day: start + wd, kind: "strength", minutes: state.strengthMinutes, distanceKm: 0, mechanical: 0, descentM: 0, steepDescentM: 0 });
+    strengthSessions.push({ day: start + wd, kind: "strength", minutes: state.strengthMinutes, distanceKm: 0, mechanical: 0, descentM: 0, steepDescentM: 0 });
   }
+  out.push(...strengthSessions);
   const free = new Map(slots.map((s) => [s.weekday, s.minutes - (o.strengthCountsInBudget && strengthWeekdays.includes(s.weekday) ? state.strengthMinutes : 0)]));
 
   // Long run: as long as the guard and its slot allow, shorter in lighter
@@ -594,21 +665,42 @@ function planWeek(
     remaining -= s.mechanical;
     weekLeft -= minutes;
   }
-  if (phase === "base" || phase === "specific") {
+  let hasHike = false;
+  if (isBuild) {
     // One quality session per build week (intensity holds fitness when
-    // volume is capped), not the day after the long run; in the specific
-    // phase one other easy run becomes a descent session (hillier route,
-    // easy effort, so easy density).
+    // volume is capped), not the day after the long run, and preferably
+    // not the day after strength; in the specific phase one other easy run
+    // becomes a descent session (hillier route, easy effort, so easy
+    // density); in the ME block one more becomes a weighted uphill hike
+    // (time on feet, easy breathing, so easy density), preferably not the
+    // day before or after the long run, then not on a strength day. A week short of runs drops the hike first,
+    // then the descent.
     const afterLong = new Set([start + longRunWeekday + 1, (state.prevLongDay ?? -Infinity) + 1]);
+    const afterStrength = new Set(strengthSessions.map((x) => x.day + 1));
     const easy = runs.filter((r) => r.kind === "easy").sort((a, b) => b.minutes - a.minutes);
-    const quality = easy.find((r) => !afterLong.has(r.day));
+    const qualityOk = easy.filter((r) => !afterLong.has(r.day));
+    const quality = qualityOk.find((r) => !afterStrength.has(r.day)) ?? qualityOk[0];
     if (quality) {
       quality.kind = "quality";
       quality.mechanical = (quality.minutes / 60) * o.maxDensity;
     }
     const descent = phase === "specific" ? easy.find((r) => r !== quality) : undefined;
     if (descent) descent.kind = "descent";
+    if (hikeWeek) {
+      const left = easy.filter((r) => r !== quality && r !== descent);
+      const strengthDays = new Set(strengthSessions.map((x) => x.day));
+      const nearLong = new Set([state.nextLongDay - 1, start + longRunWeekday - 1, ...afterLong]);
+      const awayFromLong = left.filter((r) => !nearLong.has(r.day));
+      const hike = awayFromLong.find((r) => !strengthDays.has(r.day)) ?? awayFromLong[0] ?? left.find((r) => !strengthDays.has(r.day)) ?? left[0];
+      if (hike) {
+        hike.kind = "hike";
+        hike.packPct = hikePackPct(state.weeksToRace);
+        hasHike = true;
+      }
+    }
   }
+  const focuses = strengthFocuses(phase, block, state.strengthSessions, hasHike);
+  strengthSessions.forEach((x, i) => (x.strengthFocus = focuses[i]));
 
   // Descent: progress the week's total from last week's (or the reference)
   // by at most 10%, each session within its own allowance.

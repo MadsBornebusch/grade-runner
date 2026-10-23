@@ -27,6 +27,8 @@ export interface BackfillPage {
   runs: StravaRunSummaryDTO[];
   /** Strength activities on the same page (absent from older servers). */
   strength?: StravaStrengthDTO[];
+  /** Hikes, same shape (absent from older servers). */
+  hikes?: StravaStrengthDTO[];
   hasMore: boolean;
 }
 

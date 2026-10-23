@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
-import { useStrengthDone } from "../plan/useStrengthDone";
+import { toggleSessionDone, useSessionDone } from "../plan/useSessionDone";
 import { intensityTargets } from "../plan/intensity";
 import { ArrowsClockwise, CaretRight, CheckCircle, FlagCheckered, Moon, XCircle } from "@phosphor-icons/react";
 import { useSyncExternalStore } from "react";
 import { runsNeedingFuelLog } from "../../plan/carbLadder";
 import { dateOfDayNumber, dayNumberOf } from "../../plan/historyFromRuns";
-import { matchDay } from "../../plan/matchSessions";
+import { isTickedSession, matchDay } from "../../plan/matchSessions";
 import { mondayOf, type PlannedSession } from "../../plan/planGenerator";
 import { fuelLogStore } from "../../storage/fuelLogs";
 import { planSettingsStore } from "../../storage/planSettings";
@@ -30,7 +30,7 @@ interface TodayTabProps {
 
 export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
   const settings = planSettingsStore.use();
-  const strengthDone = useStrengthDone(plan.snapshot);
+  const doneOf = useSessionDone(plan.snapshot);
   const logs = fuelLogStore.use().byRunId;
   const backfill = useSyncExternalStore(subscribeToBackfill, getBackfillStatus);
   const [openSession, setOpenSession] = useState<PlannedSession | null>(null);
@@ -77,7 +77,7 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
   const weeks = plan.snapshot.plan.weeks;
   const all = weeks.flatMap((w) => w.sessions);
   const week = weeks.find((w) => w.start === mondayOf(today));
-  const todays = all.filter((s) => s.day === today).sort((a, b) => Number(a.kind === "strength") - Number(b.kind === "strength"));
+  const todays = all.filter((s) => s.day === today).sort((a, b) => Number(isTickedSession(a.kind)) - Number(isTickedSession(b.kind)));
   const match = matchDay(today, all, history, today);
   const runToday = todays.find((s) => s.kind !== "strength");
   const next = all.filter((s) => s.day > today && s.kind !== "strength").slice(0, 2);
@@ -116,8 +116,8 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
               session={s}
               hero={s === runToday}
               targets={targets}
-              state={s.kind === "strength" ? (strengthDone[dateOfDayNumber(today)] ? "done" : null) : match.state === "today" ? null : match.state}
-              ranMin={match.runs.reduce((a, r) => a + r.movingMin, 0) || undefined}
+              state={isTickedSession(s.kind) ? (doneOf(s) ? "done" : null) : match.state === "today" ? null : match.state}
+              ranMin={isTickedSession(s.kind) ? undefined : match.runs.reduce((a, r) => a + r.movingMin, 0) || undefined}
               onOpen={() => setOpenSession(s)}
             />
           ),
@@ -177,21 +177,14 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
       {openSession && (
         <SessionSheet
           session={openSession}
-          runs={openSession.kind === "strength" ? [] : history.filter((r) => r.day === openSession.day)}
+          runs={isTickedSession(openSession.kind) ? [] : history.filter((r) => r.day === openSession.day)}
           raceName={race?.name ?? "Race"}
           raceGPerH={formInputs.intakeGPerH}
           strengthCounts={settings.schedule.strengthCountsInBudget}
           targets={targets}
-          strengthDone={strengthDone[dateOfDayNumber(openSession.day)] ?? null}
-          onToggleStrength={() =>
-            planSettingsStore.set((st) => {
-              const key = dateOfDayNumber(openSession.day);
-              const strengthDone = { ...st.strengthDone };
-              if (strengthDone[key]) delete strengthDone[key];
-              else strengthDone[key] = true;
-              return { ...st, strengthDone };
-            })
-          }
+          bodyMassKg={formInputs.bodyMassKg}
+          done={doneOf(openSession)}
+          onToggleDone={() => toggleSessionDone(openSession)}
           onClose={() => setOpenSession(null)}
         />
       )}

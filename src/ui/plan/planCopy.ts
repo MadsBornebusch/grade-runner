@@ -29,6 +29,7 @@ export const KIND_TITLE: Record<SessionKind, string> = {
   easy: "Easy run",
   quality: "Threshold run",
   descent: "Downhill run",
+  hike: "Weighted hike",
   strength: "Strength",
   race: "Race day",
 };
@@ -54,6 +55,8 @@ export function effortDetail(s: PlannedSession, t: IntensityTargets): string | n
     case "easy":
     case "descent":
       return easy;
+    case "hike":
+      return "Legs burn, breathing stays easy";
     case "long":
       return s.steadyMinutes
         ? `${easy}, with ${s.steadyMinutes} min steady${t.steady ? ` at ${bpm(t.steady.lo, t.steady.hi)}` : " at race effort"}`
@@ -65,7 +68,7 @@ export function effortDetail(s: PlannedSession, t: IntensityTargets): string | n
   }
 }
 
-export function howToRun(s: PlannedSession, raceName: string, strengthCounts: boolean, t: IntensityTargets = NO_TARGETS): string {
+export function howToRun(s: PlannedSession, raceName: string, strengthCounts: boolean, t: IntensityTargets = NO_TARGETS, bodyMassKg?: number): string {
   const under = t.easyMaxHr ? ` (under ${t.easyMaxHr} bpm)` : "";
   switch (s.kind) {
     case "easy":
@@ -91,6 +94,15 @@ export function howToRun(s: PlannedSession, raceName: string, strengthCounts: bo
     }
     case "descent":
       return `A hilly route with about ${Math.round(s.descentM / 10) * 10} m of descent, easy effort on the climbs${under}. Run the downhills controlled; it trains your legs for the race's descents.`;
+    case "hike": {
+      const pct = s.packPct ?? 5;
+      const kg = bodyMassKg ? `, about ${Math.round((bodyMassKg * pct) / 100)} kg` : "";
+      return (
+        `Hike the steepest climb you have (15–30%), or a treadmill at full incline or a stair machine, with a pack of ${pct}% of your body weight${kg}. ` +
+        `Water bottles work well: pour them out at the top and come down light. Your legs should give out before your breathing does; ` +
+        `if you're panting, slow down or find a steeper slope. It trains your legs for the race's long climbs.`
+      );
+    }
     case "strength":
       return `${Math.round(s.minutes)} min legs and core. ${strengthCounts ? "Counted in your hours." : "Not counted in your running hours."}`;
     case "race":

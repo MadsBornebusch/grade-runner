@@ -6,6 +6,7 @@ import { GUARD_FLOORS, SESSION_GUARD_MULTIPLE } from "../../plan/sessionGuard";
 import { Sheet } from "./Sheet";
 import { KIND_TITLE, dayLabel, distanceLine, effortDetail, formatMinutes, formatMinutesExact, howToRun } from "./planCopy";
 import type { IntensityTargets } from "./intensity";
+import { strengthWorkout } from "./strengthCopy";
 
 interface SessionSheetProps {
   session: PlannedSession;
@@ -14,14 +15,17 @@ interface SessionSheetProps {
   raceGPerH: number;
   strengthCounts: boolean;
   targets: IntensityTargets;
-  strengthDone: StrengthDone | null;
-  onToggleStrength: () => void;
+  bodyMassKg?: number;
+  /** Strength and hikes: done by hand or from Strava; null otherwise. */
+  done: StrengthDone | null;
+  onToggleDone: () => void;
   onMoveLongRun?: () => void;
   onClose: () => void;
 }
 
-export function SessionSheet({ session: s, runs, raceName, raceGPerH, strengthCounts, targets, strengthDone, onToggleStrength, onMoveLongRun, onClose }: SessionSheetProps) {
-  const isRun = s.kind !== "strength" && s.kind !== "race";
+export function SessionSheet({ session: s, runs, raceName, raceGPerH, strengthCounts, targets, bodyMassKg, done, onToggleDone, onMoveLongRun, onClose }: SessionSheetProps) {
+  const isRun = s.kind !== "strength" && s.kind !== "race" && s.kind !== "hike";
+  const ticked = s.kind === "strength" || s.kind === "hike";
   const ref = s.allowance;
   const effort = effortDetail(s, targets);
   return (
@@ -32,7 +36,7 @@ export function SessionSheet({ session: s, runs, raceName, raceGPerH, strengthCo
           {isRun && <span className="detail-hero__sub num">{distanceLine(s)}</span>}
         </div>
       )}
-      {isRun && (
+      {(isRun || s.kind === "hike") && (
         <dl className="facts">
           {effort && (
             <>
@@ -81,10 +85,12 @@ export function SessionSheet({ session: s, runs, raceName, raceGPerH, strengthCo
             </p>
           ))}
         </div>
+      ) : s.kind === "strength" ? (
+        <StrengthBlock session={s} strengthCounts={strengthCounts} />
       ) : (
         <div className="how-block">
-          <h3>How to run it</h3>
-          <p>{howToRun(s, raceName, strengthCounts, targets)}</p>
+          <h3>{s.kind === "hike" ? "How to do it" : "How to run it"}</h3>
+          <p>{howToRun(s, raceName, strengthCounts, targets, bodyMassKg)}</p>
         </div>
       )}
 
@@ -104,10 +110,10 @@ export function SessionSheet({ session: s, runs, raceName, raceGPerH, strengthCo
       )}
 
       <div className="sheet__actions">
-        {s.kind === "strength" && strengthDone?.source === "strava" && <p className="help">Done: {strengthDone.name}, from Strava.</p>}
-        {s.kind === "strength" && strengthDone?.source !== "strava" && (
-          <button type="button" className={strengthDone ? "button-ghost" : "button-primary"} onClick={onToggleStrength}>
-            {strengthDone ? "Mark not done" : "Did it"}
+        {ticked && done?.source === "strava" && <p className="help">Done: {done.name}, from Strava.</p>}
+        {ticked && done?.source !== "strava" && (
+          <button type="button" className={done ? "button-ghost" : "button-primary"} onClick={onToggleDone}>
+            {done ? "Mark not done" : "Did it"}
           </button>
         )}
         {onMoveLongRun && (
@@ -117,5 +123,27 @@ export function SessionSheet({ session: s, runs, raceName, raceGPerH, strengthCo
         )}
       </div>
     </Sheet>
+  );
+}
+
+function StrengthBlock({ session, strengthCounts }: { session: PlannedSession; strengthCounts: boolean }) {
+  const w = strengthWorkout(session.strengthFocus);
+  return (
+    <div className="how-block">
+      <h3>{w.title}</h3>
+      <p>{w.intro}</p>
+      <ol className="exercise-list">
+        {w.exercises.map((e) => (
+          <li key={e.name}>
+            <span className="exercise-list__name">{e.name}</span>
+            <span className="exercise-list__dose num">{e.dose}</span>
+            {e.note && <span className="exercise-list__note">{e.note}</span>}
+          </li>
+        ))}
+      </ol>
+      <p className="help">
+        {w.rest} Short on time? Drop exercises from the bottom. {strengthCounts ? "Counted in your hours." : "Not counted in your running hours."}
+      </p>
+    </div>
   );
 }

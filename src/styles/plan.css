@@ -199,6 +199,7 @@
 .kind-easy { --k: var(--kind-easy); --ks: var(--kind-easy-soft); --ki: var(--kind-easy-ink); }
 .kind-quality { --k: var(--kind-quality); --ks: var(--kind-quality-soft); --ki: var(--kind-quality-ink); }
 .kind-descent { --k: var(--kind-descent); --ks: var(--kind-descent-soft); --ki: var(--kind-descent-ink); }
+.kind-hike { --k: var(--kind-hike); --ks: var(--kind-hike-soft); --ki: var(--kind-hike-ink); }
 .kind-strength { --k: var(--kind-strength); --ks: var(--kind-strength-soft); --ki: var(--kind-strength-ink); }
 .kind-race { --k: var(--kind-race); --ks: var(--kind-race-soft); --ki: var(--kind-race-ink); }
 
@@ -334,6 +335,7 @@
 }
 
 .chip--descent { background: var(--kind-descent-soft); color: var(--kind-descent-ink); }
+.chip--hike { background: var(--kind-hike-soft); color: var(--kind-hike-ink); }
 .chip--long { background: var(--kind-long-soft); color: var(--kind-long-ink); }
 .chip--effort-up { background: var(--kind-quality-soft); color: var(--kind-quality-ink); }
 .chip--info { background: var(--info-soft); color: var(--info); cursor: pointer; list-style: none; }
@@ -2217,3 +2219,25 @@ a.button-ghost {
   font-size: var(--fs-xl);
   overflow-wrap: anywhere;
 }
+
+/* Strength session: exercises with sets and reps. */
+.exercise-list {
+  list-style: none;
+  margin: var(--sp-3) 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.exercise-list li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 var(--sp-3);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border);
+}
+.exercise-list li:last-child { border-bottom: none; }
+.how-block .exercise-list + .help { margin-top: var(--sp-2); }
+.exercise-list__name { font-weight: var(--fw-semibold); }
+.exercise-list__dose { color: var(--kind-strength-ink); font-weight: var(--fw-semibold); white-space: nowrap; }
+.exercise-list__note { grid-column: 1 / -1; color: var(--text-muted); font-size: var(--fs-sm); }

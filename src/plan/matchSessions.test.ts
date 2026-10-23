@@ -8,6 +8,12 @@ const session = (day: number, kind: PlannedSession["kind"], minutes: number): Pl
 const sessions = [session(1, "easy", 50), session(1, "strength", 25), session(3, "long", 150), session(5, "easy", 45)];
 
 describe("matchDay", () => {
+  it("doesn't match a weighted hike to runs: it's ticked off like strength", () => {
+    const m = matchDay(6, [session(6, "hike", 60)], [], 7);
+    expect(m.state).toBe(null);
+    expect(m.extra).toBe(false);
+  });
+
   it("marks a run on the day done, a short one partial, none skipped", () => {
     expect(matchDay(1, sessions, [{ day: 1, movingMin: 48, distanceKm: 8 }], 4).state).toBe("done");
     expect(matchDay(3, sessions, [{ day: 3, movingMin: 90, distanceKm: 14 }], 4).state).toBe("partial");

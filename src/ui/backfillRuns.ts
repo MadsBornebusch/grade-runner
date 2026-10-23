@@ -68,6 +68,10 @@ export async function runBackfillBatch(fromDateInput: string, onDone: (importedC
       if (strength.length > 0) {
         planSettingsStore.set((s) => ({ ...s, strengthFromStrava: { ...s.strengthFromStrava, ...Object.fromEntries(strength.map((a) => [a.localDate, a.name])) } }));
       }
+      const hikes = pageResult.hikes ?? [];
+      if (hikes.length > 0) {
+        planSettingsStore.set((s) => ({ ...s, hikeFromStrava: { ...s.hikeFromStrava, ...Object.fromEntries(hikes.map((a) => [a.localDate, a.name])) } }));
+      }
 
       for (const run of filterRunsSinceDate(pageResult.runs, targetStartDate)) {
         await upsertStoredRunSummary(toStoredRunSummaryInput(run));

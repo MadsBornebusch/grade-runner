@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  carbTargets, generatePlan, recoveryWeeks, slotsForWeek, steadyBlockMinutes, strengthDaysOf, suggestLongRunMaxMinutes, type HistoryRun, type PlanOptions, type WeeklySchedule,
+  carbTargets, generatePlan, mondayOf, hikePackPct, strengthBlockOf, strengthFocuses, recoveryWeeks, slotsForWeek, steadyBlockMinutes, strengthDaysOf, suggestLongRunMaxMinutes, type HistoryRun, type PlanOptions, type WeeklySchedule,
 } from "./planGenerator";
 import { guardBreaches, referenceAt, runReferences } from "./sessionGuard";
 
@@ -70,12 +70,19 @@ describe("generatePlan invariants (random cases)", () => {
       const longDays = new Set(all.filter((x) => x.kind === "long").map((x) => x.day));
       for (const w of plan.weeks) expect(w.sessions.filter((x) => x.kind === "quality").length).toBeLessThanOrEqual(1);
       for (const q of all.filter((x) => x.kind === "quality")) expect(longDays.has(q.day - 1)).toBe(false);
-      // Two strength sessions every week but race week, outside the budget,
-      // never on or the day before a long run.
+      // Strength by phase (two in build weeks, one in lighter weeks, none
+      // in race week or right after a race), outside the budget, never on
+      // or the day before a long run, each with a focus.
+      const expected: Record<string, number> = { race: 0, recovery: 0, taper: 1, maintenance: 1, deload: 1, base: 2, specific: 2 };
       for (const w of plan.weeks) {
         const strength = w.sessions.filter((x) => x.kind === "strength");
-        expect(strength.length).toBe(w.phase === "race" ? 0 : 2);
+        expect(strength.length).toBe(expected[w.phase]);
         for (const x of strength) expect(longDays.has(x.day) || longDays.has(x.day + 1)).toBe(false);
+        for (const x of strength) expect(x.strengthFocus).toBeDefined();
+        // At most one hike, and never alongside the gym endurance circuit.
+        const hikes = w.sessions.filter((x) => x.kind === "hike");
+        expect(hikes.length).toBeLessThanOrEqual(1);
+        if (hikes.length) expect(strength.some((x) => x.strengthFocus === "circuit")).toBe(false);
       }
       // Taper and race week lighter than the last build week.
       const lastBuild = [...plan.weeks].reverse().find((w) => w.phase === "base" || w.phase === "specific");
@@ -84,6 +91,84 @@ describe("generatePlan invariants (random cases)", () => {
       }
     });
   }
+});
+
+describe("strength blocks", () => {
+  it("moves from general to heavy to leg endurance as the race nears", () => {
+    expect(strengthBlockOf(30)).toBe("general");
+    expect(strengthBlockOf(24)).toBe("heavy");
+    expect(strengthBlockOf(13)).toBe("heavy");
+    expect(strengthBlockOf(12)).toBe("me");
+    expect(strengthBlockOf(1)).toBe("me");
+  });
+
+  it("grows the hike's pack from 5% to at most 10% of body weight", () => {
+    expect(hikePackPct(12)).toBe(5);
+    expect(hikePackPct(10)).toBe(6);
+    expect(hikePackPct(2)).toBe(10);
+    expect(hikePackPct(0)).toBe(10);
+  });
+
+  it("picks each session's focus by phase and block", () => {
+    expect(strengthFocuses("base", "general", 2, false)).toEqual(["general", "general"]);
+    expect(strengthFocuses("base", "heavy", 2, false)).toEqual(["heavy", "heavyJumps"]);
+    expect(strengthFocuses("specific", "me", 2, true)).toEqual(["maintenance", "power"]);
+    expect(strengthFocuses("specific", "me", 2, false)).toEqual(["circuit", "maintenance"]);
+    expect(strengthFocuses("base", "heavy", 3, false)).toEqual(["heavy", "heavyJumps", "heavy"]);
+    expect(strengthFocuses("deload", "heavy", 2, false)).toEqual(["deload"]);
+    expect(strengthFocuses("deload", "general", 2, false)).toEqual(["general"]);
+    expect(strengthFocuses("taper", "me", 2, false)).toEqual(["sharpen"]);
+    expect(strengthFocuses("race", "me", 2, false)).toEqual([]);
+    expect(strengthFocuses("recovery", "general", 2, false)).toEqual([]);
+    expect(strengthFocuses("taper", "me", 0, false)).toEqual([]);
+  });
+});
+
+describe("strength and hikes through a long plan", () => {
+  // Synthetic athlete: 5 runs a week, Saturday long run, race 30 weeks out.
+  const schedule: WeeklySchedule = { weeklyMinutes: 420, longRunWeekday: 5, longRunMaxMinutes: 180, runsPerWeek: 5 };
+  const r = rng(7);
+  const hist = history(r, 12, 5, 50, 120);
+  const raceDay = TODAY + 7 * 30;
+  const plan = generatePlan(hist, schedule, { name: "test", day: raceDay, expectedHours: 10 }, TODAY, OPTIONS);
+  const weeksToRace = (w: { start: number }) => (mondayOf(raceDay) - w.start) / 7;
+
+  it("hikes only in build weeks of the last 12 before the race, pack growing", () => {
+    const hikes = plan.weeks.flatMap((w) => w.sessions.filter((s) => s.kind === "hike").map((s) => ({ w, s })));
+    expect(hikes.length).toBeGreaterThan(3);
+    for (const { w, s } of hikes) {
+      expect(weeksToRace(w)).toBeLessThanOrEqual(12);
+      expect(["base", "specific"]).toContain(w.phase);
+      expect(s.packPct).toBe(hikePackPct(weeksToRace(w)));
+    }
+  });
+
+  it("general strength early, heavy in the middle", () => {
+    const focusesOf = (pred: (n: number) => boolean) =>
+      new Set(plan.weeks.filter((w) => (w.phase === "base" || w.phase === "specific") && pred(weeksToRace(w))).flatMap((w) => w.sessions.map((s) => s.strengthFocus).filter(Boolean)));
+    expect([...focusesOf((n) => n > 24)]).toEqual(["general"]);
+    expect(focusesOf((n) => n <= 24 && n > 12)).toEqual(new Set(["heavy", "heavyJumps"]));
+  });
+
+  it("the taper's one session is the earliest strength day of that week", () => {
+    const taper = plan.weeks.find((w) => w.phase === "taper")!;
+    const strength = taper.sessions.filter((s) => s.kind === "strength");
+    expect(strength).toHaveLength(1);
+    expect(strength[0].strengthFocus).toBe("sharpen");
+    expect(strength[0].day - taper.start).toBeLessThanOrEqual(1);
+  });
+
+  it("no quality session the day after strength when another day is free", () => {
+    for (const w of plan.weeks) {
+      const q = w.sessions.find((s) => s.kind === "quality");
+      if (!q) continue;
+      const afterStrength = new Set(w.sessions.filter((s) => s.kind === "strength").map((s) => s.day + 1));
+      if (!afterStrength.has(q.day)) continue;
+      const longDay = w.sessions.find((s) => s.kind === "long")?.day;
+      const alternatives = w.sessions.filter((s) => (s.kind === "easy" || s.kind === "descent" || s.kind === "hike") && !afterStrength.has(s.day) && s.day !== (longDay ?? -9) + 1);
+      expect(alternatives).toEqual([]);
+    }
+  });
 });
 
 describe("strengthDaysOf", () => {
