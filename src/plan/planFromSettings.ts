@@ -43,7 +43,7 @@ export function planInputsKey(settings: PlanSettings, carbs: CarbInputs): string
   // so stored snapshots regenerate.
   return JSON.stringify([
     5, race.courseId, race.date, race.descentM, race.steepDescentM, race.expectedHoursOverride && roundedExpectedHours(race.expectedHoursOverride),
-    settings.schedule, settings.longRunMoves, carbs.raceGPerH, settings.carbsStartGPerH,
+    settings.schedule, settings.longRunMoves, carbs.raceGPerH, settings.carbsStartGPerH, settings.strengthStartedOn,
   ]);
 }
 
@@ -94,6 +94,7 @@ export function planFromSettings(
       ...planOptionsFromHistory(past),
       strengthSessions: settings.schedule.strengthSessions,
       strengthCountsInBudget: settings.schedule.strengthCountsInBudget,
+      strengthStartDay: settings.strengthStartedOn ? dayNumberOf(settings.strengthStartedOn) : mondayOf(today),
       carbs: { raceGPerH: carbs.raceGPerH, startGPerH: carbs.startGPerH },
       includeCurrentWeek: true,
     },

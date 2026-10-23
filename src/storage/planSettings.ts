@@ -51,6 +51,9 @@ export interface PlanSettings {
   /** The same two for the weighted uphill hikes: Strava "Hike" activities. */
   hikeDone: Record<string, true>;
   hikeFromStrava: Record<string, string>;
+  /** Monday (YYYY-MM-DD) the six-week strength ramp to heavy started; set
+   * the first time a plan is made (planGenerator.ts STRENGTH_RAMP). */
+  strengthStartedOn: string | null;
   /** Carbs per hour the long-run ladder starts from before any log. */
   carbsStartGPerH: number;
   checkinsEnabled: boolean;
@@ -75,6 +78,7 @@ export const DEFAULT_PLAN_SETTINGS: PlanSettings = {
   strengthFromStrava: {},
   hikeDone: {},
   hikeFromStrava: {},
+  strengthStartedOn: null,
   carbsStartGPerH: 30,
   checkinsEnabled: true,
 };

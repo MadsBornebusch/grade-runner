@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { buildHistory } from "../plan/historyCache";
-import { dayNumberOf, type DatedHistoryRun } from "../plan/historyFromRuns";
+import { dateOfDayNumber, dayNumberOf, type DatedHistoryRun } from "../plan/historyFromRuns";
 import { ladderStart } from "../plan/carbLadder";
 import { needsReplan, planFromSettings, planInputsKey, type PlanBlocker, type PlanSnapshot } from "../plan/planFromSettings";
+import { mondayOf } from "../plan/planGenerator";
 import { localDateKey } from "../plan/loadLedger";
 import { listStoredCourses } from "../storage/courseLibrary";
 import { createLocalStore } from "../storage/localStore";
@@ -127,6 +128,11 @@ export function usePlan(formInputs: FormInputs, pausePrediction = false): PlanSt
       if (!history) return;
       const key = planInputsKey(settings, carbs);
       if (!force && (!key || !needsReplan(snapshot, today, key))) return;
+      // The strength ramp counts from the first plan; setting it re-plans.
+      if (key && !settings.strengthStartedOn) {
+        planSettingsStore.set((s) => (s.strengthStartedOn ? s : { ...s, strengthStartedOn: dateOfDayNumber(mondayOf(today)) }));
+        return;
+      }
       // A generator failure shows as a card; it must not take the app down.
       try {
         const out = planFromSettings(history, settings, today, carbs);

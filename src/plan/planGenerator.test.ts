@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  carbTargets, generatePlan, mondayOf, STRENGTH_MINUTES, hikePackPct, strengthBlockOf, strengthFocuses, recoveryWeeks, slotsForWeek, steadyBlockMinutes, strengthDaysOf, suggestLongRunMaxMinutes, type HistoryRun, type PlanOptions, type WeeklySchedule,
+  carbTargets, generatePlan, mondayOf, STRENGTH_MINUTES, hikePackPct, rampedFocuses, strengthBlockOf, strengthFocuses, recoveryWeeks, slotsForWeek, steadyBlockMinutes, strengthDaysOf, suggestLongRunMaxMinutes, type HistoryRun, type PlanOptions, type WeeklySchedule,
 } from "./planGenerator";
 import { guardBreaches, referenceAt, runReferences } from "./sessionGuard";
 
@@ -94,9 +94,8 @@ describe("generatePlan invariants (random cases)", () => {
 });
 
 describe("strength blocks", () => {
-  it("moves from general to heavy to leg endurance as the race nears", () => {
-    expect(strengthBlockOf(30)).toBe("general");
-    expect(strengthBlockOf(24)).toBe("heavy");
+  it("moves from heavy to leg endurance as the race nears", () => {
+    expect(strengthBlockOf(30)).toBe("heavy");
     expect(strengthBlockOf(13)).toBe("heavy");
     expect(strengthBlockOf(12)).toBe("me");
     expect(strengthBlockOf(1)).toBe("me");
@@ -110,16 +109,23 @@ describe("strength blocks", () => {
   });
 
   it("picks each session's focus by phase and block", () => {
-    expect(strengthFocuses("base", "general", 2, false)).toEqual(["general", "general"]);
     expect(strengthFocuses("base", "heavy", 2, false)).toEqual(["heavy", "heavyJumps"]);
     expect(strengthFocuses("specific", "me", 2, true)).toEqual(["maintenance", "power"]);
     expect(strengthFocuses("specific", "me", 2, false)).toEqual(["circuit", "maintenance"]);
     expect(strengthFocuses("base", "heavy", 3, false)).toEqual(["heavy", "heavyJumps", "heavy"]);
     expect(strengthFocuses("deload", "heavy", 2, false)).toEqual(["deload"]);
-    expect(strengthFocuses("deload", "general", 2, false)).toEqual(["general"]);
     expect(strengthFocuses("taper", "me", 2, false)).toEqual(["sharpen"]);
     expect(strengthFocuses("race", "me", 2, false)).toEqual([]);
-    expect(strengthFocuses("recovery", "general", 2, false)).toEqual([]);
+    expect(strengthFocuses("recovery", "heavy", 2, false)).toEqual([]);
+  });
+
+  it("ramps to heavy over six weeks from the start, leaving jumps and the circuit alone", () => {
+    expect(rampedFocuses(["heavy", "heavyJumps"], 0)).toEqual(["general", "general"]);
+    expect(rampedFocuses(["heavy", "heavyJumps"], 3)).toEqual(["build", "build"]);
+    expect(rampedFocuses(["maintenance", "power"], 5)).toEqual(["nearHeavy", "power"]);
+    expect(rampedFocuses(["deload"], 1)).toEqual(["general"]);
+    expect(rampedFocuses(["sharpen"], 0)).toEqual(["sharpen"]);
+    expect(rampedFocuses(["heavy", "heavyJumps"], 6)).toEqual(["heavy", "heavyJumps"]);
     expect(strengthFocuses("taper", "me", 0, false)).toEqual([]);
   });
 });
@@ -143,11 +149,20 @@ describe("strength and hikes through a long plan", () => {
     }
   });
 
-  it("general strength early, heavy in the middle", () => {
-    const focusesOf = (pred: (n: number) => boolean) =>
-      new Set(plan.weeks.filter((w) => (w.phase === "base" || w.phase === "specific") && pred(weeksToRace(w))).flatMap((w) => w.sessions.map((s) => s.strengthFocus).filter(Boolean)));
-    expect([...focusesOf((n) => n > 24)]).toEqual(["general"]);
-    expect(focusesOf((n) => n <= 24 && n > 12)).toEqual(new Set(["heavy", "heavyJumps"]));
+  it("ramps up over the first six weeks, then heavy until the last 12", () => {
+    const focusesOf = (pred: (w: { start: number }) => boolean) =>
+      new Set(plan.weeks.filter((w) => (w.phase === "base" || w.phase === "specific") && pred(w)).flatMap((w) => w.sessions.map((s) => s.strengthFocus).filter(Boolean)));
+    const first = plan.weeks[0].start;
+    expect(focusesOf((w) => w.start < first + 14)).toEqual(new Set(["general"]));
+    expect(focusesOf((w) => w.start >= first + 14 && w.start < first + 28)).toEqual(new Set(["build"]));
+    expect(focusesOf((w) => w.start >= first + 28 && w.start < first + 42)).toEqual(new Set(["nearHeavy"]));
+    expect(focusesOf((w) => w.start >= first + 42 && weeksToRace(w) > 12)).toEqual(new Set(["heavy", "heavyJumps"]));
+  });
+
+  it("the ramp follows the day strength started, not the plan's first week", () => {
+    const later = generatePlan(hist, schedule, { name: "test", day: raceDay, expectedHours: 10 }, TODAY, { ...OPTIONS, strengthStartDay: plan.weeks[0].start - 21 });
+    const focus = later.weeks[0].sessions.find((s) => s.kind === "strength")!.strengthFocus;
+    expect(focus).toBe("build");
   });
 
   it("each strength session lasts its focus's minutes", () => {

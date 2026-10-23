@@ -4599,11 +4599,15 @@ the exercises in ui/plan/strengthCopy.ts (a barbell and a few dumbbells,
 no trap bar).
 
 - **Blocks, by weeks to race** (not plan weeks, since the plan is
-  regenerated weekly): general strength more than 24 weeks out, heavy
-  from 24 to 13, leg endurance (ME) in the last 12. Uphill Athlete's order
-  is general, then max strength, then 8-16 weeks of ME; Scott Johnston,
-  who coached both 2025 UTMB winners (Evans, Croft), has most athletes add
-  ME in the last 10-16 weeks.
+  regenerated weekly): heavy until 13 weeks out, leg endurance (ME) in
+  the last 12. Uphill Athlete's order is general, then max strength, then
+  8-16 weeks of ME; Scott Johnston, who coached both 2025 UTMB winners
+  (Evans, Croft), has most athletes add ME in the last 10-16 weeks.
+- **Ramp to heavy** (user request, 2026-10-23): from the Monday strength
+  started (`strengthStartedOn`, set with the first plan), two weeks each
+  of 10-12, 8 and 6 reps, getting heavier, then heavy. It replaces the
+  heavy and maintenance sessions while it lasts, in any block. Not yet
+  restarted after a long break.
 - **Heavy**: 4-6 reps at about 85% 1RM. The best evidence for running
   economy: near-maximal loads beat lighter ones and jumps alone (Eihara et
   al. 2022), and heavy plus jumps improved economy late in a 90 min run
@@ -4623,7 +4627,7 @@ no trap bar).
 - **Spacing**: the quality run avoids the day after strength when it can;
   the hike avoids the days next to the long run, then strength days.
 - **Done**: strength and hikes tick off by hand or from Strava
-  (WeightTraining etc., and Hike); hikes stay out of the run library.
+  (WeightTraining etc., and Hike); a hike logged as a run counts too (and its time enters the run library).
 
 ### Open questions
 

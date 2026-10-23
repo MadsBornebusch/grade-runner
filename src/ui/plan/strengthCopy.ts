@@ -22,7 +22,9 @@ export interface StrengthWorkout {
 }
 
 export const STRENGTH_FOCUS_TITLE: Record<StrengthFocus, string> = {
-  general: "General strength",
+  general: "Getting started",
+  build: "Building: 8 reps",
+  nearHeavy: "Building: 6 reps",
   heavy: "Heavy",
   heavyJumps: "Heavy + jumps",
   maintenance: "Keep strength",
@@ -35,15 +37,38 @@ export const STRENGTH_FOCUS_TITLE: Record<StrengthFocus, string> = {
 const WORKOUTS: Record<StrengthFocus, StrengthWorkout> = {
   general: {
     title: STRENGTH_FOCUS_TITLE.general,
-    intro: "Learn the lifts and get the tendons used to load before going heavy. Moderate weights, stop 2–3 reps short of failure.",
+    intro: "Weeks 1–2 of six building up to heavy lifting: learn the movements and get the tendons used to load. Moderate weights, stop 2–3 reps short of failure.",
     exercises: [
-      { name: "Goblet squat", dose: "3 × 10–12", note: "Dumbbell at the chest. Move on to the barbell once this is easy." },
+      { name: "Goblet squat", dose: "3 × 10–12", note: "Dumbbell at the chest." },
       { name: "Dumbbell Romanian deadlift", dose: "3 × 10–12", note: "Hinge at the hips, soft knees, flat back." },
       { name: "Dumbbell step-up", dose: "3 × 10 each leg", note: "Box about knee height. Push through the front leg only." },
       { name: "Single-leg calf raise", dose: "3 × 15 each leg", note: "Straight knee, full range, on a step." },
       { name: "Side plank", dose: "2 × 30–45 s each side" },
     ],
     rest: "1–1.5 min between sets.",
+  },
+  build: {
+    title: STRENGTH_FOCUS_TITLE.build,
+    intro: "Weeks 3–4 of the build-up: onto the barbell, heavier and fewer reps. Start light on the squat to learn it, then add weight each session while you still have 2 reps left.",
+    exercises: [
+      { name: "Barbell back squat", dose: "3 × 8" },
+      { name: "Barbell Romanian deadlift", dose: "3 × 8" },
+      { name: "Dumbbell step-up", dose: "3 × 8 each leg", note: "Box about knee height." },
+      { name: "Single-leg calf raise", dose: "3 × 12 each leg", note: "Hold a dumbbell. Straight knee." },
+    ],
+    rest: "2 min between sets.",
+  },
+  nearHeavy: {
+    title: STRENGTH_FOCUS_TITLE.nearHeavy,
+    intro: "Weeks 5–6 of the build-up: close to heavy now, and a first taste of jumps. Keep adding weight while every rep stays clean; next up is heavy lifting.",
+    exercises: [
+      { name: "Box jump", dose: "2 × 5", note: "Low box. Step down, don't jump down." },
+      { name: "Barbell back squat", dose: "4 × 6" },
+      { name: "Barbell Romanian deadlift", dose: "3 × 6" },
+      { name: "Dumbbell Bulgarian split squat", dose: "3 × 6 each leg", note: "Rear foot on a bench." },
+      { name: "Single-leg calf raise", dose: "3 × 10 each leg", note: "Hold a heavy dumbbell." },
+    ],
+    rest: "2–3 min between sets.",
   },
   heavy: {
     title: STRENGTH_FOCUS_TITLE.heavy,

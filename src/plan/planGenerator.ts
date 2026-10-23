@@ -137,6 +137,9 @@ export interface PlanOptions {
   strengthSessions?: number;
   strengthMinutes?: number;
   strengthCountsInBudget?: boolean;
+  /** Day the strength ramp started (STRENGTH_RAMP); the first plan week
+   * without it. */
+  strengthStartDay?: number;
   /** Gut training (user request, 2026-10-21): carbs per hour on runs of
    * FUELLED_RUN_MINUTES or more, from what the athlete has shown they can
    * take (their logged intake, or `startGPerH`) up to the race's planned
@@ -152,7 +155,7 @@ export type Phase = "recovery" | "maintenance" | "base" | "specific" | "deload" 
 export type SessionKind = "long" | "easy" | "quality" | "descent" | "hike" | "strength" | "race";
 
 /** What a strength session works on (copy in ui/plan/strengthCopy.ts). */
-export type StrengthFocus = "general" | "heavy" | "heavyJumps" | "maintenance" | "power" | "circuit" | "deload" | "sharpen";
+export type StrengthFocus = "general" | "build" | "nearHeavy" | "heavy" | "heavyJumps" | "maintenance" | "power" | "circuit" | "deload" | "sharpen";
 
 export interface PlannedSession {
   day: number;
@@ -261,22 +264,31 @@ export const CAPPED_LONG_RUN_SHARE = 0.95;
  * has most athletes add ME in the last 10-16 weeks. Heavy loads (>= 85%
  * 1RM) improve running economy more than lighter ones or jumps alone
  * (Eihara et al. 2022), and heavy plus jumps improved economy late in a
- * 90 min run (Zanini et al.). The week counts are this design's
- * assumption. Keyed on weeks to race, not plan weeks, so a plan that is
- * regenerated every week still moves through the blocks.
+ * 90 min run (Zanini et al.). The general phase is a ramp from the day
+ * strength started (STRENGTH_RAMP), not a block. The week counts are this
+ * design's assumption. Keyed on weeks to race, not plan weeks, so a plan
+ * that is regenerated every week still moves through the blocks.
  */
 export const ME_WEEKS = 12;
+
+/** Assumption: the ramp to heavy, one focus per week since strength
+ * started: two weeks each of 10-12, 8 and 6 reps, getting heavier, then
+ * heavy from week 7. While it lasts it replaces the heavy sessions. */
+export const STRENGTH_RAMP: StrengthFocus[] = ["general", "general", "build", "build", "nearHeavy", "nearHeavy"];
+const RAMPED: ReadonlySet<StrengthFocus> = new Set(["heavy", "heavyJumps", "maintenance", "deload"]);
+export function rampedFocuses(focuses: StrengthFocus[], weeksSinceStart: number): StrengthFocus[] {
+  const step = STRENGTH_RAMP[Math.max(0, weeksSinceStart)];
+  return step ? focuses.map((f) => (RAMPED.has(f) ? step : f)) : focuses;
+}
 
 /** Assumption: minutes per session by focus, warm-up included, from the
  * sets, reps and rests in ui/plan/strengthCopy.ts (heavy sets take 2-3 min
  * rests, so heavy days run longest). */
 export const STRENGTH_MINUTES: Record<StrengthFocus, number> = {
-  general: 35, heavy: 45, heavyJumps: 40, maintenance: 25, power: 25, circuit: 30, deload: 25, sharpen: 20,
+  general: 35, build: 40, nearHeavy: 40, heavy: 45, heavyJumps: 40, maintenance: 25, power: 25, circuit: 30, deload: 25, sharpen: 20,
 };
-export const GENERAL_STRENGTH_ABOVE_WEEKS = 24;
-export type StrengthBlock = "general" | "heavy" | "me";
+export type StrengthBlock = "heavy" | "me";
 export function strengthBlockOf(weeksToRace: number): StrengthBlock {
-  if (weeksToRace > GENERAL_STRENGTH_ABOVE_WEEKS) return "general";
   return weeksToRace > ME_WEEKS ? "heavy" : "me";
 }
 
@@ -307,10 +319,10 @@ export function strengthFocuses(phase: Phase, block: StrengthBlock, count: numbe
       list = ["maintenance"];
       break;
     case "deload":
-      list = [block === "general" ? "general" : "deload"];
+      list = ["deload"];
       break;
     default:
-      list = block === "general" ? ["general", "general"] : block === "heavy" ? ["heavy", "heavyJumps"] : hasHike ? ["maintenance", "power"] : ["circuit", "maintenance"];
+      list = block === "heavy" ? ["heavy", "heavyJumps"] : hasHike ? ["maintenance", "power"] : ["circuit", "maintenance"];
       return Array.from({ length: count }, (_, i) => list[i % list.length]);
   }
   return list.slice(0, Math.min(count, list.length));
@@ -467,6 +479,7 @@ export function generatePlan(
       lastWeekDescent, lastWeekSteep, strengthSessions, strengthMinutes, budgetMinutes: Math.max(0, budgetPerWeek - doneMinutes), fromDay: today,
       prevLongDay, nextLongDay: start + 7 + (schedule.longRunWeekdayByWeek?.get(start + 7) ?? schedule.longRunWeekday),
       longRunCapMinutes: schedule.longRunMaxMinutes, cappedDays, weeksToRace,
+      strengthWeek: Math.floor((start - mondayOf(options.strengthStartDay ?? firstWeek)) / 7),
     });
     const plannedMech = sessions.reduce((s, x) => s + x.mechanical, 0);
     const plannedMin = sessions
@@ -549,6 +562,8 @@ interface WeekState {
   longRunCapMinutes: number;
   cappedDays: number[];
   weeksToRace: number;
+  /** Weeks since the strength ramp started. */
+  strengthWeek: number;
 }
 
 /** Assumption: weekly descent and steep descent grow at most 10% a week
@@ -596,7 +611,8 @@ function planWeek(
   const hikeWeek = isBuild && block === "me";
   // Budgeted as if the hike might not fit (the gym circuit is the longer
   // option); the final focuses are set at the end.
-  const budgetFocuses = strengthFocuses(phase, block, state.strengthSessions, false);
+  const focusesFor = (hike: boolean) => rampedFocuses(strengthFocuses(phase, block, state.strengthSessions, hike), state.strengthWeek);
+  const budgetFocuses = focusesFor(false);
   const strengthCount = budgetFocuses.length;
   const minutesOf = (f: StrengthFocus) => state.strengthMinutes ?? STRENGTH_MINUTES[f];
   const dayBeforeNextLong = state.nextLongDay - 1 - start;
@@ -712,7 +728,7 @@ function planWeek(
       }
     }
   }
-  const focuses = strengthFocuses(phase, block, state.strengthSessions, hasHike);
+  const focuses = focusesFor(hasHike);
   // Within the budgeted minutes: a hike week's focuses are never longer.
   strengthSessions.forEach((x, i) => {
     x.strengthFocus = focuses[i];
