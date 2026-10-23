@@ -1,12 +1,15 @@
 import type { DatedHistoryRun } from "../../plan/historyFromRuns";
-import type { Plan, PlanWeek } from "../../plan/planGenerator";
+import type { Plan, PlannedSession, PlanWeek } from "../../plan/planGenerator";
 import { formatMinutes } from "./planCopy";
 
 /** Minutes run so far in the week, and the week's planned total (in the
- * current week: what was run before today plus what's planned from today). */
-export function weekProgress(week: PlanWeek, history: DatedHistoryRun[], today: number) {
+ * current week: what was run before today plus what's planned from today).
+ * A weighted hike counts as running: its planned minutes once it's ticked
+ * off (`hikeDone`), since hikes aren't in the run library. */
+export function weekProgress(week: PlanWeek, history: DatedHistoryRun[], today: number, hikeDone?: (s: PlannedSession) => boolean) {
   const runs = history.filter((r) => r.day >= week.start && r.day < week.start + 7 && r.day <= today);
-  const doneMin = runs.reduce((s, r) => s + r.movingMin, 0);
+  const hikes = hikeDone ? week.sessions.filter((s) => s.kind === "hike" && s.day <= today && hikeDone(s)) : [];
+  const doneMin = runs.reduce((s, r) => s + r.movingMin, 0) + hikes.reduce((s, h) => s + h.minutes, 0);
   const doneBeforeToday = runs.filter((r) => r.day < today).reduce((s, r) => s + r.movingMin, 0);
   const isCurrent = today >= week.start && today < week.start + 7;
   const plannedMin = (isCurrent ? doneBeforeToday : 0) + week.plannedMinutes;

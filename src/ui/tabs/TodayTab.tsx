@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { toggleSessionDone, useSessionDone } from "../plan/useSessionDone";
+import { toggleSessionDone, useSessionDone, type SessionDone } from "../plan/useSessionDone";
 import { intensityTargets } from "../plan/intensity";
 import { ArrowsClockwise, CaretRight, CheckCircle, FlagCheckered, Moon, XCircle } from "@phosphor-icons/react";
 import { useSyncExternalStore } from "react";
@@ -82,6 +82,9 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
   const runToday = todays.find((s) => s.kind !== "strength");
   const next = all.filter((s) => s.day > today && s.kind !== "strength").slice(0, 2);
   const yesterday = matchDay(today - 1, all, history, today);
+  // A day of only strength or a hike has no run state: missed unless ticked.
+  const yesterdayMissed =
+    yesterday.state === "skipped" || (yesterday.state === null && yesterday.runs.length === 0 && yesterday.sessions.some((s) => isTickedSession(s.kind) && !doneOf(s)));
   const loggable = history.map((r) => r);
   const fuelRuns = [
     ...runsNeedingFuelLog(loggable, logs, today),
@@ -133,12 +136,12 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
         <section>
           <h3 className="section-title">Yesterday</h3>
           <div className="card list-row">
-            {yesterday.state === "skipped" ? <XCircle size={18} className="muted" /> : <CheckCircle size={18} weight="fill" className="success" />}
+            {yesterdayMissed ? <XCircle size={18} className="muted" /> : <CheckCircle size={18} weight="fill" className="success" />}
             <span className="num">
               {yesterday.sessions.map((s) => KIND_TITLE[s.kind]).join(" + ") || "Extra run"}
               {yesterday.runs.length > 0
                 ? ` · ran ${formatMinutesExact(yesterday.runs.reduce((a, r) => a + r.movingMin, 0))}, ${yesterday.runs.reduce((a, r) => a + r.distanceKm, 0).toFixed(1)} km`
-                : yesterday.state === "skipped"
+                : yesterdayMissed
                   ? " · missed"
                   : ""}
             </span>
@@ -152,7 +155,7 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
         </section>
       )}
 
-      {week && <WeekStrip plan={plan} weekStart={week.start} onOpen={() => navigate("schedule")} />}
+      {week && <WeekStrip plan={plan} weekStart={week.start} doneOf={doneOf} onOpen={() => navigate("schedule")} />}
 
       {next.length > 0 && (
         <section>
@@ -198,10 +201,10 @@ function countdown(days: number): string {
   return `${Math.round(days / 7)} weeks to go`;
 }
 
-function WeekStrip({ plan, weekStart, onOpen }: { plan: PlanState; weekStart: number; onOpen: () => void }) {
+function WeekStrip({ plan, weekStart, doneOf, onOpen }: { plan: PlanState; weekStart: number; doneOf: SessionDone; onOpen: () => void }) {
   const week = plan.snapshot!.plan.weeks.find((w) => w.start === weekStart)!;
   const history = plan.history!;
-  const { doneMin, plannedMin } = weekProgress(week, history, plan.today);
+  const { doneMin, plannedMin } = weekProgress(week, history, plan.today, (s) => !!doneOf(s));
   return (
     <section>
       <button type="button" className="section-title section-title--link" onClick={onOpen}>
@@ -218,7 +221,7 @@ function WeekStrip({ plan, weekStart, onOpen }: { plan: PlanState; weekStart: nu
                 <span className="week-strip__wd">{WEEKDAY_LETTER[i]}</span>
                 <span className="week-strip__date num">{dateOfDayNumber(day).slice(8).replace(/^0/, "")}</span>
                 <span className="week-strip__icons">
-                  {m.runs.length > 0 ? (
+                  {m.runs.length > 0 || (m.sessions.length > 0 && m.sessions.every((s) => isTickedSession(s.kind) && doneOf(s))) ? (
                     <CheckCircle size={14} weight="fill" className="success" />
                   ) : kinds.length ? (
                     kinds.map((k) => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  carbTargets, generatePlan, mondayOf, hikePackPct, strengthBlockOf, strengthFocuses, recoveryWeeks, slotsForWeek, steadyBlockMinutes, strengthDaysOf, suggestLongRunMaxMinutes, type HistoryRun, type PlanOptions, type WeeklySchedule,
+  carbTargets, generatePlan, mondayOf, STRENGTH_MINUTES, hikePackPct, strengthBlockOf, strengthFocuses, recoveryWeeks, slotsForWeek, steadyBlockMinutes, strengthDaysOf, suggestLongRunMaxMinutes, type HistoryRun, type PlanOptions, type WeeklySchedule,
 } from "./planGenerator";
 import { guardBreaches, referenceAt, runReferences } from "./sessionGuard";
 
@@ -148,6 +148,16 @@ describe("strength and hikes through a long plan", () => {
       new Set(plan.weeks.filter((w) => (w.phase === "base" || w.phase === "specific") && pred(weeksToRace(w))).flatMap((w) => w.sessions.map((s) => s.strengthFocus).filter(Boolean)));
     expect([...focusesOf((n) => n > 24)]).toEqual(["general"]);
     expect(focusesOf((n) => n <= 24 && n > 12)).toEqual(new Set(["heavy", "heavyJumps"]));
+  });
+
+  it("each strength session lasts its focus's minutes", () => {
+    for (const x of plan.weeks.flatMap((w) => w.sessions.filter((s) => s.kind === "strength"))) expect(x.minutes).toBe(STRENGTH_MINUTES[x.strengthFocus!]);
+  });
+
+  it("strength counted in the budget keeps every week within it", () => {
+    const inBudget = generatePlan(hist, schedule, { name: "test", day: raceDay, expectedHours: 10 }, TODAY, { ...OPTIONS, strengthCountsInBudget: true });
+    for (const w of inBudget.weeks) expect(w.plannedMinutes).toBeLessThanOrEqual(schedule.weeklyMinutes + 1e-6);
+    expect(inBudget.weeks.some((w) => w.sessions.some((s) => s.kind === "strength" && s.minutes >= 40))).toBe(true);
   });
 
   it("the taper's one session is the earliest strength day of that week", () => {

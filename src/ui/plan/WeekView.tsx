@@ -25,7 +25,7 @@ interface WeekViewProps {
 }
 
 export function WeekView({ week, weekNumber, weekCount, history, today, doneOf, targets, onOpen, onPrev, onNext, onMoveLongRun, onEditSchedule, onAllWeeks }: WeekViewProps) {
-  const { doneMin, plannedMin, isCurrent } = weekProgress(week, history, today);
+  const { doneMin, plannedMin, isCurrent } = weekProgress(week, history, today, (s) => !!doneOf(s));
   const isPast = week.start + 7 <= today;
   const days = matchWeek(week.start, week.sessions, history, today);
   const pct = plannedMin > 0 ? Math.min(100, (100 * doneMin) / plannedMin) : 0;
@@ -66,6 +66,7 @@ export function WeekView({ week, weekNumber, weekCount, history, today, doneOf, 
         </div>
         <p className="week-head__explainer">
           {PHASE_EXPLAINER[week.phase]}
+          {week.sessions.some((s) => s.kind === "hike") && " A weighted hike builds your legs for the climbs."}
           {week.longRunWeek && week.phase !== "taper" && week.phase !== "race" && " Longer long run this week; the other runs are shorter to fit your hours."}
         </p>
         <div className="meter" role="img" aria-label={`${formatMinutesExact(doneMin)} of ${formatMinutes(plannedMin)} done`}>

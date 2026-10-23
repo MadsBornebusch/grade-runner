@@ -42,7 +42,7 @@ export function planInputsKey(settings: PlanSettings, carbs: CarbInputs): string
   // The leading version bumps when the generator's output changes shape,
   // so stored snapshots regenerate.
   return JSON.stringify([
-    4, race.courseId, race.date, race.descentM, race.steepDescentM, race.expectedHoursOverride && roundedExpectedHours(race.expectedHoursOverride),
+    5, race.courseId, race.date, race.descentM, race.steepDescentM, race.expectedHoursOverride && roundedExpectedHours(race.expectedHoursOverride),
     settings.schedule, settings.longRunMoves, carbs.raceGPerH, settings.carbsStartGPerH,
   ]);
 }

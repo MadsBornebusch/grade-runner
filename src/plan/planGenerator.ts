@@ -132,7 +132,8 @@ export interface PlanOptions {
   maxDescentPerHour: number;
   maxSteepDescentPerHour: number;
   /** Strength sessions per week, and whether their minutes count inside
-   * the availability (PLAN.md: the athlete chooses). */
+   * the availability (PLAN.md: the athlete chooses). Each session lasts
+   * STRENGTH_MINUTES of its focus unless `strengthMinutes` overrides it. */
   strengthSessions?: number;
   strengthMinutes?: number;
   strengthCountsInBudget?: boolean;
@@ -265,6 +266,13 @@ export const CAPPED_LONG_RUN_SHARE = 0.95;
  * regenerated every week still moves through the blocks.
  */
 export const ME_WEEKS = 12;
+
+/** Assumption: minutes per session by focus, warm-up included, from the
+ * sets, reps and rests in ui/plan/strengthCopy.ts (heavy sets take 2-3 min
+ * rests, so heavy days run longest). */
+export const STRENGTH_MINUTES: Record<StrengthFocus, number> = {
+  general: 35, heavy: 45, heavyJumps: 40, maintenance: 25, power: 25, circuit: 30, deload: 25, sharpen: 20,
+};
 export const GENERAL_STRENGTH_ABOVE_WEEKS = 24;
 export type StrengthBlock = "general" | "heavy" | "me";
 export function strengthBlockOf(weeksToRace: number): StrengthBlock {
@@ -354,7 +362,7 @@ export function generatePlan(
   const deloadEvery = options.deloadEvery ?? 4;
   const deloadFactor = options.deloadFactor ?? 0.7;
   const strengthSessions = options.strengthSessions ?? 2;
-  const strengthMinutes = options.strengthMinutes ?? 25;
+  const strengthMinutes = options.strengthMinutes;
   const warnings: string[] = [];
 
   if (race.day < today) {
@@ -529,7 +537,7 @@ interface WeekState {
   lastWeekDescent: number | null;
   lastWeekSteep: number | null;
   strengthSessions: number;
-  strengthMinutes: number;
+  strengthMinutes: number | undefined;
   /** The week's running budget, which the slots may add up to more than. */
   budgetMinutes: number;
   /** No session before this day (today, for the current week). */
@@ -586,7 +594,11 @@ function planWeek(
   const block = strengthBlockOf(state.weeksToRace);
   const isBuild = phase === "base" || phase === "specific";
   const hikeWeek = isBuild && block === "me";
-  const strengthCount = strengthFocuses(phase, block, state.strengthSessions, hikeWeek).length;
+  // Budgeted as if the hike might not fit (the gym circuit is the longer
+  // option); the final focuses are set at the end.
+  const budgetFocuses = strengthFocuses(phase, block, state.strengthSessions, false);
+  const strengthCount = budgetFocuses.length;
+  const minutesOf = (f: StrengthFocus) => state.strengthMinutes ?? STRENGTH_MINUTES[f];
   const dayBeforeNextLong = state.nextLongDay - 1 - start;
   // The taper's one session goes early in the week, away from the race.
   const strengthWeekdays =
@@ -594,12 +606,13 @@ function planWeek(
       ? strengthDaysOf(slots, longRunWeekday, 7, !!o.strengthCountsInBudget, [dayBeforeNextLong]).slice(0, strengthCount)
       : strengthDaysOf(slots, longRunWeekday, strengthCount, !!o.strengthCountsInBudget, dayBeforeNextLong >= 0 && dayBeforeNextLong < 7 ? [dayBeforeNextLong] : []);
   const strengthSessions: PlannedSession[] = [];
+  const budgetMinutesOn = new Map(strengthWeekdays.map((wd, i) => [wd, minutesOf(budgetFocuses[i])]));
   for (const wd of strengthWeekdays) {
     if (start + wd < state.fromDay) continue;
-    strengthSessions.push({ day: start + wd, kind: "strength", minutes: state.strengthMinutes, distanceKm: 0, mechanical: 0, descentM: 0, steepDescentM: 0 });
+    strengthSessions.push({ day: start + wd, kind: "strength", minutes: budgetMinutesOn.get(wd)!, distanceKm: 0, mechanical: 0, descentM: 0, steepDescentM: 0 });
   }
   out.push(...strengthSessions);
-  const free = new Map(slots.map((s) => [s.weekday, s.minutes - (o.strengthCountsInBudget && strengthWeekdays.includes(s.weekday) ? state.strengthMinutes : 0)]));
+  const free = new Map(slots.map((s) => [s.weekday, s.minutes - (o.strengthCountsInBudget ? (budgetMinutesOn.get(s.weekday) ?? 0) : 0)]));
 
   // Long run: as long as the guard and its slot allow, shorter in lighter
   // weeks.
@@ -609,7 +622,7 @@ function planWeek(
   let remaining = target;
   // The week's running minutes never exceed the budget, even when a
   // long-run week lets the long run past its own slot.
-  let weekLeft = state.budgetMinutes - (o.strengthCountsInBudget ? strengthWeekdays.length * state.strengthMinutes : 0);
+  let weekLeft = state.budgetMinutes - (o.strengthCountsInBudget ? strengthSessions.reduce((a, x) => a + x.minutes, 0) : 0);
   if (longSlot) {
     const allow = allowOn(start + longRunWeekday);
     const maxByDistance = (allow.distanceKm / o.speedKmh) * 60;
@@ -700,7 +713,11 @@ function planWeek(
     }
   }
   const focuses = strengthFocuses(phase, block, state.strengthSessions, hasHike);
-  strengthSessions.forEach((x, i) => (x.strengthFocus = focuses[i]));
+  // Within the budgeted minutes: a hike week's focuses are never longer.
+  strengthSessions.forEach((x, i) => {
+    x.strengthFocus = focuses[i];
+    x.minutes = Math.min(x.minutes, minutesOf(focuses[i]));
+  });
 
   // Descent: progress the week's total from last week's (or the reference)
   // by at most 10%, each session within its own allowance.
