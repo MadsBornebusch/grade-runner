@@ -159,8 +159,8 @@ describe("strength and hikes through a long plan", () => {
     expect(focusesOf((w) => w.start >= first + 42 && weeksToRace(w) > 12)).toEqual(new Set(["heavy", "heavyJumps"]));
   });
 
-  it("the ramp follows the day strength started, not the plan's first week", () => {
-    const later = generatePlan(hist, schedule, { name: "test", day: raceDay, expectedHours: 10 }, TODAY, { ...OPTIONS, strengthStartDay: plan.weeks[0].start - 21 });
+  it("the ramp starts from the athlete's level, not the plan's first week", () => {
+    const later = generatePlan(hist, schedule, { name: "test", day: raceDay, expectedHours: 10 }, TODAY, { ...OPTIONS, strengthLevel: 3.5 });
     const focus = later.weeks[0].sessions.find((s) => s.kind === "strength")!.strengthFocus;
     expect(focus).toBe("build");
   });

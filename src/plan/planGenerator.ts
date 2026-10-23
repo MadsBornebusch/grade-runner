@@ -137,9 +137,9 @@ export interface PlanOptions {
   strengthSessions?: number;
   strengthMinutes?: number;
   strengthCountsInBudget?: boolean;
-  /** Day the strength ramp started (STRENGTH_RAMP); the first plan week
-   * without it. */
-  strengthStartDay?: number;
+  /** Level on the strength ramp at the first plan week (strengthRamp.ts);
+   * 0 without it. The plan assumes its sessions get done, one level a week. */
+  strengthLevel?: number;
   /** Gut training (user request, 2026-10-21): carbs per hour on runs of
    * FUELLED_RUN_MINUTES or more, from what the athlete has shown they can
    * take (their logged intake, or `startGPerH`) up to the race's planned
@@ -271,13 +271,14 @@ export const CAPPED_LONG_RUN_SHARE = 0.95;
  */
 export const ME_WEEKS = 12;
 
-/** Assumption: the ramp to heavy, one focus per week since strength
- * started: two weeks each of 10-12, 8 and 6 reps, getting heavier, then
- * heavy from week 7. While it lasts it replaces the heavy sessions. */
+/** Assumption: the ramp to heavy, one focus per ramp level (whole weeks of
+ * strength done, strengthRamp.ts): two each of 10-12, 8 and 6 reps,
+ * getting heavier, then heavy from level 6. While it lasts it replaces the
+ * heavy sessions. */
 export const STRENGTH_RAMP: StrengthFocus[] = ["general", "general", "build", "build", "nearHeavy", "nearHeavy"];
 const RAMPED: ReadonlySet<StrengthFocus> = new Set(["heavy", "heavyJumps", "maintenance", "deload"]);
-export function rampedFocuses(focuses: StrengthFocus[], weeksSinceStart: number): StrengthFocus[] {
-  const step = STRENGTH_RAMP[Math.max(0, weeksSinceStart)];
+export function rampedFocuses(focuses: StrengthFocus[], level: number): StrengthFocus[] {
+  const step = STRENGTH_RAMP[Math.max(0, Math.floor(level))];
   return step ? focuses.map((f) => (RAMPED.has(f) ? step : f)) : focuses;
 }
 
@@ -479,7 +480,7 @@ export function generatePlan(
       lastWeekDescent, lastWeekSteep, strengthSessions, strengthMinutes, budgetMinutes: Math.max(0, budgetPerWeek - doneMinutes), fromDay: today,
       prevLongDay, nextLongDay: start + 7 + (schedule.longRunWeekdayByWeek?.get(start + 7) ?? schedule.longRunWeekday),
       longRunCapMinutes: schedule.longRunMaxMinutes, cappedDays, weeksToRace,
-      strengthWeek: Math.floor((start - mondayOf(options.strengthStartDay ?? firstWeek)) / 7),
+      strengthLevel: (options.strengthLevel ?? 0) + w,
     });
     const plannedMech = sessions.reduce((s, x) => s + x.mechanical, 0);
     const plannedMin = sessions
@@ -562,8 +563,8 @@ interface WeekState {
   longRunCapMinutes: number;
   cappedDays: number[];
   weeksToRace: number;
-  /** Weeks since the strength ramp started. */
-  strengthWeek: number;
+  /** Level on the strength ramp this week. */
+  strengthLevel: number;
 }
 
 /** Assumption: weekly descent and steep descent grow at most 10% a week
@@ -611,7 +612,7 @@ function planWeek(
   const hikeWeek = isBuild && block === "me";
   // Budgeted as if the hike might not fit (the gym circuit is the longer
   // option); the final focuses are set at the end.
-  const focusesFor = (hike: boolean) => rampedFocuses(strengthFocuses(phase, block, state.strengthSessions, hike), state.strengthWeek);
+  const focusesFor = (hike: boolean) => rampedFocuses(strengthFocuses(phase, block, state.strengthSessions, hike), state.strengthLevel);
   const budgetFocuses = focusesFor(false);
   const strengthCount = budgetFocuses.length;
   const minutesOf = (f: StrengthFocus) => state.strengthMinutes ?? STRENGTH_MINUTES[f];

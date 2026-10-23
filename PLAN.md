@@ -4603,11 +4603,14 @@ no trap bar).
   the last 12. Uphill Athlete's order is general, then max strength, then
   8-16 weeks of ME; Scott Johnston, who coached both 2025 UTMB winners
   (Evans, Croft), has most athletes add ME in the last 10-16 weeks.
-- **Ramp to heavy** (user request, 2026-10-23): from the Monday strength
-  started (`strengthStartedOn`, set with the first plan), two weeks each
-  of 10-12, 8 and 6 reps, getting heavier, then heavy. It replaces the
-  heavy and maintenance sessions while it lasts, in any block. Not yet
-  restarted after a long break.
+- **Ramp to heavy** (user request, 2026-10-23): two levels each of
+  10-12, 8 and 6 reps, getting heavier, then heavy from level 6. The level
+  comes from strength actually done since `strengthStartedOn` (set with the
+  first plan): +1 for a week with a session, -0.5 for a week without, so a
+  three-week break from heavy drops back to the 6-rep stage, not to the
+  start (strengthRamp.ts). Ahead of today the plan assumes its sessions
+  get done. The ramp replaces the heavy and maintenance sessions while it
+  lasts, in any block.
 - **Heavy**: 4-6 reps at about 85% 1RM. The best evidence for running
   economy: near-maximal loads beat lighter ones and jumps alone (Eihara et
   al. 2022), and heavy plus jumps improved economy late in a 90 min run

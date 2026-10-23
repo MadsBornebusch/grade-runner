@@ -3,6 +3,7 @@
 // generator. Pure, so the re-plan rule and the inputs mapping are tested.
 import { expectedHoursOf, type PlanSettings } from "../storage/planSettings";
 import { dayNumberOf, planOptionsFromHistory, usesGenericPlanOptions, type DatedHistoryRun } from "./historyFromRuns";
+import { strengthRampLevel } from "./strengthRamp";
 import { generatePlan, mondayOf, suggestLongRunMaxMinutes, type Plan, type WeeklySchedule } from "./planGenerator";
 
 export interface PlanSnapshot {
@@ -94,7 +95,7 @@ export function planFromSettings(
       ...planOptionsFromHistory(past),
       strengthSessions: settings.schedule.strengthSessions,
       strengthCountsInBudget: settings.schedule.strengthCountsInBudget,
-      strengthStartDay: settings.strengthStartedOn ? dayNumberOf(settings.strengthStartedOn) : mondayOf(today),
+      strengthLevel: strengthRampLevel(settings.strengthStartedOn, [...Object.keys(settings.strengthDone), ...Object.keys(settings.strengthFromStrava)], today),
       carbs: { raceGPerH: carbs.raceGPerH, startGPerH: carbs.startGPerH },
       includeCurrentWeek: true,
     },
