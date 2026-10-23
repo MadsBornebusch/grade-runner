@@ -4,11 +4,12 @@ import { formatMinutes } from "./planCopy";
 
 /** Minutes run so far in the week, and the week's planned total (in the
  * current week: what was run before today plus what's planned from today).
- * A weighted hike counts as running: its planned minutes once it's ticked
- * off (`hikeDone`), since hikes aren't in the run library. */
+ * A weighted hike counts as running: logged as a run it's in `history`;
+ * ticked off by hand or as a Strava hike (`hikeDone`), its planned minutes
+ * count, unless a run that day already does. */
 export function weekProgress(week: PlanWeek, history: DatedHistoryRun[], today: number, hikeDone?: (s: PlannedSession) => boolean) {
   const runs = history.filter((r) => r.day >= week.start && r.day < week.start + 7 && r.day <= today);
-  const hikes = hikeDone ? week.sessions.filter((s) => s.kind === "hike" && s.day <= today && hikeDone(s)) : [];
+  const hikes = hikeDone ? week.sessions.filter((s) => s.kind === "hike" && s.day <= today && hikeDone(s) && !runs.some((r) => r.day === s.day)) : [];
   const doneMin = runs.reduce((s, r) => s + r.movingMin, 0) + hikes.reduce((s, h) => s + h.minutes, 0);
   const doneBeforeToday = runs.filter((r) => r.day < today).reduce((s, r) => s + r.movingMin, 0);
   const isCurrent = today >= week.start && today < week.start + 7;

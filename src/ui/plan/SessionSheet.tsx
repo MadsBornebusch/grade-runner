@@ -111,7 +111,7 @@ export function SessionSheet({ session: s, runs, raceName, raceGPerH, strengthCo
 
       <div className="sheet__actions">
         {ticked && done?.source === "strava" && <p className="help">Done: {done.name}, from Strava.</p>}
-        {ticked && done?.source !== "strava" && (
+        {ticked && done?.source !== "strava" && runs.length === 0 && (
           <button type="button" className={done ? "button-ghost" : "button-primary"} onClick={onToggleDone}>
             {done ? "Mark not done" : "Did it"}
           </button>

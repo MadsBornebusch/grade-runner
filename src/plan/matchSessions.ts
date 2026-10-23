@@ -2,8 +2,6 @@
 // the session's day counts, whatever it was.
 import type { PlannedSession } from "./planGenerator";
 
-/** Sessions ticked off by hand or from Strava, not matched to runs. */
-export const isTickedSession = (kind: PlannedSession["kind"]) => kind === "strength" || kind === "hike";
 
 export interface DoneRun {
   day: number;
@@ -20,9 +18,10 @@ export interface DayMatch<R extends DoneRun = DoneRun> {
   day: number;
   sessions: PlannedSession[];
   runs: R[];
-  /** State of the day's run session; null on a day without one. Strength
-   * and weighted hikes aren't matched: the run library holds runs only
-   * (they're ticked off by hand or from Strava, strengthDone.ts). */
+  /** State of the day's run session (a weighted hike counts: it may be
+   * logged as a run); null on a day without one. Strength isn't matched:
+   * the run library holds runs only (strengthDone.ts ticks it, and hikes
+   * logged as Strava hikes). */
   state: SessionState | null;
   /** Runs on a day with no run session. */
   extra: boolean;
@@ -31,7 +30,7 @@ export interface DayMatch<R extends DoneRun = DoneRun> {
 export function matchDay<R extends DoneRun>(day: number, sessions: PlannedSession[], runs: R[], today: number): DayMatch<R> {
   const daySessions = sessions.filter((s) => s.day === day);
   const dayRuns = runs.filter((r) => r.day === day);
-  const run = daySessions.find((s) => !isTickedSession(s.kind));
+  const run = daySessions.find((s) => s.kind !== "strength");
   const ranMin = dayRuns.reduce((sum, r) => sum + r.movingMin, 0);
   let state: SessionState | null = null;
   if (run) {

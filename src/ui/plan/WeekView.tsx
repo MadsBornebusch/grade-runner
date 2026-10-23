@@ -1,8 +1,8 @@
 import { CaretLeft, CaretRight, DotsThreeOutline, Path, PersonSimpleRun } from "@phosphor-icons/react";
-import type { SessionDone } from "./useSessionDone";
+import { sessionState, type SessionDone } from "./useSessionDone";
 import type { IntensityTargets } from "./intensity";
 import type { DatedHistoryRun } from "../../plan/historyFromRuns";
-import { isTickedSession, matchWeek } from "../../plan/matchSessions";
+import { matchWeek } from "../../plan/matchSessions";
 import type { PlannedSession, PlanWeek } from "../../plan/planGenerator";
 import { RestRow, SessionCard } from "./SessionCard";
 import { weekProgress } from "./planViewModel";
@@ -115,12 +115,12 @@ export function WeekView({ week, weekNumber, weekCount, history, today, doneOf, 
                 <span>{dayLabel(d.day)}</span>
                 {isToday && <span className="today-pill">Today</span>}
               </div>
-              {[...d.sessions].sort((a, b) => Number(isTickedSession(a.kind)) - Number(isTickedSession(b.kind))).map((s) => (
+              {[...d.sessions].sort((a, b) => Number(a.kind === "strength") - Number(b.kind === "strength")).map((s) => (
                 <SessionCard
                   key={s.kind}
                   session={s}
-                  state={isTickedSession(s.kind) ? (doneOf(s) ? "done" : null) : d.state}
-                  ranMin={isTickedSession(s.kind) ? undefined : runMin}
+                  state={sessionState(s, d.state, doneOf)}
+                  ranMin={s.kind === "strength" ? undefined : runMin || undefined}
                   targets={targets}
                   onOpen={() => onOpen(s)}
                 />

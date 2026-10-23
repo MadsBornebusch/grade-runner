@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { dateOfDayNumber } from "../../plan/historyFromRuns";
+import type { SessionState } from "../../plan/matchSessions";
 import type { PlannedSession } from "../../plan/planGenerator";
 import type { PlanSnapshot } from "../../plan/planFromSettings";
 import { strengthDoneByDay, type StrengthDone } from "../../plan/strengthDone";
@@ -29,4 +30,13 @@ export function toggleSessionDone(s: PlannedSession): void {
     else done[key] = true;
     return { ...st, [field]: done };
   });
+}
+
+/** A session's state on the plan: strength by its tick, a hike by its tick
+ * (by hand or a Strava hike) or else like a run, other runs by the runs
+ * that day (`dayState`, matchSessions.ts). */
+export function sessionState(s: PlannedSession, dayState: SessionState | null, doneOf: SessionDone): SessionState | null {
+  if (s.kind === "strength") return doneOf(s) ? "done" : null;
+  if (s.kind === "hike" && doneOf(s)) return "done";
+  return dayState;
 }

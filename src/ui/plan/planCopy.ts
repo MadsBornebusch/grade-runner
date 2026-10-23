@@ -98,9 +98,10 @@ export function howToRun(s: PlannedSession, raceName: string, strengthCounts: bo
       const pct = s.packPct ?? 5;
       const kg = bodyMassKg ? `, about ${Math.round((bodyMassKg * pct) / 100)} kg` : "";
       return (
-        `Hike the steepest climb you have (15–30%), or a treadmill at full incline or a stair machine, with a pack of ${pct}% of your body weight${kg}. ` +
-        `Water bottles work well: pour them out at the top and come down light. Your legs should give out before your breathing does; ` +
-        `if you're panting, slow down or find a steeper slope. It trains your legs for the race's long climbs.`
+        `Hike the steepest climb you have (15–30%) with a pack of ${pct}% of your body weight${kg}: water works well. ` +
+        `At the top, pour it out and run down easy, refill at the bottom and go again, as many times as the time allows; most of it should be climbing. ` +
+        `A treadmill at full incline or a stair machine works too. Your legs should give out before your breathing does; ` +
+        `if you're panting, slow down or find a steeper slope. Log it as a hike or a run on Strava: either counts.`
       );
     }
     case "strength":

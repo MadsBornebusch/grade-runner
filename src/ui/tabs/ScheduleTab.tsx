@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { toggleSessionDone, useSessionDone } from "../plan/useSessionDone";
-import { isTickedSession } from "../../plan/matchSessions";
 import { intensityTargets } from "../plan/intensity";
 import { dateOfDayNumber, dayNumberOf } from "../../plan/historyFromRuns";
 import { mondayOf, type PlannedSession } from "../../plan/planGenerator";
@@ -131,7 +130,7 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
       {openSession && (
         <SessionSheet
           session={openSession}
-          runs={isTickedSession(openSession.kind) ? [] : history.filter((r) => r.day === openSession.day)}
+          runs={openSession.kind === "strength" ? [] : history.filter((r) => r.day === openSession.day)}
           raceName={race!.name}
           raceGPerH={formInputs.intakeGPerH}
           strengthCounts={settings.schedule.strengthCountsInBudget}

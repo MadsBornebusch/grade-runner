@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
-import { toggleSessionDone, useSessionDone, type SessionDone } from "../plan/useSessionDone";
+import { sessionState, toggleSessionDone, useSessionDone, type SessionDone } from "../plan/useSessionDone";
 import { intensityTargets } from "../plan/intensity";
 import { ArrowsClockwise, CaretRight, CheckCircle, FlagCheckered, Moon, XCircle } from "@phosphor-icons/react";
 import { useSyncExternalStore } from "react";
 import { runsNeedingFuelLog } from "../../plan/carbLadder";
 import { dateOfDayNumber, dayNumberOf } from "../../plan/historyFromRuns";
-import { isTickedSession, matchDay } from "../../plan/matchSessions";
+import { matchDay } from "../../plan/matchSessions";
 import { mondayOf, type PlannedSession } from "../../plan/planGenerator";
 import { fuelLogStore } from "../../storage/fuelLogs";
 import { planSettingsStore } from "../../storage/planSettings";
@@ -77,14 +77,17 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
   const weeks = plan.snapshot.plan.weeks;
   const all = weeks.flatMap((w) => w.sessions);
   const week = weeks.find((w) => w.start === mondayOf(today));
-  const todays = all.filter((s) => s.day === today).sort((a, b) => Number(isTickedSession(a.kind)) - Number(isTickedSession(b.kind)));
+  const todays = all.filter((s) => s.day === today).sort((a, b) => Number(a.kind === "strength") - Number(b.kind === "strength"));
   const match = matchDay(today, all, history, today);
   const runToday = todays.find((s) => s.kind !== "strength");
   const next = all.filter((s) => s.day > today && s.kind !== "strength").slice(0, 2);
   const yesterday = matchDay(today - 1, all, history, today);
-  // A day of only strength or a hike has no run state: missed unless ticked.
-  const yesterdayMissed =
-    yesterday.state === "skipped" || (yesterday.state === null && yesterday.runs.length === 0 && yesterday.sessions.some((s) => isTickedSession(s.kind) && !doneOf(s)));
+  // Missed: any of the day's sessions not done (strength unticked, a run
+  // or hike with nothing logged).
+  const yesterdayMissed = yesterday.runs.length === 0 && yesterday.sessions.some((s) => {
+    const st = sessionState(s, yesterday.state, doneOf);
+    return st === null || st === "skipped";
+  });
   const loggable = history.map((r) => r);
   const fuelRuns = [
     ...runsNeedingFuelLog(loggable, logs, today),
@@ -119,8 +122,8 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
               session={s}
               hero={s === runToday}
               targets={targets}
-              state={isTickedSession(s.kind) ? (doneOf(s) ? "done" : null) : match.state === "today" ? null : match.state}
-              ranMin={isTickedSession(s.kind) ? undefined : match.runs.reduce((a, r) => a + r.movingMin, 0) || undefined}
+              state={((st) => (st === "today" ? null : st))(sessionState(s, match.state, doneOf))}
+              ranMin={s.kind === "strength" ? undefined : match.runs.reduce((a, r) => a + r.movingMin, 0) || undefined}
               onOpen={() => setOpenSession(s)}
             />
           ),
@@ -180,7 +183,7 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
       {openSession && (
         <SessionSheet
           session={openSession}
-          runs={isTickedSession(openSession.kind) ? [] : history.filter((r) => r.day === openSession.day)}
+          runs={openSession.kind === "strength" ? [] : history.filter((r) => r.day === openSession.day)}
           raceName={race?.name ?? "Race"}
           raceGPerH={formInputs.intakeGPerH}
           strengthCounts={settings.schedule.strengthCountsInBudget}
@@ -221,7 +224,7 @@ function WeekStrip({ plan, weekStart, doneOf, onOpen }: { plan: PlanState; weekS
                 <span className="week-strip__wd">{WEEKDAY_LETTER[i]}</span>
                 <span className="week-strip__date num">{dateOfDayNumber(day).slice(8).replace(/^0/, "")}</span>
                 <span className="week-strip__icons">
-                  {m.runs.length > 0 || (m.sessions.length > 0 && m.sessions.every((s) => isTickedSession(s.kind) && doneOf(s))) ? (
+                  {m.runs.length > 0 || (m.sessions.length > 0 && m.sessions.every((s) => sessionState(s, m.state, doneOf) === "done")) ? (
                     <CheckCircle size={14} weight="fill" className="success" />
                   ) : kinds.length ? (
                     kinds.map((k) => {
