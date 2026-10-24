@@ -214,9 +214,19 @@ describe("current week and past races", () => {
     const plan = generatePlan(hist, schedule, { name: "r", day: TODAY + 120, expectedHours: 6 }, TODAY, { ...OPTIONS, includeCurrentWeek: true });
     const first = plan.weeks[0];
     expect(first.start).toBe(19996);
-    for (const x of first.sessions) expect(x.day).toBeGreaterThanOrEqual(TODAY);
+    for (const x of first.sessions) if (x.kind !== "strength") expect(x.day).toBeGreaterThanOrEqual(TODAY);
     const done = hist.filter((r) => r.day >= 19996).reduce((a, r) => a + r.movingMin, 0);
     expect(first.plannedMinutes).toBeLessThanOrEqual(300 - done + 1e-6);
+  });
+
+  it("keeps this week's strength days when re-planned mid-week", () => {
+    const race = { name: "r", day: TODAY + 120, expectedHours: 6 };
+    const strengthDays = (today: number) =>
+      generatePlan(hist.filter((r) => r.day < today), schedule, race, today, { ...OPTIONS, strengthSessions: 2, includeCurrentWeek: true })
+        .weeks[0].sessions.filter((x) => x.kind === "strength").map((x) => x.day);
+    const fromMonday = strengthDays(19996);
+    expect(fromMonday.some((d) => d < TODAY)).toBe(true);
+    expect(strengthDays(TODAY)).toEqual(fromMonday);
   });
 
   it("returns an empty plan for a race already run, and attaches allowances", () => {

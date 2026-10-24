@@ -598,8 +598,9 @@ function planWeek(
   if (phase === "race") {
     out.push({ day: race.day, kind: "race", minutes: race.expectedHours * 60, distanceKm: 0, mechanical: 0, descentM: race.descentM ?? 0, steepDescentM: race.steepDescentM ?? 0 });
   }
-  const slots = [...availability]
-    .filter((s) => (phase !== "race" || start + s.weekday < race.day - 1) && start + s.weekday >= state.fromDay)
+  const weekSlots = availability.filter((s) => phase !== "race" || start + s.weekday < race.day - 1);
+  const slots = weekSlots
+    .filter((s) => start + s.weekday >= state.fromDay)
     .sort((a, b) => (a.weekday === longRunWeekday ? -1 : b.weekday === longRunWeekday ? 1 : b.minutes - a.minutes));
 
   // Strength first: as many sessions as the phase wants (strengthFocuses),
@@ -607,6 +608,9 @@ function planWeek(
   // week. Outside the budget (the default) it can go on any such day;
   // inside it, only on slot days, and it takes slot time. The focus of
   // each is set at the end, once it's known whether the week has a hike.
+  // In the current week the days before today keep their sessions, so a
+  // re-plan mid-week doesn't move them and a late one can still be matched
+  // to its planned day (strengthDone.ts).
   const block = strengthBlockOf(state.weeksToRace);
   const isBuild = phase === "base" || phase === "specific";
   const hikeWeek = isBuild && block === "me";
@@ -620,12 +624,11 @@ function planWeek(
   // The taper's one session goes early in the week, away from the race.
   const strengthWeekdays =
     phase === "taper"
-      ? strengthDaysOf(slots, longRunWeekday, 7, !!o.strengthCountsInBudget, [dayBeforeNextLong]).slice(0, strengthCount)
-      : strengthDaysOf(slots, longRunWeekday, strengthCount, !!o.strengthCountsInBudget, dayBeforeNextLong >= 0 && dayBeforeNextLong < 7 ? [dayBeforeNextLong] : []);
+      ? strengthDaysOf(weekSlots, longRunWeekday, 7, !!o.strengthCountsInBudget, [dayBeforeNextLong]).slice(0, strengthCount)
+      : strengthDaysOf(weekSlots, longRunWeekday, strengthCount, !!o.strengthCountsInBudget, dayBeforeNextLong >= 0 && dayBeforeNextLong < 7 ? [dayBeforeNextLong] : []);
   const strengthSessions: PlannedSession[] = [];
   const budgetMinutesOn = new Map(strengthWeekdays.map((wd, i) => [wd, minutesOf(budgetFocuses[i])]));
   for (const wd of strengthWeekdays) {
-    if (start + wd < state.fromDay) continue;
     strengthSessions.push({ day: start + wd, kind: "strength", minutes: budgetMinutesOn.get(wd)!, distanceKm: 0, mechanical: 0, descentM: 0, steepDescentM: 0 });
   }
   out.push(...strengthSessions);
@@ -639,7 +642,7 @@ function planWeek(
   let remaining = target;
   // The week's running minutes never exceed the budget, even when a
   // long-run week lets the long run past its own slot.
-  let weekLeft = state.budgetMinutes - (o.strengthCountsInBudget ? strengthSessions.reduce((a, x) => a + x.minutes, 0) : 0);
+  let weekLeft = state.budgetMinutes - (o.strengthCountsInBudget ? strengthSessions.filter((x) => x.day >= state.fromDay).reduce((a, x) => a + x.minutes, 0) : 0);
   if (longSlot) {
     const allow = allowOn(start + longRunWeekday);
     const maxByDistance = (allow.distanceKm / o.speedKmh) * 60;

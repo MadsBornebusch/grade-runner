@@ -25,12 +25,12 @@ describe("planFromSettings", () => {
     expect(planFromSettings([], settings, today, carbs)).toEqual({ blocker: "noHistory" });
   });
 
-  it("plans the current week from today", () => {
+  it("plans the current week's runs from today", () => {
     const out = planFromSettings(history, settings, today, carbs);
     if (!("snapshot" in out)) throw new Error("no plan");
     const first = out.snapshot.plan.weeks[0];
     expect(first.start).toBe(mondayOf(today));
-    expect(first.sessions.every((s) => s.day >= today)).toBe(true);
+    expect(first.sessions.every((s) => s.kind === "strength" || s.day >= today)).toBe(true);
     expect(out.snapshot.generic).toBe(true);
   });
 
