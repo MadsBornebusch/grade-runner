@@ -112,6 +112,15 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
 
   return (
     <>
+      {p.status === "recovering" && (
+        <div className="card empty-state">
+          <h2>Recovering from {race!.name}</h2>
+          <p>Days off, then easy running. Pick your next race when you're ready: its plan starts with what's left of this.</p>
+          <button type="button" className="button-ghost" onClick={() => navigate("race")}>
+            Pick next race
+          </button>
+        </div>
+      )}
       <WeekView
         week={week}
         weekNumber={index + 1}

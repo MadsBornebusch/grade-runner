@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  restDaysAfter,
   carbTargets, generatePlan, mondayOf, STRENGTH_MINUTES, hikePackPct, rampedFocuses, strengthBlockOf, strengthFocuses, recoveryWeeks, slotsForWeek, steadyBlockMinutes, strengthDaysOf, suggestLongRunMaxMinutes, type HistoryRun, type PlanOptions, type WeeklySchedule,
 } from "./planGenerator";
 import { guardBreaches, referenceAt, runReferences } from "./sessionGuard";
@@ -230,11 +231,46 @@ describe("current week and past races", () => {
   });
 
   it("returns an empty plan for a race already run, and attaches allowances", () => {
-    expect(generatePlan(hist, schedule, { name: "r", day: TODAY - 1, expectedHours: 6 }, TODAY, OPTIONS).status).toBe("racePast");
+    expect(generatePlan(hist, schedule, { name: "r", day: TODAY - 60, expectedHours: 6 }, TODAY, OPTIONS).status).toBe("racePast");
     const plan = generatePlan(hist, schedule, { name: "r", day: TODAY + 120, expectedHours: 6 }, TODAY, OPTIONS);
     const long = plan.weeks.flatMap((w) => w.sessions).find((x) => x.kind === "long")!;
     expect(long.allowance!.movingMin).toBeGreaterThanOrEqual(long.minutes);
     expect(long.allowance!.distanceKm).toBeGreaterThanOrEqual(long.distanceKm);
+  });
+});
+
+describe("after a race", () => {
+  const schedule: WeeklySchedule = { weeklyMinutes: 300, longRunWeekday: 5, longRunMaxMinutes: 180 };
+  // TODAY (day 20000) is a Friday; its Monday is 19996.
+  const hist = history(rng(10), 12, 3, 45, 100).filter((r) => r.day < TODAY);
+  const opts = { ...OPTIONS, strengthSessions: 2, includeCurrentWeek: true };
+
+  it("scales the days off with the race's length", () => {
+    expect([60, 180, 360, 900].map(restDaysAfter)).toEqual([0, 3, 5, 7]);
+  });
+
+  it("plans the goal race's recovery once it's run: days off, then easy weeks, nothing on the days off", () => {
+    // A 6 h race yesterday that hasn't synced: recovered from its expected time.
+    const plan = generatePlan(hist, schedule, { name: "r", day: TODAY - 1, expectedHours: 6 }, TODAY, opts);
+    expect(plan.status).toBe("recovering");
+    expect(plan.weeks.map((w) => w.phase)).toEqual(["recovery", "recovery", "maintenance"]);
+    const restUntil = TODAY - 1 + 1 + restDaysAfter(360);
+    expect(plan.weeks[0].restUntil).toBe(restUntil);
+    expect(plan.weeks[1].restUntil).toBe(restUntil);
+    expect(plan.weeks[2].restUntil).toBeUndefined();
+    const all = plan.weeks.flatMap((w) => w.sessions);
+    for (const x of all) expect(x.day).toBeGreaterThanOrEqual(restUntil);
+    expect(all.some((x) => x.kind === "strength")).toBe(true);
+    expect(all.some((x) => x.kind === "quality" || x.kind === "descent" || x.kind === "hike")).toBe(false);
+  });
+
+  it("counts a confirmed race whatever its size", () => {
+    const race = { name: "r", day: TODAY + 120, expectedHours: 6 };
+    const last = hist.filter((r) => r.movingMin >= 90).at(-1)!;
+    expect(generatePlan(hist, schedule, race, TODAY, opts).weeks[0].phase).not.toBe("recovery");
+    const plan = generatePlan(hist, schedule, race, TODAY, { ...opts, raceDays: [last.day] });
+    expect(plan.weeks[0].phase).toBe("recovery");
+    for (const x of plan.weeks[0].sessions) expect(x.day).toBeGreaterThanOrEqual(last.day + 1 + restDaysAfter(last.movingMin));
   });
 });
 

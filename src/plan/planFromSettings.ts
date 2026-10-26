@@ -43,15 +43,21 @@ export function planInputsKey(settings: PlanSettings, carbs: CarbInputs): string
   // The leading version bumps when the generator's output changes shape,
   // so stored snapshots regenerate.
   return JSON.stringify([
-    6, race.courseId, race.date, race.descentM, race.steepDescentM, race.expectedHoursOverride && roundedExpectedHours(race.expectedHoursOverride),
-    settings.schedule, settings.longRunMoves, carbs.raceGPerH, settings.carbsStartGPerH, settings.strengthStartedOn,
+    7, race.courseId, race.date, race.descentM, race.steepDescentM, race.expectedHoursOverride && roundedExpectedHours(race.expectedHoursOverride),
+    settings.schedule, settings.longRunMoves, carbs.raceGPerH, settings.carbsStartGPerH, settings.strengthStartedOn, settings.pastGoalRaces,
   ]);
 }
 
-/** Re-plan only on a new week, changed inputs, or no snapshot: a sync
- * during the week keeps the current week as it is. */
+/** Re-plan only on a new week, changed inputs, no snapshot, or the goal
+ * race just run (its days off start at once): a sync during the week
+ * otherwise keeps the current week as it is. */
 export function needsReplan(snapshot: PlanSnapshot | null, today: number, inputsKey: string): boolean {
-  return !snapshot || snapshot.weekOf !== mondayOf(today) || snapshot.inputsKey !== inputsKey;
+  return (
+    !snapshot ||
+    snapshot.weekOf !== mondayOf(today) ||
+    snapshot.inputsKey !== inputsKey ||
+    (snapshot.plan.status === "ok" && snapshot.plan.weeks.some((w) => w.sessions.some((s) => s.kind === "race" && s.day < today)))
+  );
 }
 
 export function scheduleFromSettings(settings: PlanSettings, expectedHours: number): WeeklySchedule {
@@ -71,6 +77,8 @@ export function planFromSettings(
   settings: PlanSettings,
   today: number,
   carbs: CarbInputs,
+  /** Runs the athlete confirmed as races (StoredRun.raceTag). */
+  raceRunIds: ReadonlySet<string> = new Set(),
 ): { snapshot: PlanSnapshot } | { blocker: PlanBlocker } {
   const race = settings.goalRace;
   if (!race) return { blocker: "noRace" };
@@ -98,6 +106,11 @@ export function planFromSettings(
       strengthLevel: strengthRampLevel(settings.strengthStartedOn, [...Object.keys(settings.strengthDone), ...Object.keys(settings.strengthFromStrava)], today),
       carbs: { raceGPerH: carbs.raceGPerH, startGPerH: carbs.startGPerH },
       includeCurrentWeek: true,
+      raceDays: [
+        dayNumberOf(race.date),
+        ...settings.pastGoalRaces.map(dayNumberOf),
+        ...history.filter((r) => raceRunIds.has(r.runId)).map((r) => r.day),
+      ],
     },
   );
   return { snapshot: { version: 1, generatedOn: today, weekOf: mondayOf(today), inputsKey, generic: usesGenericPlanOptions(past), plan } };

@@ -4010,6 +4010,18 @@ goes in `src/plan/`.
      check against primary sources on post-ultra recovery before building.
      Descent and long-run length restart from the post-race spike reference
      above, not from the race.
+     *Built 2026-10-26 (user request: a forced break, then a gradual return):*
+     days with no running and no strength after the race (restDaysAfter:
+     none under 90 min, 3 days to 4 h, 5 to 10 h, 7 beyond; an assumption
+     from Millet et al. 2011, where nerve and muscle function after a 166 km
+     mountain ultra were mostly back by day 9 and fully by day 16, and the
+     clinical advice of at least 3 days off after a marathon), then the easy
+     and maintenance weeks. A race is a 2x spike, a run the athlete
+     confirmed as a race, or a run on a goal race's date (also earlier goal
+     races, kept when the next is set), whatever its size. After the goal
+     race the plan is its recovery only ("recovering"), and it re-plans the
+     day after the race so the days off show at once. Recovery weeks with no
+     strength still fade the strength ramp.
    - *Re-planning*: after every synced activity. When actual load stays below
      plan for two or more weeks, say so and offer a lower-ramp plan instead
      of silently repeating the same week (weakness 5).

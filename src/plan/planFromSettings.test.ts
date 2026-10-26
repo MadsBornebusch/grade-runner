@@ -57,4 +57,11 @@ describe("needsReplan", () => {
     const own = { ...settings, goalRace: { ...settings.goalRace!, expectedHoursOverride: 7 } };
     expect(needsReplan(snapshot, today, planInputsKey(own, carbs)!)).toBe(true);
   });
+
+  it("re-plans the day after the goal race, so its days off show at once", () => {
+    const raceWeek = { sessions: [{ day: today + 1, kind: "race" }] };
+    const withRace = { ...snapshot, plan: { status: "ok", weeks: [raceWeek] } as never };
+    expect(needsReplan(withRace, today + 1, key)).toBe(false);
+    expect(needsReplan(withRace, today + 2, key)).toBe(true);
+  });
 });

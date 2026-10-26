@@ -184,6 +184,8 @@ function GoalRaceForm({ courses, initial, onDone, canCancel }: { courses: Stored
           },
           // Moves were for the old race's weeks.
           longRunMoves: sameCourse ? s.longRunMoves : {},
+          // A goal race already run still sets the recovery after it.
+          pastGoalRaces: initial && initial.date < todayIso && !s.pastGoalRaces.includes(initial.date) ? [...s.pastGoalRaces, initial.date].slice(-5) : s.pastGoalRaces,
         }));
         onDone();
       }}

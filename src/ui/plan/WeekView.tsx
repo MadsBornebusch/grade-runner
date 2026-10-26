@@ -66,6 +66,7 @@ export function WeekView({ week, weekNumber, weekCount, history, today, doneOf, 
         </div>
         <p className="week-head__explainer">
           {PHASE_EXPLAINER[week.phase]}
+          {week.restUntil && ` No running or strength until ${dayLabel(week.restUntil)}: the days off are part of the plan.`}
           {week.sessions.some((s) => s.kind === "hike") && " A weighted hike builds your legs for the climbs."}
           {week.longRunWeek && week.phase !== "taper" && week.phase !== "race" && " Longer long run this week; the other runs are shorter to fit your hours."}
         </p>
@@ -134,7 +135,7 @@ export function WeekView({ week, weekNumber, weekCount, history, today, doneOf, 
                     </span>
                   </div>
                 ))}
-              {empty && <RestRow text={d.day < today ? "Rest" : "Rest day"} />}
+              {empty && <RestRow text={week.restUntil && d.day < week.restUntil ? "Day off after the race" : d.day < today ? "Rest" : "Rest day"} />}
             </li>
           );
         })}

@@ -50,6 +50,7 @@ export function usePlan(formInputs: FormInputs, pausePrediction = false): PlanSt
   const logs = fuelLogStore.use().byRunId;
   const [history, setHistory] = useState<DatedHistoryRun[] | null>(null);
   const [runNames, setRunNames] = useState(new Map<string, string>());
+  const [raceRunIds, setRaceRunIds] = useState<ReadonlySet<string>>(new Set());
   const [progress, setProgress] = useState<PlanState["progress"]>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [predicting, setPredicting] = useState(false);
@@ -74,6 +75,7 @@ export function usePlan(formInputs: FormInputs, pausePrediction = false): PlanSt
       .then((runs) => {
         if (cancelled) return null;
         setRunNames(new Map(runs.map((r) => [r.id, r.name])));
+        setRaceRunIds(new Set(runs.filter((r) => r.raceTag === "race").map((r) => r.id)));
         return buildHistory(runs, TIME_ZONE, (done, total) => !cancelled && setProgress({ done, total }));
       })
       .then((h) => {
@@ -135,14 +137,14 @@ export function usePlan(formInputs: FormInputs, pausePrediction = false): PlanSt
       }
       // A generator failure shows as a card; it must not take the app down.
       try {
-        const out = planFromSettings(history, settings, today, carbs);
+        const out = planFromSettings(history, settings, today, carbs, raceRunIds);
         if ("snapshot" in out) planSnapshotStore.set({ version: 1, snapshot: out.snapshot });
         setPlanError(null);
       } catch (err) {
         setPlanError(err instanceof Error ? err.message : String(err));
       }
     },
-    [history, settings, carbs, snapshot, today],
+    [history, settings, carbs, snapshot, today, raceRunIds],
   );
 
   useEffect(() => generate(false), [generate]);

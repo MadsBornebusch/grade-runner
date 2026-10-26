@@ -100,7 +100,15 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
       {header}
       {raceLine}
 
-      {todays.length === 0 ? (
+      {todays.length === 0 && week?.restUntil && today < week.restUntil ? (
+        <div className="card hero-rest">
+          <Moon size={28} weight="duotone" aria-hidden="true" />
+          <div>
+            <h2>Day off</h2>
+            <p>Your legs are recovering from the race, even if they feel fine. No running or strength until {dayName(week.restUntil)}; walking is good.</p>
+          </div>
+        </div>
+      ) : todays.length === 0 ? (
         <div className="card hero-rest">
           <Moon size={28} weight="duotone" aria-hidden="true" />
           <div>
