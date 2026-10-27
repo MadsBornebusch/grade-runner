@@ -10,6 +10,15 @@
 import type { GpxPoint } from "../gpx/pipeline";
 import type { ValhallaSurfaceEdge } from "../model/surfaceExposure";
 
+/** One lap of a treadmill run, with the grade the athlete entered. */
+export interface TreadmillLap {
+  /** Belt distance, m. */
+  distanceM: number;
+  movingS: number;
+  /** Incline, % (negative for a decline). */
+  gradePct: number;
+}
+
 export interface StoredRun {
   id: string;
   name: string;
@@ -99,6 +108,11 @@ export interface StoredRun {
    * shown for tagging but not yet included either way).
    */
   raceTag?: "race" | "notRace";
+  /** Indoor (treadmill): Strava's trainer flag, or no GPS stream. */
+  indoor?: boolean;
+  /** A treadmill run's laps with their grades, entered on the Runs tab:
+   * its climb, descent and load come from these (historyFromRuns.ts). */
+  treadmillLaps?: TreadmillLap[];
 }
 
 export interface StravaRunSummaryInput {
@@ -110,6 +124,7 @@ export interface StravaRunSummaryInput {
   elevationGainM: number;
   avgHeartRate: number | null;
   avgWatts: number | null;
+  indoor?: boolean;
 }
 
 const DB_NAME = "grade-runner";
@@ -162,7 +177,10 @@ export async function upsertStoredRunSummary(summary: StravaRunSummaryInput): Pr
     const getReq = store.get(id);
     getReq.onsuccess = () => {
       const existing = getReq.result as StoredRun | undefined;
+      // Keeps what the app added to the row (race tag, fetch marks, lap
+      // grades) when a summary is synced again.
       const run: StoredRun = {
+        ...existing,
         id,
         name: summary.name,
         addedAt: existing?.addedAt ?? Date.now(),
@@ -174,6 +192,7 @@ export async function upsertStoredRunSummary(summary: StravaRunSummaryInput): Pr
         elevationGainM: summary.elevationGainM,
         avgHeartRate: summary.avgHeartRate,
         avgWatts: summary.avgWatts,
+        indoor: summary.indoor || existing?.indoor || undefined,
       };
       store.put(run);
     };
@@ -287,6 +306,22 @@ export async function setStoredRunRaceTags(tags: { id: string; raceTag: "race" |
   });
 }
 
+/** Saves a treadmill run's laps and grades. */
+export async function setStoredRunTreadmillLaps(id: string, laps: TreadmillLap[]): Promise<void> {
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const getReq = store.get(id);
+    getReq.onsuccess = () => {
+      const existing = getReq.result as StoredRun | undefined;
+      if (existing) store.put({ ...existing, treadmillLaps: laps });
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 export async function listStoredRuns(): Promise<StoredRun[]> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
@@ -328,7 +363,7 @@ export async function clearStoredRuns(): Promise<void> {
  * the two stay consistent. */
 export const PERMANENT_FETCH_FAILURE_COUNT = 3;
 
-export async function recordRunFetchFailure(id: string, permanent = false): Promise<void> {
+export async function recordRunFetchFailure(id: string, permanent = false, indoor = false): Promise<void> {
   const db = await openDb();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite");
@@ -349,6 +384,7 @@ export async function recordRunFetchFailure(id: string, permanent = false): Prom
             ? PERMANENT_FETCH_FAILURE_COUNT
             : (existing.fetchFailureCount ?? 0) + 1,
           lastFetchFailureAt: Date.now(),
+          ...(indoor ? { indoor: true } : {}),
         });
       }
     };

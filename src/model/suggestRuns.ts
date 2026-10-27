@@ -272,6 +272,15 @@ export function selectRecentForPlanIds(runs: StoredRun[], now: number, days = PL
     .map((r) => r.id);
 }
 
+/** Summary-only Strava runs that look indoor: Strava's trainer flag, no
+ * GPS stream, or no elevation gain at all. */
+export function treadmillCandidates(runs: StoredRun[], now: number): StoredRun[] {
+  const since = now - PLAN_FULL_DATA_DAYS * 864e5;
+  return runs
+    .filter((r) => r.points === null && r.stravaId !== undefined && r.date && Date.parse(r.date) >= since && (r.indoor || !r.elevationGainM))
+    .sort((a, b) => Date.parse(b.date!) - Date.parse(a.date!));
+}
+
 /** Marked for a full-data fetch (either reason) and not downloaded yet. */
 export const awaitsFullData = (r: StoredRun) => (!!r.wantsFullData || !!r.fullDataForPlan) && r.points === null;
 

@@ -3,6 +3,7 @@ import type { SurfaceCategory } from "../gpx/pipeline";
 import { runPipeline } from "../gpx/pipeline";
 import { analyzeRun } from "../model/analysis";
 import { awaitsFullData, DURABILITY_MIN_DURATION_S, inModelFit } from "../model/suggestRuns";
+import { TreadmillRuns } from "./TreadmillRuns";
 import { DEFAULT_HALF_LIFE_DAYS, loadLastFitAt, markNewFetchCandidates, saveFitInputsKeyAfterManualFit } from "./modelRefresh";
 import { dedupeStoredRuns } from "../model/dedupeRuns";
 import { splitAtTransitGaps } from "../gpx/transitGap";
@@ -627,6 +628,8 @@ export function RunLibraryPanel({
           </div>
         </section>
       )}
+
+      <TreadmillRuns runs={dedupedRuns} onSaved={refresh} />
 
       {vo2MaxEstimates.length > 0 && (
         <section>

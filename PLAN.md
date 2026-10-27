@@ -4620,6 +4620,12 @@ carry a grade per lap.
   week's limits. A run that goes more than max(100 m, 25%) past its day's
   planned descent or climb re-plans the rest of the week (needsReplan),
   the morning after: the generator reads runs before today only.
+- **Treadmill grades.** Lap the watch at each grade change; the Runs tab
+  lists indoor runs of the last 90 days (Strava's trainer flag, no GPS
+  stream, or no gain) and fetches a run's laps on request (one call,
+  api/strava/laps.ts) to enter a grade per lap. Climb and descent are
+  d g / sqrt(1 + g^2) per lap of belt distance d; the load is runningImpact
+  on one segment per lap. Laps without a grade count as flat.
 
 ### Strength sessions and the weighted hike (built 2026-10-23)
 

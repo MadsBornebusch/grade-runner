@@ -2241,3 +2241,14 @@ a.button-ghost {
 .exercise-list__name { font-weight: var(--fw-semibold); }
 .exercise-list__dose { color: var(--kind-strength-ink); font-weight: var(--fw-semibold); white-space: nowrap; }
 .exercise-list__note { grid-column: 1 / -1; color: var(--text-muted); font-size: var(--fs-sm); }
+
+.lap-grades {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4) var(--sp-4);
+}
+
+.lap-grades input {
+  width: 4.5em;
+}

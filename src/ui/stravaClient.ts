@@ -28,6 +28,14 @@ export class StravaFetchError extends Error {
  * one-off import (StravaImport) and to lazily upgrade a summary-only
  * backfilled run (RunLibraryPanel) the first time it's actually selected
  * for a fit. */
+/** An activity's laps: belt distance and moving time of each. */
+export async function fetchStravaLaps(stravaId: number): Promise<{ distanceM: number; movingS: number }[]> {
+  const res = await fetch(`/api/strava/laps?id=${stravaId}`);
+  const body = await res.json();
+  if (!res.ok) throw new StravaFetchError(body.error ?? "Failed to fetch laps from Strava.", res.status);
+  return body.laps;
+}
+
 export async function fetchStravaActivity(stravaId: number): Promise<{ name: string; points: GpxPoint[] }> {
   const res = await fetch(`/api/strava/activity?id=${stravaId}`);
   const body = await res.json();

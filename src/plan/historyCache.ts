@@ -13,7 +13,7 @@ const CHUNK = 8;
 type Cache = { version: number; timeZone: string; byKey: Record<string, DatedHistoryRun | null> };
 
 const keyOf = (run: StoredRun) =>
-  `${run.id}:${run.points ? `p${run.points.length}` : "s"}:${run.durationS ?? ""}:${run.distanceKm ?? ""}`;
+  `${run.id}:${run.points ? `p${run.points.length}` : "s"}:${run.durationS ?? ""}:${run.distanceKm ?? ""}:${run.treadmillLaps?.map((l) => l.gradePct).join("/") ?? ""}`;
 
 function readCache(timeZone: string): Cache {
   try {

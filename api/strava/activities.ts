@@ -13,6 +13,8 @@ interface StravaActivitySummary {
   total_elevation_gain: number;
   average_heartrate?: number;
   average_watts?: number;
+  /** Indoor: a treadmill or trainer. */
+  trainer?: boolean;
 }
 
 const RUN_SPORT_TYPES = new Set(["Run", "TrailRun", "VirtualRun"]);
@@ -56,6 +58,7 @@ export default handleErrors(async (req: IncomingMessage, res: ServerResponse) =>
       elevationGainM: a.total_elevation_gain,
       avgHeartRate: a.average_heartrate ?? null,
       avgWatts: a.average_watts ?? null,
+      indoor: a.trainer || a.sport_type === "VirtualRun",
     }));
   // The athlete's local calendar day, which is what the plan is laid out in.
   const strength = activities

@@ -6,10 +6,10 @@
 // Mechanical load needs no physiology, so nothing here depends on the
 // athlete's settings.
 
-import { runPipeline } from "../gpx/pipeline";
-import { descentMeters, steepDescentMeters } from "../model/descentImpact";
+import { runPipeline, type CourseSegment } from "../gpx/pipeline";
+import { descentMeters, STEEP_DESCENT_GRADE, steepDescentMeters } from "../model/descentImpact";
 import { runningImpact } from "../model/runningImpact";
-import type { StoredRun } from "../storage/runLibrary";
+import type { StoredRun, TreadmillLap } from "../storage/runLibrary";
 import { activityLoadFromSummary, localDateKey } from "./loadLedger";
 import type { HistoryRun, PlanOptions } from "./planGenerator";
 
@@ -17,7 +17,8 @@ export interface DatedHistoryRun extends HistoryRun {
   /** Local date, YYYY-MM-DD. */
   date: string;
   runId: string;
-  source: "points" | "summary";
+  /** "laps": a treadmill run with its lap grades entered. */
+  source: "points" | "summary" | "laps";
 }
 
 export const dayNumberOf = (date: string) => Date.parse(`${date}T00:00:00Z`) / 864e5;
@@ -37,6 +38,7 @@ export function historyRunFromStored(run: StoredRun, timeZone: string): DatedHis
   const gain = run.elevationGainM ?? course?.totalElevationGain ?? 0;
   const summary = activityLoadFromSummary({ activityId: run.id, date, distanceKm, elevationGainM: gain, movingS, thresholdGrossPowerWPerKg: 15 });
   const base = { day: dayNumberOf(date), date, runId: run.id, movingMin: movingS / 60, distanceKm };
+  if (!course && run.treadmillLaps?.length) return { ...base, ...treadmillLoad(run.treadmillLaps), source: "laps" };
   if (course?.hasElevation) {
     const mechanical = runningImpact(course.segments);
     if (!(summary.mechanical > 0 && mechanical / summary.mechanical > 1.5)) {
@@ -44,6 +46,37 @@ export function historyRunFromStored(run: StoredRun, timeZone: string): DatedHis
     }
   }
   return { ...base, mechanical: summary.mechanical, descentM: summary.descentM, steepDescentM: summary.steepDescentM, climbM: gain, source: "summary" };
+}
+
+/**
+ * Climb, descent and load of a treadmill run from its laps' grades. The
+ * belt measures along-slope distance, so a lap of d m at grade g rises
+ * d g / sqrt(1 + g^2). The load is runningImpact on one segment per lap
+ * (not runPipeline, whose smoothing would blur the grade changes).
+ */
+export function treadmillLoad(laps: TreadmillLap[]): Pick<HistoryRun, "mechanical" | "descentM" | "steepDescentM" | "climbM"> {
+  let climbM = 0;
+  let descentM = 0;
+  let steepDescentM = 0;
+  let cumulative = 0;
+  let elevation = 0;
+  const segments: CourseSegment[] = laps.map((lap, index) => {
+    const g = lap.gradePct / 100;
+    const horizontal = lap.distanceM / Math.sqrt(1 + g * g);
+    const rise = horizontal * g;
+    if (rise > 0) climbM += rise;
+    else {
+      descentM -= rise;
+      if (g < STEEP_DESCENT_GRADE) steepDescentM -= rise;
+    }
+    cumulative += lap.distanceM;
+    elevation += rise;
+    return {
+      index, cumulativeDistance3D: cumulative, distanceHorizontal: horizontal, distance3D: lap.distanceM, elevation, gradient: g,
+      time: null, dtS: lap.movingS, paused: false, heartRateBpm: null, powerWatts: null,
+    };
+  });
+  return { mechanical: runningImpact(segments), descentM, steepDescentM, climbM };
 }
 
 /** Typical values for a generic athlete, used until enough runs have points. */

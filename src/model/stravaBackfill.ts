@@ -14,6 +14,7 @@ export interface StravaRunSummaryDTO {
   elevationGainM: number;
   avgHeartRate: number | null;
   avgWatts: number | null;
+  indoor?: boolean;
 }
 
 export interface StravaStrengthDTO {
@@ -67,5 +68,6 @@ export function toStoredRunSummaryInput(run: StravaRunSummaryDTO): StravaRunSumm
     elevationGainM: run.elevationGainM,
     avgHeartRate: run.avgHeartRate,
     avgWatts: run.avgWatts,
+    indoor: run.indoor,
   };
 }

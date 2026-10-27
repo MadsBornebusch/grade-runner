@@ -73,7 +73,8 @@ export async function ensurePointsForRun(run: StoredRun): Promise<GpxPoint[]> {
     await setStoredRunPoints(run.id, points);
     return points;
   } catch (err) {
-    await recordRunFetchFailure(run.id, isPermanentFetchFailure(err));
+    // 422 is no GPS stream: an indoor run, which can take lap grades.
+    await recordRunFetchFailure(run.id, isPermanentFetchFailure(err), err instanceof StravaFetchError && err.status === 422);
     throw err;
   }
 }
