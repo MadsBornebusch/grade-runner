@@ -52,6 +52,13 @@ export interface StoredRun {
    */
   wantsFullData?: boolean;
   /**
+   * Marked for a full-data fetch because it's recent (suggestRuns.ts
+   * selectRecentForPlanIds), for the training plan's load and descent:
+   * outside AUTO_FETCH_TOTAL_CAP, and kept out of the model fit unless it
+   * is also a fit pick or a confirmed race (inModelFit).
+   */
+  fullDataForPlan?: boolean;
+  /**
    * Set once, after this run's full data has been downloaded and checked
    * against the VO2max estimate's own duration window (see
    * vo2MaxEstimate.ts's isEstimableEffort) -- true if at least one of its
@@ -219,7 +226,7 @@ export async function setStoredRunSurfaceEdges(id: string, surfaceEdges: Valhall
  * fetch -- one transaction, not one per id. Silently skips any id that
  * isn't actually present (e.g. deleted as a duplicate between being
  * suggested and marked) rather than failing the whole batch over it. */
-export async function markRunsWantedForFetch(ids: string[]): Promise<void> {
+export async function markRunsWantedForFetch(ids: string[], flag: "wantsFullData" | "fullDataForPlan" = "wantsFullData"): Promise<void> {
   if (ids.length === 0) return;
   const db = await openDb();
   await new Promise<void>((resolve, reject) => {
@@ -229,7 +236,7 @@ export async function markRunsWantedForFetch(ids: string[]): Promise<void> {
       const getReq = store.get(id);
       getReq.onsuccess = () => {
         const existing = getReq.result as StoredRun | undefined;
-        if (existing) store.put({ ...existing, wantsFullData: true });
+        if (existing) store.put({ ...existing, [flag]: true });
       };
     }
     tx.oncomplete = () => resolve();

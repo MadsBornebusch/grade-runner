@@ -14,4 +14,11 @@ describe("fitInputsKey", () => {
     expect(fitInputsKey([run("a", true), run("b", true)])).not.toBe(base);
     expect(fitInputsKey([run("a", true, "race"), run("b", false)])).not.toBe(base);
   });
+
+  it("leaves out runs downloaded only for the plan, unless they're races or fit picks", () => {
+    const base = fitInputsKey([run("a", true)]);
+    expect(fitInputsKey([run("a", true), { ...run("p", true), fullDataForPlan: true }])).toBe(base);
+    expect(fitInputsKey([run("a", true), { ...run("p", true, "race"), fullDataForPlan: true }])).not.toBe(base);
+    expect(fitInputsKey([run("a", true), { ...run("p", true), fullDataForPlan: true, wantsFullData: true }])).not.toBe(base);
+  });
 });

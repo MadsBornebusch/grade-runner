@@ -259,6 +259,27 @@ function interleave<T>(lists: T[][]): T[] {
  * a SUGGESTION and never a gate, and confirming a race in the UI fetches
  * that run immediately, ahead of this speculative batch entirely.
  */
+/** Days back that every run gets full data, for the plan's 30- and 90-day
+ * load and descent references (planGenerator.ts, sessionGuard.ts). */
+export const PLAN_FULL_DATA_DAYS = 90;
+
+/** Summary-only Strava runs from the last PLAN_FULL_DATA_DAYS not yet
+ * marked for any fetch. */
+export function selectRecentForPlanIds(runs: StoredRun[], now: number, days = PLAN_FULL_DATA_DAYS): string[] {
+  const since = now - days * 864e5;
+  return runs
+    .filter((r) => r.points === null && r.stravaId !== undefined && !r.wantsFullData && !r.fullDataForPlan && r.date && Date.parse(r.date) >= since)
+    .map((r) => r.id);
+}
+
+/** Marked for a full-data fetch (either reason) and not downloaded yet. */
+export const awaitsFullData = (r: StoredRun) => (!!r.wantsFullData || !!r.fullDataForPlan) && r.points === null;
+
+/** Whether a run with full data feeds the model fit: everything except
+ * runs downloaded only for the plan, unless they are fit picks or races. */
+export const inModelFit = (r: Pick<StoredRun, "fullDataForPlan" | "wantsFullData" | "raceTag">) =>
+  !r.fullDataForPlan || !!r.wantsFullData || r.raceTag === "race";
+
 export function selectFetchCandidateIds(
   runs: StoredRun[],
   totalCap: number,

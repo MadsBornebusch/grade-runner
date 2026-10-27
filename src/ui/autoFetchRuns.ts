@@ -180,17 +180,17 @@ export async function runAutoFetchBatch(pending: StoredRun[], onDone: () => void
   const realFailures = failures - skippedNoGps;
   let error: string | null = null;
   if (rateLimited) {
-    error = `Fetched ${fetched} of ${total} recommended runs -- Strava's rate limit kicked in. Paused; retries automatically in about 15 minutes.`;
+    error = `Fetched ${fetched} of ${total} runs -- Strava's rate limit kicked in. Paused; retries automatically in about 15 minutes.`;
   } else if (sessionExpired) {
     error = "Your Strava session expired. Reconnect Strava in Runs, then this will pick up where it left off.";
   } else if (realFailures > 0) {
     const noGpsNote = skippedNoGps > 0 ? `, and skipped ${skippedNoGps} with no GPS data` : "";
-    error = `Fetched ${fetched} of ${total} recommended runs -- ${realFailures} failed${noGpsNote}. Try again shortly.`;
+    error = `Fetched ${fetched} of ${total} runs -- ${realFailures} failed${noGpsNote}. Try again shortly.`;
   } else if (skippedNoGps > 0) {
     // Not an error at all: indoor runs and strength sessions have nothing
     // to download. Saying so beats the old "N failed. Try again shortly",
     // which invited a retry that could never do anything.
-    error = `Fetched ${fetched} of ${total} recommended runs -- skipped ${skippedNoGps} with no GPS data (indoor or strength sessions). Nothing to retry.`;
+    error = `Fetched ${fetched} of ${total} runs -- skipped ${skippedNoGps} with no GPS data (indoor or strength sessions). Nothing to retry.`;
   }
 
   setStatus({ running: false, progress: null, error });

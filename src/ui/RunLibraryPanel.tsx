@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { SurfaceCategory } from "../gpx/pipeline";
 import { runPipeline } from "../gpx/pipeline";
 import { analyzeRun } from "../model/analysis";
-import { DURABILITY_MIN_DURATION_S } from "../model/suggestRuns";
+import { awaitsFullData, DURABILITY_MIN_DURATION_S, inModelFit } from "../model/suggestRuns";
 import { DEFAULT_HALF_LIFE_DAYS, loadLastFitAt, markNewFetchCandidates, saveFitInputsKeyAfterManualFit } from "./modelRefresh";
 import { dedupeStoredRuns } from "../model/dedupeRuns";
 import { splitAtTransitGaps } from "../gpx/transitGap";
@@ -436,7 +436,8 @@ export function RunLibraryPanel({
     // fetched via the suggestions below or a direct import. Candidates
     // themselves are still filtered by duration inside runFitBatch
     // (DURABILITY_MIN_DURATION_S) before actually feeding the pooled fits.
-    const readyRuns = dedupedRuns.filter((r) => r.points !== null);
+    // Runs downloaded only for the plan stay out (inModelFit).
+    const readyRuns = dedupedRuns.filter((r) => r.points !== null && inModelFit(r));
     setError(null);
     void runFitBatch(readyRuns, formInputs, ceilingParams, halfLifeDays, {
       onApplySurfaceCostMultipliers,
@@ -470,7 +471,7 @@ export function RunLibraryPanel({
   // the auto batch (see autoFetchRuns.ts) -- without it, a run that can
   // never produce points is re-queued on every single app launch.
   const pendingFetchRuns = useMemo(
-    () => dedupedRuns.filter((r) => r.wantsFullData && r.points === null && isDueForFetch(r)),
+    () => dedupedRuns.filter((r) => awaitsFullData(r) && isDueForFetch(r)),
     [dedupedRuns],
   );
   // A plain string, not the array itself, so the effect below only kicks
@@ -518,7 +519,7 @@ export function RunLibraryPanel({
     : backfillStatus.running
       ? "Checking Strava for new runs…"
       : autoFetchStatus.running
-        ? `Downloading GPS for useful runs${autoFetchStatus.progress ? ` (${autoFetchStatus.progress.done} of ${autoFetchStatus.progress.total})` : ""}…`
+        ? `Downloading full data for runs${autoFetchStatus.progress ? ` (${autoFetchStatus.progress.done} of ${autoFetchStatus.progress.total})` : ""}…`
         : pendingFetchRuns.length > 0
           ? `${pendingFetchRuns.length} run${pendingFetchRuns.length === 1 ? "" : "s"} waiting to download.`
           : fittedAt
@@ -547,7 +548,7 @@ export function RunLibraryPanel({
           <div className="form-row">
             <span className="num">
               {dedupedRuns.length} run{dedupedRuns.length === 1 ? "" : "s"}
-              <span className="muted"> · {readyCount} with GPS</span>
+              <span className="muted"> · {readyCount} with full data</span>
             </span>
             {stravaConnected && (
               <button type="button" className="button-ghost" onClick={runBackfill} disabled={backfillStatus.running}>

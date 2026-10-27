@@ -40,6 +40,6 @@ export function planWarnings(plan: Plan, expectedHours: number, generic: boolean
   if (best && plan.projectedChronicAtRace < 0.9 * best.chronicBefore) {
     out.push({ text: `On race day you'll be a bit less trained than before ${raceLabel(best.day)}. More hours, or a later race, would close the gap.`, action: "schedule" });
   }
-  if (generic) out.push({ text: "Using typical pace and climb values until 20 of your runs with GPS data have synced." });
+  if (generic) out.push({ text: "Using typical pace and climb values until 20 of your runs with full data have synced." });
   return out;
 }

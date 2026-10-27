@@ -5,7 +5,7 @@
 // runFitBatch.ts, so it keeps going across tab switches.
 
 import { dedupeStoredRuns } from "../model/dedupeRuns";
-import { selectFetchCandidateIds } from "../model/suggestRuns";
+import { awaitsFullData, inModelFit, selectFetchCandidateIds, selectRecentForPlanIds } from "../model/suggestRuns";
 import { listStoredRuns, markRunsWantedForFetch, type StoredRun } from "../storage/runLibrary";
 import { getAutoFetchStatus, isDueForFetch, runAutoFetchBatch, subscribeToAutoFetch } from "./autoFetchRuns";
 import { resolveCeilingParams, type FormInputs } from "./formInputs";
@@ -61,13 +61,16 @@ export async function markNewFetchCandidates(): Promise<void> {
   const { kept } = dedupeStoredRuns(await listStoredRuns());
   const candidateIds = selectFetchCandidateIds(kept, AUTO_FETCH_TOTAL_CAP, AUTO_FETCH_CANDIDATE_COUNT);
   if (candidateIds.length > 0) await markRunsWantedForFetch(candidateIds);
+  // Every recent run too, for the plan (outside the cap above).
+  const recentIds = selectRecentForPlanIds(dedupeStoredRuns(await listStoredRuns()).kept, Date.now());
+  if (recentIds.length > 0) await markRunsWantedForFetch(recentIds, "fullDataForPlan");
 }
 
 /** What a fit depends on from the library: the runs with full data and
  * their race tags. Re-listing the same runs gives the same key. */
-export function fitInputsKey(runs: Pick<StoredRun, "id" | "points" | "raceTag">[]): string {
+export function fitInputsKey(runs: Pick<StoredRun, "id" | "points" | "raceTag" | "fullDataForPlan" | "wantsFullData">[]): string {
   return runs
-    .filter((r) => r.points !== null)
+    .filter((r) => r.points !== null && inModelFit(r))
     .map((r) => `${r.id}:${r.raceTag ?? ""}`)
     .sort()
     .join(",");
@@ -135,10 +138,10 @@ export async function refreshModel(getFormInputs: () => FormInputs, callbacks: R
   refreshing = true;
   try {
     await markNewFetchCandidates();
-    const pending = dedupeStoredRuns(await listStoredRuns()).kept.filter((r) => r.wantsFullData && r.points === null && isDueForFetch(r));
+    const pending = dedupeStoredRuns(await listStoredRuns()).kept.filter((r) => awaitsFullData(r) && isDueForFetch(r));
     if (pending.length > 0) void runAutoFetchBatch(pending, () => {});
     await autoFetchIdle();
-    const ready = dedupeStoredRuns(await listStoredRuns()).kept.filter((r) => r.points !== null);
+    const ready = dedupeStoredRuns(await listStoredRuns()).kept.filter((r) => r.points !== null && inModelFit(r));
     const key = fitInputsKey(ready);
     if (ready.length === 0 || key === loadFitKey() || getRunFitStatus().running) return;
     const formInputs = getFormInputs();

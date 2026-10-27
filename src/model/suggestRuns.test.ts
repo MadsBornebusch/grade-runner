@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StoredRun } from "../storage/runLibrary";
-import { selectFetchCandidateIds, suggestRunsForFit } from "./suggestRuns";
+import { awaitsFullData, inModelFit, selectFetchCandidateIds, selectRecentForPlanIds, suggestRunsForFit } from "./suggestRuns";
 
 function makeRun(overrides: Partial<StoredRun> = {}): StoredRun {
   return {
@@ -246,5 +246,33 @@ describe("selectFetchCandidateIds", () => {
     const ids = selectFetchCandidateIds(runs, 10, 60);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toHaveLength(10);
+  });
+});
+
+describe("selectRecentForPlanIds", () => {
+  const now = Date.parse("2026-06-01T12:00:00Z");
+  const daysAgo = (d: number) => new Date(now - d * 864e5).toISOString();
+
+  it("marks every summary-only Strava run of the last 90 days, outside the fit cap", () => {
+    const runs = [
+      makeRun({ id: "recent", stravaId: 1, date: daysAgo(10) }),
+      makeRun({ id: "old", stravaId: 2, date: daysAgo(120) }),
+      makeRun({ id: "fetched", stravaId: 3, date: daysAgo(5), points: [] }),
+      makeRun({ id: "picked", stravaId: 4, date: daysAgo(5), wantsFullData: true }),
+      makeRun({ id: "gpx", date: daysAgo(5) }),
+    ];
+    expect(selectRecentForPlanIds(runs, now)).toEqual(["recent"]);
+    // The fit's lifetime cap doesn't count them.
+    const full = Array.from({ length: 10 }, (_, i) => makeRun({ id: `p${i}`, stravaId: 100 + i, fullDataForPlan: true }));
+    expect(selectFetchCandidateIds([...full, makeRun({ id: "x", stravaId: 99, durationS: 1800, avgHeartRate: 170 })], 1)).toEqual(["x"]);
+  });
+
+  it("queues plan-only runs for download but keeps them out of the model fit", () => {
+    const planOnly = makeRun({ id: "p", fullDataForPlan: true });
+    expect(awaitsFullData(planOnly)).toBe(true);
+    expect(awaitsFullData({ ...planOnly, points: [] })).toBe(false);
+    expect(inModelFit(planOnly)).toBe(false);
+    expect(inModelFit({ ...planOnly, raceTag: "race" })).toBe(true);
+    expect(inModelFit(makeRun())).toBe(true);
   });
 });
