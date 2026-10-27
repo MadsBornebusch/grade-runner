@@ -333,6 +333,15 @@ export async function setStoredRunTreadmillLaps(id: string, laps: TreadmillLap[]
   notifyRunEdits();
 }
 
+export async function getStoredRun(id: string): Promise<StoredRun | undefined> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(id);
+    req.onsuccess = () => resolve(req.result as StoredRun | undefined);
+    req.onerror = () => reject(req.error);
+  });
+}
+
 export async function listStoredRuns(): Promise<StoredRun[]> {
   const db = await openDb();
   return new Promise((resolve, reject) => {

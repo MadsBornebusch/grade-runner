@@ -4639,7 +4639,9 @@ carry a grade per lap.
   stream, or no gain) and fetches a run's laps on request (one call,
   api/strava/laps.ts) to enter a grade per lap. Climb and descent are
   d g / sqrt(1 + g^2) per lap of belt distance d; the load is runningImpact
-  on one segment per lap. Laps without a grade count as flat.
+  on one segment per lap. Laps without a grade count as flat. The same editor
+  opens from a done indoor run on Today and Schedule (DoneRunLine), and
+  loads the laps as it opens.
 
 ### Strength sessions and the weighted hike (built 2026-10-23)
 

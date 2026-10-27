@@ -4,6 +4,7 @@ import type { IntensityTargets } from "./intensity";
 import type { DatedHistoryRun } from "../../plan/historyFromRuns";
 import { matchWeek } from "../../plan/matchSessions";
 import type { PlannedSession, PlanWeek } from "../../plan/planGenerator";
+import { DoneRunLine } from "./DoneRunLine";
 import { RestRow, SessionCard } from "./SessionCard";
 import { weekProgress } from "./planViewModel";
 import { PHASE_EXPLAINER, PHASE_LABEL, dayLabel, formatMinutes, formatMinutesExact, shortDate } from "./planCopy";
@@ -130,9 +131,7 @@ export function WeekView({ week, weekNumber, weekCount, history, today, doneOf, 
                 d.runs.map((r) => (
                   <div key={r.runId} className="extra-run">
                     <PersonSimpleRun size={18} weight="duotone" aria-hidden="true" />
-                    <span className="num">
-                      Ran {formatMinutesExact(r.movingMin)} · {r.distanceKm.toFixed(1)} km
-                    </span>
+                    <DoneRunLine run={r} className="extra-run__line" />
                   </div>
                 ))}
               {empty && <RestRow text={week.restUntil && d.day < week.restUntil ? "Day off after the race" : d.day < today ? "Rest" : "Rest day"} />}

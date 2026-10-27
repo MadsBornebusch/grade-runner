@@ -2,7 +2,7 @@
 // grade change, then enter each lap's grade here. The plan then counts the
 // run's climb, descent and load from the laps (historyFromRuns.ts
 // treadmillLoad).
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { treadmillCandidates } from "../model/suggestRuns";
 import { setStoredRunTreadmillLaps, type StoredRun, type TreadmillLap } from "../storage/runLibrary";
 import { fetchStravaLaps } from "./stravaClient";
@@ -53,32 +53,41 @@ function climbOf(laps: TreadmillLap[]): number {
   return laps.reduce((a, l) => a + Math.max(0, (l.distanceM * l.gradePct) / 100 / Math.sqrt(1 + (l.gradePct / 100) ** 2)), 0);
 }
 
-function LapGrades({ run, onSaved }: { run: StoredRun; onSaved: () => void }) {
+/** One run's lap grades: loads its laps from Strava on open (one request)
+ * unless they're already saved. */
+export function LapGrades({ run, onSaved }: { run: StoredRun; onSaved: () => void }) {
   const [laps, setLaps] = useState<{ distanceM: number; movingS: number; grade: string }[] | null>(
     run.treadmillLaps?.map((l) => ({ distanceM: l.distanceM, movingS: l.movingS, grade: String(l.gradePct) })) ?? null,
   );
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (laps) return;
+    let cancelled = false;
+    setError(null);
+    fetchStravaLaps(run.stravaId!)
+      .then((ls) => !cancelled && setLaps(ls.map((l) => ({ ...l, grade: "" }))))
+      .catch((e: Error) => !cancelled && setError(e.message));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run.id, attempt]);
 
   if (!laps) {
     return (
       <div className="lap-grades">
-        {error && <p className="help danger">{error}</p>}
-        <button
-          type="button"
-          className="button-ghost"
-          disabled={loading}
-          onClick={() => {
-            setLoading(true);
-            setError(null);
-            fetchStravaLaps(run.stravaId!)
-              .then((ls) => setLaps(ls.map((l) => ({ ...l, grade: "" }))))
-              .catch((e: Error) => setError(e.message))
-              .finally(() => setLoading(false));
-          }}
-        >
-          {loading ? "Getting laps…" : "Get laps from Strava"}
-        </button>
+        {error ? (
+          <>
+            <p className="help danger">{error}</p>
+            <button type="button" className="button-ghost" onClick={() => setAttempt((a) => a + 1)}>
+              Try again
+            </button>
+          </>
+        ) : (
+          <p className="help">Getting laps from Strava…</p>
+        )}
       </div>
     );
   }

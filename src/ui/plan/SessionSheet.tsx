@@ -1,4 +1,5 @@
 import { Info } from "@phosphor-icons/react";
+import { DoneRunLine } from "./DoneRunLine";
 import type { StrengthDone } from "../../plan/strengthDone";
 import type { DatedHistoryRun } from "../../plan/historyFromRuns";
 import type { PlannedSession } from "../../plan/planGenerator";
@@ -79,10 +80,7 @@ export function SessionSheet({ session: s, runs, raceName, raceGPerH, strengthCo
         <div className="done-block">
           <h3>Done</h3>
           {runs.map((r) => (
-            <p key={r.runId} className="num">
-              Ran {formatMinutesExact(r.movingMin)} · {r.distanceKm.toFixed(1)} km · {r.source === "summary" ? "≈" : ""}
-              {Math.round(r.climbM)} m up, {Math.round(r.descentM)} m down
-            </p>
+            <DoneRunLine key={r.runId} run={r} />
           ))}
         </div>
       ) : s.kind === "strength" ? (

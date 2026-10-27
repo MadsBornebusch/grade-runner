@@ -2252,3 +2252,42 @@ a.button-ghost {
 .lap-grades input {
   width: 4.5em;
 }
+
+.done-run {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-1) var(--sp-3);
+  width: 100%;
+  min-height: var(--tap-min);
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.done-run__action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--brand-ink);
+  font-weight: var(--fw-semibold);
+}
+
+.done-block .lap-grades {
+  padding-inline: 0;
+}
+
+.extra-run:has(.lap-grades) {
+  align-items: flex-start;
+}
+
+.extra-run__line {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
