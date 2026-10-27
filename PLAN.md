@@ -4620,6 +4620,12 @@ carry a grade per lap.
   week's limits. A run that goes more than max(100 m, 25%) past its day's
   planned descent or climb re-plans the rest of the week (needsReplan),
   the morning after: the generator reads runs before today only.
+- **Going over doesn't raise the limits.** A run's descent, steep descent
+  and climb count toward later per-run references only up to its own
+  allowance (runReferences' credited runs); duration and distance count in
+  full. Next week grows from this week's total or its limit, whichever is
+  less; the first plan week from the week before, capped by one level of
+  the same rule.
 - **Treadmill grades.** Lap the watch at each grade change; the Runs tab
   lists indoor runs of the last 90 days (Strava's trainer flag, no GPS
   stream, or no gain) and fetches a run's laps on request (one call,

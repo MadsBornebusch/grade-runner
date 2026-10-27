@@ -43,3 +43,14 @@ describe("sessionAllowance", () => {
     expect(referenceAt([run(0, 200, 25)], 100).movingMin).toBe(0);
   });
 });
+
+describe("credited hill quantities", () => {
+  it("counts a run's descent and climb toward later references only up to its allowance", () => {
+    const runs = [run(0, 60, 10, 200), run(40, 60, 10, 200), run(45, 60, 10, 3000), run(50, 60, 10, 200)];
+    const { reference, credited } = runReferences(runs);
+    expect(credited[2].descentM).toBeCloseTo(sessionAllowance(reference[2]).descentM, 9);
+    expect(credited[2].climbM).toBeCloseTo(sessionAllowance(reference[2]).climbM, 9);
+    expect(credited[2].movingMin).toBe(60);
+    expect(reference[3].descentM).toBeLessThan(400);
+  });
+});

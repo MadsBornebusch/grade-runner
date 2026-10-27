@@ -273,6 +273,22 @@ describe("climb", () => {
   });
 });
 
+describe("overshooting the hills", () => {
+  it("doesn't raise later limits: a 3000 m descent run of normal length counts only to its allowance", () => {
+    const schedule: WeeklySchedule = { weeklyMinutes: 360, longRunWeekday: 5, longRunMaxMinutes: 180 };
+    const base = history(rng(6), 12, 4, 50, 120);
+    const spike = [...base, { day: TODAY - 10, movingMin: 60, distanceKm: 9, descentM: 3000, steepDescentM: 900, climbM: 3000, mechanical: 70 }].sort((a, b) => a.day - b.day);
+    const race = { name: "r", day: TODAY + 150, expectedHours: 6 };
+    const [calm, hilly] = [base, spike].map((h) => generatePlan(h, schedule, race, TODAY, OPTIONS));
+    const week = (p: typeof calm, q: "descentM" | "climbM") => p.weeks[0].sessions.reduce((a, x) => a + x[q], 0);
+    const firstAllow = (p: typeof calm) => p.weeks[0].sessions.find((x) => x.allowance)!.allowance!;
+    for (const q of ["descentM", "climbM"] as const) {
+      expect(firstAllow(hilly)[q]).toBeLessThanOrEqual(1.1 * firstAllow(calm)[q] + 1e-6);
+      expect(week(hilly, q)).toBeLessThanOrEqual(1.1 * 1.1 * Math.max(week(calm, q), firstAllow(calm)[q]) + 1e-6);
+    }
+  });
+});
+
 describe("after a race", () => {
   const schedule: WeeklySchedule = { weeklyMinutes: 300, longRunWeekday: 5, longRunMaxMinutes: 180 };
   // TODAY (day 20000) is a Friday; its Monday is 19996.

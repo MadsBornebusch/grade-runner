@@ -41,19 +41,32 @@ const WINDOW_DAYS = 30;
  * like capSpikes' return window. */
 const RETURN_WINDOW_DAYS = 90;
 
+/** Hill quantities a run counts toward later references only up to its
+ * own allowance (user request, 2026-10-27): a run far past the limit
+ * mustn't raise the next ones. Duration and distance count in full, so
+ * long runs still progress as run. */
+export const CREDITED_QUANTITIES: GuardQuantity[] = ["descentM", "steepDescentM", "climbM"];
+
 /**
  * Each run's reference, from the earlier non-race runs only: per quantity,
  * the biggest of the previous 30 days or half the biggest of the previous
  * 90, whichever is larger. `isRace[i]` says whether run i was itself a race
- * against its reference. Runs must be in time order.
+ * against its reference. `credited[i]` is run i as it counts toward later
+ * references: its hill quantities capped at its own allowance. Runs must
+ * be in time order.
  */
-export function runReferences(runs: GuardRun[]): { reference: RunReference[]; isRace: boolean[] } {
+export function runReferences<R extends GuardRun>(runs: R[]): { reference: RunReference[]; isRace: boolean[]; credited: R[] } {
   const reference: RunReference[] = [];
   const isRace: boolean[] = [];
+  const credited: R[] = [];
   for (let i = 0; i < runs.length; i++) {
-    const ref = referenceAt(runs.slice(0, i).filter((_, j) => !isRace[j]), runs[i].day);
+    const ref = referenceAt(credited.filter((_, j) => !isRace[j]), runs[i].day);
     reference.push(ref);
     const r = runs[i];
+    const allow = sessionAllowance(ref);
+    const c = { ...r };
+    for (const q of CREDITED_QUANTITIES) c[q] = Math.min(r[q], allow[q]);
+    credited.push(c);
     const established = runs[0] !== undefined && r.day - runs[0].day >= WINDOW_DAYS;
     isRace.push(
       established &&
@@ -61,7 +74,7 @@ export function runReferences(runs: GuardRun[]): { reference: RunReference[]; is
           (ref.distanceKm > 0 && r.distanceKm > RACE_MULTIPLE * ref.distanceKm)),
     );
   }
-  return { reference, isRace };
+  return { reference, isRace, credited };
 }
 
 /** The reference on `day` from `nonRaceRuns` (all strictly before it). */
