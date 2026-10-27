@@ -9,7 +9,7 @@ import { listStoredCourses } from "../storage/courseLibrary";
 import { createLocalStore } from "../storage/localStore";
 import { fuelLogStore } from "../storage/fuelLogs";
 import { planSettingsStore } from "../storage/planSettings";
-import { listStoredRuns } from "../storage/runLibrary";
+import { listStoredRuns, subscribeToRunEdits } from "../storage/runLibrary";
 import { getAutoFetchStatus, subscribeToAutoFetch } from "./autoFetchRuns";
 import { getBackfillStatus, subscribeToBackfill } from "./backfillRuns";
 import type { FormInputs } from "./formInputs";
@@ -68,6 +68,9 @@ export function usePlan(formInputs: FormInputs, pausePrediction = false): PlanSt
     if (wasSyncingRef.current && !syncing) setReloadKey((k) => k + 1);
     wasSyncingRef.current = syncing;
   }, [syncing]);
+
+  // And after a race tag or treadmill grades change.
+  useEffect(() => subscribeToRunEdits(() => setReloadKey((k) => k + 1)), []);
 
   useEffect(() => {
     let cancelled = false;

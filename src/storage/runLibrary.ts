@@ -288,6 +288,15 @@ export async function setVo2MaxEstimability(results: { id: string; estimable: bo
 
 /** Same one-transaction batch pattern as setVo2MaxEstimability -- persists a
  * user's race/not-race calls from the tagging list in one write. */
+const changeListeners = new Set<() => void>();
+/** Edits that change the plan's history (race tags, treadmill grades):
+ * usePlan reloads the runs on them. */
+export function subscribeToRunEdits(listener: () => void): () => void {
+  changeListeners.add(listener);
+  return () => changeListeners.delete(listener);
+}
+const notifyRunEdits = () => changeListeners.forEach((l) => l());
+
 export async function setStoredRunRaceTags(tags: { id: string; raceTag: "race" | "notRace" }[]): Promise<void> {
   if (tags.length === 0) return;
   const db = await openDb();
@@ -304,6 +313,7 @@ export async function setStoredRunRaceTags(tags: { id: string; raceTag: "race" |
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
+  notifyRunEdits();
 }
 
 /** Saves a treadmill run's laps and grades. */
@@ -320,6 +330,7 @@ export async function setStoredRunTreadmillLaps(id: string, laps: TreadmillLap[]
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
+  notifyRunEdits();
 }
 
 export async function listStoredRuns(): Promise<StoredRun[]> {
