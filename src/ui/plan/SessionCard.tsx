@@ -23,6 +23,8 @@ export function SessionCard({ session, state, ranMin, hero, targets, onOpen }: S
   const key = session.kind === "long" || session.kind === "race";
   // Runs show a distance; hikes and strength only their time.
   const isRun = session.kind !== "strength" && session.kind !== "race" && session.kind !== "hike";
+  // A hike's hills are its climb.
+  const hills = (isRun && session.descentM >= 50) || (session.kind === "hike" && session.climbM >= 50);
   const focus = session.kind === "strength" && session.strengthFocus ? ` · ${STRENGTH_FOCUS_TITLE[session.strengthFocus]}` : "";
   const cls = [
     "session-card",
@@ -53,7 +55,7 @@ export function SessionCard({ session, state, ranMin, hero, targets, onOpen }: S
             {focus}
           </span>
         )}
-        {(session.descentM >= 50 && isRun) || session.carbsGPerH || effort || session.packPct ? (
+        {hills || session.carbsGPerH || effort || session.packPct ? (
           <span className="session-card__chips">
             {effort && (
               <span className={`chip chip--effort${session.steadyMinutes || session.kind === "quality" ? " chip--effort-up" : ""}`}>
@@ -65,7 +67,7 @@ export function SessionCard({ session, state, ranMin, hero, targets, onOpen }: S
                 <Backpack size={14} /> {session.packPct}% pack
               </span>
             )}
-            {isRun && session.descentM >= 50 && (
+            {hills && (
               <span className="chip chip--descent">
                 <TrendDown size={14} /> {climbDescentText(session.climbM, session.descentM)}
               </span>

@@ -70,7 +70,18 @@ export async function runBackfillBatch(fromDateInput: string, onDone: (importedC
       }
       const hikes = pageResult.hikes ?? [];
       if (hikes.length > 0) {
-        planSettingsStore.set((s) => ({ ...s, hikeFromStrava: { ...s.hikeFromStrava, ...Object.fromEntries(hikes.map((a) => [a.localDate, a.name])) } }));
+        planSettingsStore.set((s) => ({
+          ...s,
+          hikeFromStrava: { ...s.hikeFromStrava, ...Object.fromEntries(hikes.map((a) => [a.localDate, a.name])) },
+          // By activity id, so a re-sync doesn't add a hike twice. Outdoors
+          // it comes back down; on a treadmill it doesn't.
+          hikeHillsFromStrava: {
+            ...s.hikeHillsFromStrava,
+            ...Object.fromEntries(
+              hikes.filter((a) => a.elevationGainM !== undefined).map((a) => [String(a.id), { date: a.localDate, climbM: a.elevationGainM!, descentM: a.indoor ? 0 : a.elevationGainM! }]),
+            ),
+          },
+        }));
       }
 
       for (const run of filterRunsSinceDate(pageResult.runs, targetStartDate)) {

@@ -5,7 +5,7 @@ import { expectedHoursOf, type PlanSettings } from "../storage/planSettings";
 import { dayNumberOf, planOptionsFromHistory, usesGenericPlanOptions, type DatedHistoryRun } from "./historyFromRuns";
 import { strengthRampLevel } from "./strengthRamp";
 import type { GuardRun } from "./sessionGuard";
-import { generatePlan, mondayOf, suggestLongRunMaxMinutes, type Plan, type WeeklySchedule } from "./planGenerator";
+import { generatePlan, mondayOf, type HistoryRun, suggestLongRunMaxMinutes, type Plan, type WeeklySchedule } from "./planGenerator";
 
 export interface PlanSnapshot {
   version: 1;
@@ -44,7 +44,7 @@ export function planInputsKey(settings: PlanSettings, carbs: CarbInputs): string
   // The leading version bumps when the generator's output changes shape,
   // so stored snapshots regenerate.
   return JSON.stringify([
-    10, race.courseId, race.date, race.descentM, race.steepDescentM, race.expectedHoursOverride && roundedExpectedHours(race.expectedHoursOverride),
+    11, race.courseId, race.date, race.descentM, race.steepDescentM, race.expectedHoursOverride && roundedExpectedHours(race.expectedHoursOverride),
     settings.schedule, settings.longRunMoves, carbs.raceGPerH, settings.carbsStartGPerH, settings.strengthStartedOn, settings.pastGoalRaces,
   ]);
 }
@@ -101,6 +101,15 @@ export function scheduleFromSettings(settings: PlanSettings, expectedHours: numb
   };
 }
 
+/** Strava hikes as climb-and-descent-only entries for the generator's
+ * history (no time, distance or load): they count toward the weekly limits
+ * and the climb reference, and toward overshootSincePlanned. */
+export function hikeHillRuns(settings: PlanSettings): HistoryRun[] {
+  return Object.values(settings.hikeHillsFromStrava).map((h) => ({
+    day: dayNumberOf(h.date), movingMin: 0, distanceKm: 0, descentM: h.descentM, steepDescentM: 0, climbM: h.climbM, mechanical: 0,
+  }));
+}
+
 export function planFromSettings(
   history: DatedHistoryRun[],
   settings: PlanSettings,
@@ -118,7 +127,7 @@ export function planFromSettings(
   // The generator itself only reads runs before today.
   const past = history.filter((r) => r.day < today);
   const plan = generatePlan(
-    past,
+    [...past, ...hikeHillRuns(settings).filter((r) => r.day < today)],
     scheduleFromSettings(settings, roundedExpectedHours(hours)),
     {
       name: race.name,

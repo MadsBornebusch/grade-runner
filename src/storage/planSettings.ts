@@ -51,6 +51,9 @@ export interface PlanSettings {
   /** The same two for the weighted uphill hikes: Strava "Hike" activities. */
   hikeDone: Record<string, true>;
   hikeFromStrava: Record<string, string>;
+  /** Strava hikes' climb and descent, by activity id: they count toward the
+   * plan's weekly climb and descent (planFromSettings.ts hikeHillRuns). */
+  hikeHillsFromStrava: Record<string, { date: string; climbM: number; descentM: number }>;
   /** Monday (YYYY-MM-DD) the six-week strength ramp to heavy started; set
    * the first time a plan is made (planGenerator.ts STRENGTH_RAMP). */
   strengthStartedOn: string | null;
@@ -81,6 +84,7 @@ export const DEFAULT_PLAN_SETTINGS: PlanSettings = {
   strengthFromStrava: {},
   hikeDone: {},
   hikeFromStrava: {},
+  hikeHillsFromStrava: {},
   strengthStartedOn: null,
   pastGoalRaces: [],
   carbsStartGPerH: 30,

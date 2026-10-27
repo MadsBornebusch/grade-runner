@@ -17,6 +17,12 @@ export interface StravaRunSummaryDTO {
   indoor?: boolean;
 }
 
+/** A Strava "Hike": its climb counts toward the plan's climb and descent. */
+export interface StravaHikeDTO extends StravaStrengthDTO {
+  elevationGainM?: number;
+  indoor?: boolean;
+}
+
 export interface StravaStrengthDTO {
   id: number;
   name: string;
@@ -29,7 +35,7 @@ export interface BackfillPage {
   /** Strength activities on the same page (absent from older servers). */
   strength?: StravaStrengthDTO[];
   /** Hikes, same shape (absent from older servers). */
-  hikes?: StravaStrengthDTO[];
+  hikes?: StravaHikeDTO[];
   hasMore: boolean;
 }
 

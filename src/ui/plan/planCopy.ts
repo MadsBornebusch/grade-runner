@@ -97,11 +97,18 @@ export function howToRun(s: PlannedSession, raceName: string, strengthCounts: bo
     case "hike": {
       const pct = s.packPct ?? 5;
       const kg = bodyMassKg ? `, about ${Math.round((bodyMassKg * pct) / 100)} kg` : "";
+      const climb = tens(s.climbM);
+      const down = tens(s.descentM);
+      const stop =
+        climb >= 50
+          ? ` Climb about ${climb} m in total, then stop, even if there's time left: more than that is a bigger step than your legs are ready for.` +
+            (down < climb - 20 ? ` Run down only about ${down} m of it; walk down the rest, or do the rest on a treadmill or stair machine.` : "")
+          : "";
       return (
         `Hike the steepest climb you have (15–30%) with a pack of ${pct}% of your body weight${kg}: water works well. ` +
         `At the top, pour it out and run down easy, refill at the bottom and go again, as many times as the time allows; most of it should be climbing. ` +
         `A treadmill at full incline or a stair machine works too. Your legs should give out before your breathing does; ` +
-        `if you're panting, slow down or find a steeper slope. Log it as a hike or a run on Strava: either counts.`
+        `if you're panting, slow down or find a steeper slope.${stop} Log it as a hike or a run on Strava: either counts.`
       );
     }
     case "strength":

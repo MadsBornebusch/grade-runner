@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { buildHistory } from "../plan/historyCache";
 import { dateOfDayNumber, dayNumberOf, type DatedHistoryRun } from "../plan/historyFromRuns";
 import { ladderStart } from "../plan/carbLadder";
-import { needsReplan, planFromSettings, planInputsKey, type PlanBlocker, type PlanSnapshot } from "../plan/planFromSettings";
+import { hikeHillRuns, needsReplan, planFromSettings, planInputsKey, type PlanBlocker, type PlanSnapshot } from "../plan/planFromSettings";
 import { mondayOf } from "../plan/planGenerator";
 import { localDateKey } from "../plan/loadLedger";
 import { listStoredCourses } from "../storage/courseLibrary";
@@ -132,7 +132,7 @@ export function usePlan(formInputs: FormInputs, pausePrediction = false): PlanSt
     (force: boolean) => {
       if (!history) return;
       const key = planInputsKey(settings, carbs);
-      if (!force && (!key || !needsReplan(snapshot, today, key, history))) return;
+      if (!force && (!key || !needsReplan(snapshot, today, key, [...history, ...hikeHillRuns(settings)]))) return;
       // The strength ramp counts from the first plan; setting it re-plans.
       if (key && !settings.strengthStartedOn) {
         planSettingsStore.set((s) => (s.strengthStartedOn ? s : { ...s, strengthStartedOn: dateOfDayNumber(mondayOf(today)) }));

@@ -262,7 +262,7 @@ describe("climb", () => {
     for (const w of plan.weeks) {
       const runs = w.sessions.filter((x) => x.kind !== "race" && x.kind !== "strength");
       for (const r of runs) {
-        expect(r.climbM).toBe(r.descentM);
+        if (r.kind !== "hike") expect(r.climbM).toBe(r.descentM);
         expect(r.climbM).toBeLessThanOrEqual(r.allowance!.climbM + 1e-6);
       }
       const climb = runs.reduce((a, r) => a + r.climbM, 0);
@@ -270,6 +270,37 @@ describe("climb", () => {
       last = climb;
     }
     expect(plan.weeks.some((w) => w.sessions.some((x) => x.climbM > 0))).toBe(true);
+  });
+});
+
+describe("weighted hikes", () => {
+  const schedule: WeeklySchedule = { weeklyMinutes: 360, runsPerWeek: 5, longRunWeekday: 5, longRunMaxMinutes: 180 };
+  const race = { name: "r", day: TODAY + 60, expectedHours: 6 };
+
+  it("plan climb first, within the run's allowance, and leave the long run its hills", () => {
+    const plan = generatePlan(history(rng(8), 12, 5, 50, 120), schedule, race, TODAY, OPTIONS);
+    const weeks = plan.weeks.filter((w) => w.sessions.some((x) => x.kind === "hike"));
+    expect(weeks.length).toBeGreaterThan(0);
+    for (const w of weeks) {
+      const hike = w.sessions.find((x) => x.kind === "hike")!;
+      const easy = w.sessions.filter((x) => x.kind === "easy");
+      expect(hike.climbM).toBeGreaterThan(0);
+      expect(hike.climbM).toBeLessThanOrEqual(hike.allowance!.climbM + 1e-6);
+      expect(hike.descentM).toBeLessThanOrEqual(hike.climbM + 1e-6);
+      for (const e of easy) expect(hike.climbM / hike.minutes).toBeGreaterThanOrEqual(e.climbM / e.minutes - 1e-9);
+      const long = w.sessions.find((x) => x.kind === "long");
+      if (long && w.phase !== "taper") expect(long.climbM).toBeGreaterThan(0);
+    }
+  });
+
+  it("counts a Strava hike's climb (no time, no load) against the week", () => {
+    const hist = history(rng(8), 12, 5, 50, 120).filter((r) => r.day < 19996);
+    const opts = { ...OPTIONS, includeCurrentWeek: true };
+    const climbOf = (h: HistoryRun[]) =>
+      generatePlan(h, schedule, race, TODAY, opts).weeks[0].sessions.reduce((a, x) => a + x.climbM, 0);
+    const hike = { day: 19996, movingMin: 0, distanceKm: 0, descentM: 2500, steepDescentM: 0, climbM: 2500, mechanical: 0 };
+    expect(climbOf(hist)).toBeGreaterThan(0);
+    expect(climbOf([...hist, hike])).toBe(0);
   });
 });
 

@@ -66,7 +66,7 @@ export default handleErrors(async (req: IncomingMessage, res: ServerResponse) =>
     .map((a) => ({ id: a.id, name: a.name, localDate: a.start_date_local.slice(0, 10) }));
   const hikes = activities
     .filter((a) => HIKE_SPORT_TYPES.has(a.sport_type))
-    .map((a) => ({ id: a.id, name: a.name, localDate: a.start_date_local.slice(0, 10) }));
+    .map((a) => ({ id: a.id, name: a.name, localDate: a.start_date_local.slice(0, 10), elevationGainM: a.total_elevation_gain, indoor: !!a.trainer }));
   // A full page of raw activities (before the run-type filter) means there's
   // likely another page; a short page means we've hit the end of history --
   // this has to be judged on the raw count, since filtering can otherwise

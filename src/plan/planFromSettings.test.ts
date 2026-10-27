@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_PLAN_SETTINGS, type PlanSettings } from "../storage/planSettings";
 import { dayNumberOf, type DatedHistoryRun } from "./historyFromRuns";
-import { needsReplan, planFromSettings, planInputsKey, scheduleFromSettings } from "./planFromSettings";
+import { hikeHillRuns, needsReplan, planFromSettings, planInputsKey, scheduleFromSettings } from "./planFromSettings";
 import { mondayOf } from "./planGenerator";
 
 const today = dayNumberOf("2026-10-21"); // a Wednesday
@@ -37,6 +37,13 @@ describe("planFromSettings", () => {
   it("turns long-run moves into the generator's map", () => {
     const sched = scheduleFromSettings({ ...settings, longRunMoves: { "2026-10-26": 6 } }, 6);
     expect(sched.longRunWeekdayByWeek?.get(dayNumberOf("2026-10-26"))).toBe(6);
+  });
+});
+
+describe("hikeHillRuns", () => {
+  it("turns Strava hikes into climb-and-descent-only entries", () => {
+    const runs = hikeHillRuns({ ...settings, hikeHillsFromStrava: { "7": { date: "2026-10-20", climbM: 600, descentM: 0 } } });
+    expect(runs).toEqual([{ day: dayNumberOf("2026-10-20"), movingMin: 0, distanceKm: 0, descentM: 0, steepDescentM: 0, climbM: 600, mechanical: 0 }]);
   });
 });
 

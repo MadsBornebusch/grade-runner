@@ -4626,6 +4626,14 @@ carry a grade per lap.
   full. Next week grows from this week's total or its limit, whichever is
   less; the first plan week from the week before, capped by one level of
   the same rule.
+- **Weighted hikes plan climb first**: up to HIKE_CLIMB_PER_HOUR (500 m/h,
+  an assumption) within the run's climb allowance, with 40% of the week's
+  climb and descent set aside for it so the descent session and long run
+  keep theirs; descent only as far as its limits (the rest on a treadmill
+  or walked down). The session says how much to climb in total, then stop.
+  Strava "Hike" activities' gain (by activity id; no descent on a trainer)
+  counts toward the weekly climb and descent, the climb reference and the
+  overshoot re-plan, but not toward time or load.
 - **Treadmill grades.** Lap the watch at each grade change; the Runs tab
   lists indoor runs of the last 90 days (Strava's trainer flag, no GPS
   stream, or no gain) and fetches a run's laps on request (one call,

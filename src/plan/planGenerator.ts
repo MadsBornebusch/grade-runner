@@ -435,7 +435,7 @@ export function generatePlan(
   // time if it hasn't synced yet). The one whose recovery runs longest
   // sets it.
   const raceDays = new Set(options.raceDays ?? []);
-  const races = past.filter((r, i) => isRace[i] || raceDays.has(r.day)).map((r) => ({ day: r.day, movingMin: r.movingMin }));
+  const races = past.filter((r, i) => r.movingMin > 0 && (isRace[i] || raceDays.has(r.day))).map((r) => ({ day: r.day, movingMin: r.movingMin }));
   if (recovering && !races.some((r) => r.day === race.day)) races.push({ day: race.day, movingMin: race.expectedHours * 60 });
   const firstWeek = mondayOf(today) + (options.includeCurrentWeek ? 0 : 7);
   const raceWeek = mondayOf(race.day);
@@ -833,9 +833,32 @@ function planWeek(
   state.caps.steepDescentM = phase === "recovery" ? 0 : weekSteepCap * lighter;
   state.caps.climbM = phase === "recovery" ? 0 : weekClimbCap * lighter;
   const order = [...runs].sort((a, b) => rank(a.kind) - rank(b.kind));
+  // The hike's share is set aside first, so the descent session and the
+  // long run can't use up the week's climb before it.
+  const hikeRun = runs.find((r) => r.kind === "hike");
+  let hikeClimb = 0;
+  let hikeDescent = 0;
+  if (hikeRun) {
+    const allow = allowOn(hikeRun.day);
+    hikeClimb = Math.max(0, Math.min(climbLeft * HIKE_CLIMB_SHARE, allow.climbM, HIKE_CLIMB_PER_HOUR * (hikeRun.minutes / 60)));
+    hikeDescent = Math.max(0, Math.min(hikeClimb, descentLeft * HIKE_CLIMB_SHARE, allow.descentM));
+    climbLeft -= hikeClimb;
+    descentLeft -= hikeDescent;
+  }
   for (const r of order) {
     const hours = r.minutes / 60;
     const allow = allowOn(r.day);
+    if (r.kind === "hike") {
+      // Climb first, topped up from what the other runs left; outdoors you
+      // run back down, as far as the descent limits allow (the rest on a
+      // treadmill or stair machine).
+      r.climbM = Math.max(0, Math.min(hikeClimb + climbLeft, allow.climbM, HIKE_CLIMB_PER_HOUR * hours));
+      climbLeft -= r.climbM - hikeClimb;
+      r.descentM = Math.max(0, Math.min(r.climbM, hikeDescent + descentLeft, allow.descentM));
+      descentLeft -= r.descentM - hikeDescent;
+      r.steepDescentM = 0;
+      continue;
+    }
     const perHour = r.kind === "descent" ? 1 : r.kind === "long" ? 0.6 : 0.3;
     r.descentM = Math.max(0, Math.min(descentLeft, climbLeft, allow.descentM, allow.climbM, perHour * o.maxDescentPerHour * hours, perHour * maxClimbPerHour * hours));
     r.climbM = r.descentM;
@@ -871,5 +894,14 @@ export function strengthDaysOf(
   return chosen.sort((a, b) => a - b);
 }
 
-const rank = (k: SessionKind) => (k === "descent" ? 0 : k === "long" ? 1 : 2);
+// The hike after the long run, so the long run keeps its hills.
+const rank = (k: SessionKind) => (k === "descent" ? 0 : k === "long" ? 1 : k === "hike" ? 2 : 3);
+
+/** Assumption, not measured: climb per hour of a weighted hike with
+ * repeats (steep climbing, then running back down, most of the time
+ * climbing). The per-run and weekly climb limits usually bind first. */
+export const HIKE_CLIMB_PER_HOUR = 500;
+/** Assumption: the share of the week's climb and descent set aside for the
+ * hike before the other runs take theirs. */
+export const HIKE_CLIMB_SHARE = 0.4;
 

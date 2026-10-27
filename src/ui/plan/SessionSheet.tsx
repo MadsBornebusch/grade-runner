@@ -49,7 +49,7 @@ export function SessionSheet({ session: s, runs, raceName, raceGPerH, strengthCo
               </dd>
             </>
           )}
-          {s.descentM >= 50 && (
+          {Math.max(s.descentM, s.climbM) >= 50 && (
             <>
               <dt>Hills</dt>
               <dd className="num">about {climbDescentText(s.climbM, s.descentM)}</dd>
