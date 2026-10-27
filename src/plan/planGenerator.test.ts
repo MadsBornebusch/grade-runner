@@ -220,6 +220,19 @@ describe("current week and past races", () => {
     expect(first.plannedMinutes).toBeLessThanOrEqual(300 - done + 1e-6);
   });
 
+  it("counts this week's descent and climb so far against the rest of the week", () => {
+    const race = { name: "r", day: TODAY + 120, expectedHours: 6 };
+    const rest = (h: HistoryRun[]) => {
+      const runs = generatePlan(h, schedule, race, TODAY, { ...OPTIONS, includeCurrentWeek: true }).weeks[0].sessions.filter((x) => x.kind !== "strength");
+      return { descent: runs.reduce((a, x) => a + x.descentM, 0), climb: runs.reduce((a, x) => a + x.climbM, 0) };
+    };
+    // A short, very hilly Monday run (19996), well past any weekly cap.
+    const hilly = [...hist.filter((r) => r.day < 19996), { day: 19996, movingMin: 50, distanceKm: 7, descentM: 3000, steepDescentM: 900, climbM: 3000, mechanical: 60 }];
+    const flat = [...hist.filter((r) => r.day < 19996), { day: 19996, movingMin: 50, distanceKm: 7, descentM: 0, steepDescentM: 0, climbM: 0, mechanical: 60 }];
+    expect(rest(flat).descent).toBeGreaterThan(0);
+    expect(rest(hilly)).toEqual({ descent: 0, climb: 0 });
+  });
+
   it("keeps this week's strength days when re-planned mid-week", () => {
     const race = { name: "r", day: TODAY + 120, expectedHours: 6 };
     const strengthDays = (today: number) =>

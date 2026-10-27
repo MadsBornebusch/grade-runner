@@ -471,9 +471,12 @@ export function generatePlan(
   // the other runs shrink to keep the week within budget.
   const longRunWeekEvery = schedule.longRunWeekEvery ?? 2;
   let lastFullWeekMech = 0;
-  let lastWeekDescent: number | null = null;
-  let lastWeekSteep: number | null = null;
-  let lastWeekClimb: number | null = null;
+  // The first week grows from what was actually run the week before it.
+  const weekBefore = past.filter((r, i) => !isRace[i] && r.day >= firstWeek - 7 && r.day < firstWeek);
+  const sumOf = (runs: HistoryRun[], q: "descentM" | "steepDescentM" | "climbM") => runs.reduce((a, r) => a + r[q], 0);
+  let lastWeekDescent: number | null = weekBefore.length ? sumOf(weekBefore, "descentM") : null;
+  let lastWeekSteep: number | null = weekBefore.length ? sumOf(weekBefore, "steepDescentM") : null;
+  let lastWeekClimb: number | null = weekBefore.length ? sumOf(weekBefore, "climbM") : null;
   let budgetBindsFrom: number | null = null;
 
   for (let w = 0; w < nWeeks; w++) {
@@ -519,7 +522,9 @@ export function generatePlan(
     const runsSoFar = nonRace();
     const allowOn = (day: number) => sessionAllowance(referenceAt(runsSoFar, day));
     const sessions = planWeek(start, phase, target, referenceAt(runsSoFar, start), allowOn, availability, longRunWeekday, race, options, {
-      lastWeekDescent, lastWeekSteep, lastWeekClimb, strengthSessions, strengthMinutes, budgetMinutes: Math.max(0, budgetPerWeek - doneMinutes), fromDay: today,
+      lastWeekDescent, lastWeekSteep, lastWeekClimb,
+      doneDescentM: sumOf(doneThisWeek, "descentM"), doneSteepM: sumOf(doneThisWeek, "steepDescentM"), doneClimbM: sumOf(doneThisWeek, "climbM"),
+      strengthSessions, strengthMinutes, budgetMinutes: Math.max(0, budgetPerWeek - doneMinutes), fromDay: today,
       prevLongDay, nextLongDay: start + 7 + (schedule.longRunWeekdayByWeek?.get(start + 7) ?? schedule.longRunWeekday),
       longRunCapMinutes: schedule.longRunMaxMinutes, cappedDays, weeksToRace,
       strengthLevel: (options.strengthLevel ?? 0) + w, restUntil,
@@ -540,9 +545,10 @@ export function generatePlan(
     }
     if (phase === "base" || phase === "specific") lastFullWeekMech = plannedMech;
     const runs = sessions.filter((s) => s.kind !== "strength" && s.kind !== "race");
-    lastWeekDescent = runs.reduce((s, x) => s + x.descentM, 0);
-    lastWeekSteep = runs.reduce((s, x) => s + x.steepDescentM, 0);
-    lastWeekClimb = runs.reduce((s, x) => s + x.climbM, 0);
+    // Including what was run earlier in the current week.
+    lastWeekDescent = sumOf(doneThisWeek, "descentM") + runs.reduce((s, x) => s + x.descentM, 0);
+    lastWeekSteep = sumOf(doneThisWeek, "steepDescentM") + runs.reduce((s, x) => s + x.steepDescentM, 0);
+    lastWeekClimb = sumOf(doneThisWeek, "climbM") + runs.reduce((s, x) => s + x.climbM, 0);
     const long = sessions.find((x) => x.kind === "long");
     prevLongDay = long?.day ?? null;
     if (long && long.minutes >= CAPPED_LONG_RUN_SHARE * schedule.longRunMaxMinutes) cappedDays.push(long.day);
@@ -598,6 +604,11 @@ interface WeekState {
   lastWeekDescent: number | null;
   lastWeekSteep: number | null;
   lastWeekClimb: number | null;
+  /** Already run this week (the current week only): it counts against the
+   * week's descent and climb. */
+  doneDescentM: number;
+  doneSteepM: number;
+  doneClimbM: number;
   strengthSessions: number;
   strengthMinutes: number | undefined;
   /** The week's running budget, which the slots may add up to more than. */
@@ -798,9 +809,9 @@ function planWeek(
   const weekDescentCap = state.lastWeekDescent === null ? 2 * ref.descentM : DESCENT_WEEKLY_STEP * Math.max(state.lastWeekDescent, weekAllow.descentM);
   const weekSteepCap = state.lastWeekSteep === null ? 2 * ref.steepDescentM : DESCENT_WEEKLY_STEP * Math.max(state.lastWeekSteep, weekAllow.steepDescentM);
   const weekClimbCap = state.lastWeekClimb === null ? 2 * ref.climbM : DESCENT_WEEKLY_STEP * Math.max(state.lastWeekClimb, weekAllow.climbM);
-  let descentLeft = phase === "recovery" ? 0 : weekDescentCap * lighter;
-  let steepLeft = phase === "recovery" ? 0 : weekSteepCap * lighter;
-  let climbLeft = phase === "recovery" ? 0 : weekClimbCap * lighter;
+  let descentLeft = phase === "recovery" ? 0 : weekDescentCap * lighter - state.doneDescentM;
+  let steepLeft = phase === "recovery" ? 0 : weekSteepCap * lighter - state.doneSteepM;
+  let climbLeft = phase === "recovery" ? 0 : weekClimbCap * lighter - state.doneClimbM;
   const maxClimbPerHour = o.maxClimbPerHour ?? o.maxDescentPerHour;
   const order = [...runs].sort((a, b) => rank(a.kind) - rank(b.kind));
   for (const r of order) {

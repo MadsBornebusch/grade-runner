@@ -4614,6 +4614,12 @@ carry a grade per lap.
   own elevation gain, which is better than the summary's descent estimate.
   A planned run climbs what it descends (a route returns to its start), so
   both limits bound one number.
+- **The week so far counts.** The first plan week grows from what was
+  actually run the week before (not from twice the biggest recent run),
+  and descent, steep descent and climb already run this week come off the
+  week's limits. A run that goes more than max(100 m, 25%) past its day's
+  planned descent or climb re-plans the rest of the week (needsReplan),
+  the morning after: the generator reads runs before today only.
 
 ### Strength sessions and the weighted hike (built 2026-10-23)
 

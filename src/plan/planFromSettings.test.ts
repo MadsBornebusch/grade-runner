@@ -58,6 +58,19 @@ describe("needsReplan", () => {
     expect(needsReplan(snapshot, today, planInputsKey(own, carbs)!)).toBe(true);
   });
 
+  it("re-plans once when a run since the plan went well past its planned descent or climb", () => {
+    const easy = { day: today, kind: "easy", descentM: 200, climbM: 200 };
+    const made = { ...snapshot, generatedOn: today, plan: { status: "ok", weeks: [{ sessions: [easy] }] } as never };
+    const ran = (descentM: number, climbM = descentM) => [{ day: today, movingMin: 60, distanceKm: 10, descentM, steepDescentM: 0, climbM }];
+    expect(needsReplan(made, today + 1, key, ran(280))).toBe(false);
+    expect(needsReplan(made, today + 1, key, ran(320))).toBe(true);
+    expect(needsReplan(made, today + 1, key, ran(200, 400))).toBe(true);
+    // Not on the day itself (the generator only reads earlier runs), and
+    // not again once re-planned.
+    expect(needsReplan(made, today, key, ran(500))).toBe(false);
+    expect(needsReplan({ ...made, generatedOn: today + 1 }, today + 1, key, ran(500))).toBe(false);
+  });
+
   it("re-plans the day after the goal race, so its days off show at once", () => {
     const raceWeek = { sessions: [{ day: today + 1, kind: "race" }] };
     const withRace = { ...snapshot, plan: { status: "ok", weeks: [raceWeek] } as never };

@@ -4,6 +4,7 @@
 import { expectedHoursOf, type PlanSettings } from "../storage/planSettings";
 import { dayNumberOf, planOptionsFromHistory, usesGenericPlanOptions, type DatedHistoryRun } from "./historyFromRuns";
 import { strengthRampLevel } from "./strengthRamp";
+import type { GuardRun } from "./sessionGuard";
 import { generatePlan, mondayOf, suggestLongRunMaxMinutes, type Plan, type WeeklySchedule } from "./planGenerator";
 
 export interface PlanSnapshot {
@@ -48,15 +49,43 @@ export function planInputsKey(settings: PlanSettings, carbs: CarbInputs): string
   ]);
 }
 
-/** Re-plan only on a new week, changed inputs, no snapshot, or the goal
- * race just run (its days off start at once): a sync during the week
- * otherwise keeps the current week as it is. */
-export function needsReplan(snapshot: PlanSnapshot | null, today: number, inputsKey: string): boolean {
+/** A run counts as well past its plan beyond this many metres of descent
+ * or climb, or this share of the planned amount, whichever is more. */
+export const OVERSHOOT_M = 100;
+export const OVERSHOOT_SHARE = 0.25;
+
+/**
+ * A run since the snapshot was made (and before today: the generator reads
+ * runs before today only) that went well past its day's planned descent or
+ * climb. Runs before the snapshot are already in it, so a re-plan clears
+ * this.
+ */
+export function overshotSincePlanned(snapshot: PlanSnapshot, history: GuardRun[], today: number): boolean {
+  const days = new Set(history.filter((r) => r.day >= Math.max(snapshot.generatedOn, snapshot.weekOf) && r.day < today).map((r) => r.day));
+  if (days.size === 0) return false;
+  const sessions = snapshot.plan.weeks.flatMap((w) => w.sessions).filter((s) => s.kind !== "strength" && s.kind !== "race");
+  for (const day of days) {
+    const done = history.filter((r) => r.day === day);
+    const planned = sessions.filter((s) => s.day === day);
+    for (const q of ["descentM", "climbM"] as const) {
+      const p = planned.reduce((a, s) => a + s[q], 0);
+      if (done.reduce((a, r) => a + r[q], 0) > p + Math.max(OVERSHOOT_M, OVERSHOOT_SHARE * p)) return true;
+    }
+  }
+  return false;
+}
+
+/** Re-plan only on a new week, changed inputs, no snapshot, the goal race
+ * just run (its days off start at once), or a run well past its planned
+ * descent or climb (the rest of the week takes less): a sync during the
+ * week otherwise keeps the current week as it is. */
+export function needsReplan(snapshot: PlanSnapshot | null, today: number, inputsKey: string, history: GuardRun[] = []): boolean {
   return (
     !snapshot ||
     snapshot.weekOf !== mondayOf(today) ||
     snapshot.inputsKey !== inputsKey ||
-    (snapshot.plan.status === "ok" && snapshot.plan.weeks.some((w) => w.sessions.some((s) => s.kind === "race" && s.day < today)))
+    (snapshot.plan.status === "ok" && snapshot.plan.weeks.some((w) => w.sessions.some((s) => s.kind === "race" && s.day < today))) ||
+    overshotSincePlanned(snapshot, history, today)
   );
 }
 

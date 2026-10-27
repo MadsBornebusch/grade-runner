@@ -129,7 +129,7 @@ export function usePlan(formInputs: FormInputs, pausePrediction = false): PlanSt
     (force: boolean) => {
       if (!history) return;
       const key = planInputsKey(settings, carbs);
-      if (!force && (!key || !needsReplan(snapshot, today, key))) return;
+      if (!force && (!key || !needsReplan(snapshot, today, key, history))) return;
       // The strength ramp counts from the first plan; setting it re-plans.
       if (key && !settings.strengthStartedOn) {
         planSettingsStore.set((s) => (s.strengthStartedOn ? s : { ...s, strengthStartedOn: dateOfDayNumber(mondayOf(today)) }));
