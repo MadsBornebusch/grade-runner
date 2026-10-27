@@ -3,7 +3,7 @@ import { matchDay, matchWeek } from "./matchSessions";
 import type { PlannedSession } from "./planGenerator";
 
 const session = (day: number, kind: PlannedSession["kind"], minutes: number): PlannedSession => ({
-  day, kind, minutes, distanceKm: minutes / 6, mechanical: 0, descentM: 0, steepDescentM: 0,
+  day, kind, minutes, distanceKm: minutes / 6, mechanical: 0, descentM: 0, steepDescentM: 0, climbM: 0,
 });
 const sessions = [session(1, "easy", 50), session(1, "strength", 25), session(3, "long", 150), session(5, "easy", 45)];
 

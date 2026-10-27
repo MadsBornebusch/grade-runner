@@ -40,10 +40,10 @@ export function historyRunFromStored(run: StoredRun, timeZone: string): DatedHis
   if (course?.hasElevation) {
     const mechanical = runningImpact(course.segments);
     if (!(summary.mechanical > 0 && mechanical / summary.mechanical > 1.5)) {
-      return { ...base, mechanical, descentM: descentMeters(course.segments), steepDescentM: steepDescentMeters(course.segments), source: "points" };
+      return { ...base, mechanical, descentM: descentMeters(course.segments), steepDescentM: steepDescentMeters(course.segments), climbM: course.totalElevationGain, source: "points" };
     }
   }
-  return { ...base, mechanical: summary.mechanical, descentM: summary.descentM, steepDescentM: summary.steepDescentM, source: "summary" };
+  return { ...base, mechanical: summary.mechanical, descentM: summary.descentM, steepDescentM: summary.steepDescentM, climbM: gain, source: "summary" };
 }
 
 /** Typical values for a generic athlete, used until enough runs have points. */
@@ -71,5 +71,6 @@ export function planOptionsFromHistory(history: DatedHistoryRun[]): PlanOptions 
     speedKmh: q(perHour((r) => r.distanceKm), 0.5),
     maxDescentPerHour: q(perHour((r) => r.descentM), 0.9),
     maxSteepDescentPerHour: q(perHour((r) => r.steepDescentM), 0.9),
+    maxClimbPerHour: q(perHour((r) => r.climbM), 0.9),
   };
 }

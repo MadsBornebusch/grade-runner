@@ -7,7 +7,7 @@ import { paceToGrossPowerWPerKg } from "../../model/substrate";
 
 // Synthetic thresholds, not anyone's lab values.
 const base: FormInputs = { ...DEFAULT_FORM_INPUTS, lt1HeartRateBpm: null, lt2HeartRateBpm: null, fatOxPoints: [], hrPowerCalibrationSlope: null, hrPowerCalibrationIntercept: null };
-const long = (steadyMinutes?: number): PlannedSession => ({ day: 0, kind: "long", minutes: 180, distanceKm: 25, mechanical: 0, descentM: 0, steepDescentM: 0, steadyMinutes });
+const long = (steadyMinutes?: number): PlannedSession => ({ day: 0, kind: "long", minutes: 180, distanceKm: 25, mechanical: 0, descentM: 0, steepDescentM: 0, climbM: 0, steadyMinutes });
 
 describe("intensity targets", () => {
   it("has no heart rates without heart-rate settings, and falls back to words", () => {

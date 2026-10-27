@@ -148,4 +148,11 @@ export function shortDate(day: number): string {
   const [, m, d] = dateOfDayNumber(day).split("-").map(Number);
   return `${d} ${MONTHS[m - 1]}`;
 }
+const tens = (m: number) => Math.round(m / 10) * 10;
+
+/** "300 m up and down", or "300 m up · 250 m down" when they differ. */
+export function climbDescentText(climbM: number, descentM: number): string {
+  return tens(climbM) === tens(descentM) ? `${tens(descentM)} m up and down` : `${tens(climbM)} m up · ${tens(descentM)} m down`;
+}
+
 export const dayLabel = (day: number) => `${dayName(day)} ${shortDate(day)}`;

@@ -2,7 +2,7 @@ import { Backpack, CaretRight, CheckCircle, CircleHalf, Couch, ForkKnife, Heartb
 import { KIND_ICON } from "./kindIcons";
 import type { PlannedSession } from "../../plan/planGenerator";
 import type { SessionState } from "../../plan/matchSessions";
-import { KIND_TITLE, distanceLine, effortChip, formatMinutes, formatMinutesExact } from "./planCopy";
+import { KIND_TITLE, climbDescentText, distanceLine, effortChip, formatMinutes, formatMinutesExact } from "./planCopy";
 import type { IntensityTargets } from "./intensity";
 import { STRENGTH_FOCUS_TITLE } from "./strengthCopy";
 
@@ -67,7 +67,7 @@ export function SessionCard({ session, state, ranMin, hero, targets, onOpen }: S
             )}
             {isRun && session.descentM >= 50 && (
               <span className="chip chip--descent">
-                <TrendDown size={14} /> {Math.round(session.descentM / 10) * 10} m down
+                <TrendDown size={14} /> {climbDescentText(session.climbM, session.descentM)}
               </span>
             )}
             {session.carbsGPerH && session.kind !== "race" ? (

@@ -20,11 +20,11 @@ function history(r: () => number, weeks: number, perWeek: number, minutes: numbe
     const dow = (d - (TODAY - 7 * weeks)) % 7;
     const run = dow === 5 ? longMin : dow < perWeek ? minutes * (0.8 + 0.4 * r()) : 0;
     if (!run) continue;
-    out.push({ day: d, movingMin: run, distanceKm: (run / 60) * 9.5, descentM: (run / 60) * 150, steepDescentM: (run / 60) * 40, mechanical: (run / 60) * 70 });
+    out.push({ day: d, movingMin: run, distanceKm: (run / 60) * 9.5, descentM: (run / 60) * 150, steepDescentM: (run / 60) * 40, climbM: (run / 60) * 150, mechanical: (run / 60) * 70 });
   }
   if (raceDaysAgo !== undefined) {
     const h = raceMin / 60;
-    out.push({ day: TODAY - raceDaysAgo, movingMin: raceMin, distanceKm: h * 8, descentM: h * 300, steepDescentM: h * 80, mechanical: h * 75 });
+    out.push({ day: TODAY - raceDaysAgo, movingMin: raceMin, distanceKm: h * 8, descentM: h * 300, steepDescentM: h * 80, climbM: h * 300, mechanical: h * 75 });
   }
   return out.sort((a, b) => a.day - b.day);
 }
@@ -61,7 +61,7 @@ describe("generatePlan invariants (random cases)", () => {
       const before = hist.filter((_, i) => !isRace[i]);
       const planned = plan.weeks
         .flatMap((w) => w.sessions.filter((s) => s.kind !== "race" && s.kind !== "strength"))
-        .map((s) => ({ day: s.day, movingMin: s.minutes, distanceKm: s.distanceKm, descentM: s.descentM, steepDescentM: s.steepDescentM }));
+        .map((s) => ({ day: s.day, movingMin: s.minutes, distanceKm: s.distanceKm, descentM: s.descentM, steepDescentM: s.steepDescentM, climbM: s.climbM }));
       planned.forEach((s, i) => {
         const ref = referenceAt([...before, ...planned.slice(0, i)], s.day);
         expect(guardBreaches(s, ref)).toEqual([]);
@@ -239,6 +239,27 @@ describe("current week and past races", () => {
   });
 });
 
+describe("climb", () => {
+  it("grows each week's climb at most 10% and keeps each run's climb within its descent and allowance", () => {
+    const schedule: WeeklySchedule = { weeklyMinutes: 360, longRunWeekday: 5, longRunMaxMinutes: 180 };
+    // Hillier going up than down per hour on past runs; the plan pairs them.
+    const hist = history(rng(4), 12, 4, 50, 120).map((r) => ({ ...r, climbM: r.descentM * 0.5 }));
+    const plan = generatePlan(hist, schedule, { name: "r", day: TODAY + 150, expectedHours: 6 }, TODAY, OPTIONS);
+    let last: number | null = null;
+    for (const w of plan.weeks) {
+      const runs = w.sessions.filter((x) => x.kind !== "race" && x.kind !== "strength");
+      for (const r of runs) {
+        expect(r.climbM).toBe(r.descentM);
+        expect(r.climbM).toBeLessThanOrEqual(r.allowance!.climbM + 1e-6);
+      }
+      const climb = runs.reduce((a, r) => a + r.climbM, 0);
+      if (last !== null && last > 0 && w.phase !== "recovery") expect(climb).toBeLessThanOrEqual(1.1 * Math.max(last, runs[0]?.allowance?.climbM ?? 0) + 1e-6);
+      last = climb;
+    }
+    expect(plan.weeks.some((w) => w.sessions.some((x) => x.climbM > 0))).toBe(true);
+  });
+});
+
 describe("after a race", () => {
   const schedule: WeeklySchedule = { weeklyMinutes: 300, longRunWeekday: 5, longRunMaxMinutes: 180 };
   // TODAY (day 20000) is a Friday; its Monday is 19996.
@@ -349,7 +370,7 @@ describe("generatePlan structure", () => {
     // A big build ending in an 8 h race 200 days ago, then a goal race of
     // the same length on a 2 h/week budget.
     const hist = [...history(rng(6), 30, 6, 80, 180).map((r) => ({ ...r, day: r.day - 200 })), ...history(rng(7), 25, 2, 40, 60)];
-    hist.push({ day: TODAY - 200, movingMin: 480, distanceKm: 55, descentM: 2000, steepDescentM: 500, mechanical: 450 });
+    hist.push({ day: TODAY - 200, movingMin: 480, distanceKm: 55, descentM: 2000, steepDescentM: 500, climbM: 2000, mechanical: 450 });
     hist.sort((a, b) => a.day - b.day);
     const small: WeeklySchedule = { weeklyMinutes: 120, longRunWeekday: 5, longRunMaxMinutes: 80, runsPerWeek: 2 };
     const plan = generatePlan(hist, small, { name: "r", day: TODAY + 120, expectedHours: 6 }, TODAY, OPTIONS);

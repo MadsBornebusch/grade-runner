@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GUARD_FLOORS, guardBreaches, referenceAt, runReferences, sessionAllowance, type GuardRun } from "./sessionGuard";
 
-const run = (day: number, movingMin: number, distanceKm: number, descentM = 100, steepDescentM = 20): GuardRun => ({ day, movingMin, distanceKm, descentM, steepDescentM });
+const run = (day: number, movingMin: number, distanceKm: number, descentM = 100, steepDescentM = 20, climbM = descentM): GuardRun => ({ day, movingMin, distanceKm, descentM, steepDescentM, climbM });
 
 describe("runReferences", () => {
   // Five weeks of training, longest run 145 min / 18.6 km of trail, then a
@@ -30,7 +30,7 @@ describe("runReferences", () => {
 
 describe("sessionAllowance", () => {
   it("gives every athlete the floors, and 1.1x the reference above them", () => {
-    const allow = sessionAllowance({ movingMin: 120, distanceKm: 2, descentM: 10, steepDescentM: 1000 });
+    const allow = sessionAllowance({ movingMin: 120, distanceKm: 2, descentM: 10, steepDescentM: 1000, climbM: 10 });
     expect(allow.movingMin).toBeCloseTo(132, 9);
     expect(allow.distanceKm).toBe(GUARD_FLOORS.distanceKm);
     expect(allow.descentM).toBe(GUARD_FLOORS.descentM);

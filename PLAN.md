@@ -4602,6 +4602,19 @@ for what it can't get:
   the goal race screen can show what under-trained fuelling costs in
   finish time.
 
+### Climb, descent and treadmill grades (built 2026-10-27)
+
+User request: track climbing as well as descent, adjust the rest of the
+week when a run goes well past its planned descent, and let treadmill runs
+carry a grade per lap.
+
+- **Climb** is a guard quantity like descent (sessionGuard.ts): each run
+  within 110% of the biggest of the last 30 days (floor 300 m), each week at
+  most 10% over the last. Points runs measure it; summary runs use Strava's
+  own elevation gain, which is better than the summary's descent estimate.
+  A planned run climbs what it descends (a route returns to its start), so
+  both limits bound one number.
+
 ### Strength sessions and the weighted hike (built 2026-10-23)
 
 What the plan prescribes in its strength sessions, and a weighted uphill

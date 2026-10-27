@@ -7,7 +7,7 @@ import { mondayOf } from "./planGenerator";
 const today = dayNumberOf("2026-10-21"); // a Wednesday
 const history: DatedHistoryRun[] = Array.from({ length: 60 }, (_, i) => {
   const day = today - 120 + 2 * i;
-  return { day, date: "", runId: String(i), source: "summary", movingMin: i % 7 === 0 ? 120 : 50, distanceKm: 9, descentM: 150, steepDescentM: 20, mechanical: 60 };
+  return { day, date: "", runId: String(i), source: "summary", movingMin: i % 7 === 0 ? 120 : 50, distanceKm: 9, descentM: 150, steepDescentM: 20, climbM: 150, mechanical: 60 };
 });
 const settings: PlanSettings = {
   ...DEFAULT_PLAN_SETTINGS,

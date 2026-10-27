@@ -26,7 +26,7 @@ describe("planOptionsFromHistory", () => {
   it("uses generic values until there are enough points-based runs", () => {
     expect(planOptionsFromHistory([]).easyDensity).toBe(70);
     const runs: DatedHistoryRun[] = Array.from({ length: 30 }, (_, k) => ({
-      day: k, date: "", runId: String(k), source: "points", movingMin: 60, distanceKm: 10, mechanical: 60 + k, descentM: 100, steepDescentM: 10,
+      day: k, date: "", runId: String(k), source: "points", movingMin: 60, distanceKm: 10, mechanical: 60 + k, descentM: 100, steepDescentM: 10, climbM: 100,
     }));
     const o = planOptionsFromHistory(runs);
     expect(o.easyDensity).toBe(75);

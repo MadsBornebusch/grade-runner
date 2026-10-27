@@ -12,10 +12,12 @@ export interface GuardRun {
   distanceKm: number;
   descentM: number;
   steepDescentM: number;
+  /** Elevation gain, m. */
+  climbM: number;
 }
 
-export type GuardQuantity = "movingMin" | "distanceKm" | "descentM" | "steepDescentM";
-export const GUARD_QUANTITIES: GuardQuantity[] = ["movingMin", "distanceKm", "descentM", "steepDescentM"];
+export type GuardQuantity = "movingMin" | "distanceKm" | "descentM" | "steepDescentM" | "climbM";
+export const GUARD_QUANTITIES: GuardQuantity[] = ["movingMin", "distanceKm", "descentM", "steepDescentM", "climbM"];
 
 export type RunReference = Record<GuardQuantity, number>;
 
@@ -32,7 +34,7 @@ export const RACE_MULTIPLE = 2;
  * first trail run isn't a 30x "spike" against a 10 m reference. Guesses,
  * not fitted (PLAN.md §15 steep-descent notes).
  */
-export const GUARD_FLOORS: RunReference = { movingMin: 45, distanceKm: 8, descentM: 300, steepDescentM: 150 };
+export const GUARD_FLOORS: RunReference = { movingMin: 45, distanceKm: 8, descentM: 300, steepDescentM: 150, climbM: 300 };
 
 const WINDOW_DAYS = 30;
 /** After a break, half the biggest run of this longer window still counts,
@@ -64,7 +66,7 @@ export function runReferences(runs: GuardRun[]): { reference: RunReference[]; is
 
 /** The reference on `day` from `nonRaceRuns` (all strictly before it). */
 export function referenceAt(nonRaceRuns: GuardRun[], day: number): RunReference {
-  const out = { movingMin: 0, distanceKm: 0, descentM: 0, steepDescentM: 0 };
+  const out = { movingMin: 0, distanceKm: 0, descentM: 0, steepDescentM: 0, climbM: 0 };
   for (const q of GUARD_QUANTITIES) {
     let recent = 0;
     let longer = 0;

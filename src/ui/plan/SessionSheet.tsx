@@ -4,7 +4,7 @@ import type { DatedHistoryRun } from "../../plan/historyFromRuns";
 import type { PlannedSession } from "../../plan/planGenerator";
 import { GUARD_FLOORS, SESSION_GUARD_MULTIPLE } from "../../plan/sessionGuard";
 import { Sheet } from "./Sheet";
-import { KIND_TITLE, dayLabel, distanceLine, effortDetail, formatMinutes, formatMinutesExact, howToRun } from "./planCopy";
+import { KIND_TITLE, climbDescentText, dayLabel, distanceLine, effortDetail, formatMinutes, formatMinutesExact, howToRun } from "./planCopy";
 import type { IntensityTargets } from "./intensity";
 import { strengthWorkout } from "./strengthCopy";
 
@@ -51,8 +51,8 @@ export function SessionSheet({ session: s, runs, raceName, raceGPerH, strengthCo
           )}
           {s.descentM >= 50 && (
             <>
-              <dt>Descent</dt>
-              <dd className="num">about {Math.round(s.descentM / 10) * 10} m</dd>
+              <dt>Hills</dt>
+              <dd className="num">about {climbDescentText(s.climbM, s.descentM)}</dd>
             </>
           )}
           {s.steepDescentM >= 30 && (
@@ -81,7 +81,7 @@ export function SessionSheet({ session: s, runs, raceName, raceGPerH, strengthCo
           {runs.map((r) => (
             <p key={r.runId} className="num">
               Ran {formatMinutesExact(r.movingMin)} · {r.distanceKm.toFixed(1)} km · {r.source === "summary" ? "≈" : ""}
-              {Math.round(r.descentM)} m down
+              {Math.round(r.climbM)} m up, {Math.round(r.descentM)} m down
             </p>
           ))}
         </div>
@@ -103,7 +103,7 @@ export function SessionSheet({ session: s, runs, raceName, raceGPerH, strengthCo
             {ref.movingMin <= GUARD_FLOORS.movingMin * SESSION_GUARD_MULTIPLE
               ? "A starting limit until you have a few weeks of longer runs."
               : `No run more than 10% beyond your biggest of the last 30 days (${formatMinutesExact(ref.movingMin / SESSION_GUARD_MULTIPLE)}, ${(ref.distanceKm / SESSION_GUARD_MULTIPLE).toFixed(0)} km).`}{" "}
-            Today's limit: {formatMinutesExact(ref.movingMin)}, {Math.round(ref.distanceKm)} km, {Math.round(ref.descentM / 10) * 10} m down. Small steps keep
+            Today's limit: {formatMinutesExact(ref.movingMin)}, {Math.round(ref.distanceKm)} km, {Math.round(ref.climbM / 10) * 10} m up, {Math.round(ref.descentM / 10) * 10} m down. Small steps keep
             you injury-free.
           </p>
         </details>

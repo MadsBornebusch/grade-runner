@@ -6,7 +6,7 @@ import type { StoredRun } from "../storage/runLibrary";
 import { historyRunFromStored, type DatedHistoryRun } from "./historyFromRuns";
 
 /** Bump when historyRunFromStored's output changes, to rebuild the cache. */
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 const CACHE_KEY = "grade-runner.historyCache.v1";
 const CHUNK = 8;
 
