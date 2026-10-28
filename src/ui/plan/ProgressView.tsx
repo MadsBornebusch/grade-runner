@@ -1,9 +1,16 @@
 // #/schedule/progress: training over time (from the run history, so it
 // reaches back as far as the runs do) and the goal race's predicted finish
-// (saved from when this page was added: storage/predictionLog.ts).
-import { useMemo, useState } from "react";
+// (saved from when this page was added: storage/predictionLog.ts), plus the
+// experimental fitness index (plan/fitnessIndex.ts).
+import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft } from "@phosphor-icons/react";
-import { Area, Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, Scatter, Tooltip, XAxis, YAxis } from "recharts";
+import { costOfRunning } from "../../model/minetti";
+import { grossToNet } from "../../model/energetics";
+import { buildFitnessSummaries } from "../../plan/fitnessFromRuns";
+import { fitnessReadings, trailingIndex, type CompactRunSummary } from "../../plan/fitnessIndex";
+import { listStoredRuns } from "../../storage/runLibrary";
+import { resolveCeilingParams, type FormInputs } from "../formInputs";
 import { dateOfDayNumber, dayNumberOf, type DatedHistoryRun } from "../../plan/historyFromRuns";
 import { hikeHillRuns } from "../../plan/planFromSettings";
 import { byMonth, loadSeries, longTermChange, weeklyTotals, type WeekTotals } from "../../plan/progressSeries";
@@ -41,11 +48,12 @@ const hm = (s: number) => {
 
 interface ProgressViewProps {
   history: DatedHistoryRun[];
+  formInputs: FormInputs;
   today: number;
   onBack: () => void;
 }
 
-export function ProgressView({ history, today, onBack }: ProgressViewProps) {
+export function ProgressView({ history, formInputs, today, onBack }: ProgressViewProps) {
   const settings = planSettingsStore.use();
   const [rangeId, setRangeId] = useState<RangeId>("6m");
   const [metric, setMetric] = useState<MetricId>("hours");
@@ -87,6 +95,7 @@ export function ProgressView({ history, today, onBack }: ProgressViewProps) {
       </div>
 
       <LoadCard series={load} change={change} long={long} />
+      <FitnessCard history={history} formInputs={formInputs} from={from} long={long} />
       <WeeksCard weeks={weeks} monthly={long} metric={metric} onMetric={setMetric} today={today} />
     </section>
   );
@@ -222,6 +231,110 @@ function WeeksCard({ weeks, monthly, metric, onMetric, today }: { weeks: WeekTot
         Average {fmt(avg)} {m.unit} a {monthly ? "month" : "week"}
         {monthly ? "" : " (finished weeks)"}.{metric === "climbM" || metric === "descentM" ? " Includes hikes synced from Strava." : ""}
       </p>
+    </div>
+  );
+}
+
+/** Flat-ground pace, s/km, for a gross power (W/kg). */
+const flatPaceS = (grossWPerKg: number) => 1000 / (grossToNet(grossWPerKg) / costOfRunning(0));
+const paceText = (sPerKm: number) => `${Math.floor(sPerKm / 60)}:${String(Math.round(sPerKm % 60)).padStart(2, "0")}`;
+
+/** Per-run index summaries, by run id; computed once per run and cached. */
+function useFitnessSummaries(formInputs: FormInputs) {
+  const [state, setState] = useState<{ summaries: Map<string, CompactRunSummary> | null; progress: { done: number; total: number } | null }>({ summaries: null, progress: null });
+  const bodyMassKg = formInputs.bodyMassKg;
+  useEffect(() => {
+    let cancelled = false;
+    const ceiling = resolveCeilingParams(formInputs);
+    listStoredRuns()
+      .then((runs) => buildFitnessSummaries(runs, bodyMassKg, ceiling, (done, total) => !cancelled && setState((s) => ({ ...s, progress: { done, total } })), () => cancelled))
+      .then((summaries) => !cancelled && summaries && setState({ summaries, progress: null }))
+      .catch(() => !cancelled && setState({ summaries: new Map(), progress: null }));
+    return () => {
+      cancelled = true;
+    };
+    // Pace-derived power is per kg and doesn't use the ceiling; the mass is
+    // only there for analyzeRun's bookkeeping.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return state;
+}
+
+function FitnessCard({ history, formInputs, from, long }: { history: DatedHistoryRun[]; formInputs: FormInputs; from: number; long: boolean }) {
+  const { summaries, progress } = useFitnessSummaries(formInputs);
+  const fit = useMemo(() => {
+    if (!summaries) return null;
+    const runs = history.flatMap((r) => (summaries.has(r.runId) ? [{ day: r.day, summary: summaries.get(r.runId)! }] : []));
+    return fitnessReadings(runs);
+  }, [summaries, history]);
+  const trend = useMemo(() => (fit ? trailingIndex(fit.readings) : []), [fit]);
+
+  const runs = (fit?.readings ?? []).filter((r) => r.day >= from).map((r) => ({ day: r.day, run: flatPaceS(r.value) }));
+  const line = trend.filter((r) => r.day >= from).map((r) => ({ day: r.day, avg: flatPaceS(r.value) }));
+  const now = trend.at(-1);
+  // The same average about 3 months earlier, for the headline.
+  const then = now && [...trend].reverse().find((r) => r.day <= now.day - 84 && r.day > now.day - 130);
+  const diffS = now && then ? flatPaceS(now.value) - flatPaceS(then.value) : null;
+
+  return (
+    <div className="card chart">
+      <div className="chart__header">
+        <h3 className="card-title">Fitness</h3>
+        <span className="chip chip--info">Experimental</span>
+      </div>
+      {!fit ? (
+        <p className="help num">{progress ? `Reading your runs' heart rate… ${progress.done} of ${progress.total}` : "Reading your runs' heart rate…"}</p>
+      ) : fit.readings.length < 3 ? (
+        <p className="help">Not enough runs with heart rate and flat running yet.</p>
+      ) : (
+        <>
+          {now && (
+            <p className="progress__headline">
+              <span className="num progress__big">{paceText(flatPaceS(now.value))}</span>
+              <span className="muted num">/km on the flat at {fit.referenceHr} bpm</span>
+              {diffS !== null && Math.abs(diffS) >= 2 && (
+                <span className={diffS < 0 ? "success num" : "muted num"}>
+                  {Math.round(Math.abs(diffS))} s/km {diffS < 0 ? "faster" : "slower"} than 3 months ago
+                </span>
+              )}
+            </p>
+          )}
+          {runs.length > 0 ? (
+            <FitnessChart runs={runs} line={line} from={from} long={long} />
+          ) : (
+            <p className="help">No runs in this range give a reading.</p>
+          )}
+          <p className="help">
+            Your pace on flat ground at {fit.referenceHr} bpm, from runs with full data, heart rate and at least 8 minutes of flat running ({fit.readings.length} runs so far). Each dot is a run, the line the 6-week average; faster is up.
+            Experimental: averaged over a few weeks it's steady enough to show changes of a few percent, but it hasn't yet been shown to follow race fitness, and hilly or very long runs read a little slower.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function FitnessChart({ runs, line, from, long }: { runs: { day: number; run: number }[]; line: { day: number; avg: number }[]; from: number; long: boolean }) {
+  const [ref, width] = useContainerWidth<HTMLDivElement>();
+  const all = [...runs.map((r) => r.run), ...line.map((r) => r.avg)];
+  // Ticks on whole half minutes.
+  const lo = Math.floor(Math.min(...all) / 30) * 30;
+  const hi = Math.ceil(Math.max(...all) / 30) * 30;
+  const step = hi - lo > 150 ? 60 : 30;
+  const ticks = Array.from({ length: Math.floor((hi - lo) / step) + 1 }, (_, i) => lo + i * step);
+  const start = Math.max(from, runs[0].day - 7);
+  return (
+    <div className="chart__canvas" ref={ref}>
+      {width > 0 && (
+        <ComposedChart width={width} height={180} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" opacity={0.3} vertical={false} />
+          <XAxis dataKey="day" type="number" domain={[start, "dataMax"]} tickFormatter={(d: number) => (long && runs.at(-1)!.day - start > 400 ? monthLabel(d, true) : shortDate(d))} tick={{ fontSize: 11 }} minTickGap={28} allowDuplicatedCategory={false} />
+          <YAxis type="number" reversed domain={[lo, hi]} ticks={ticks} tickFormatter={paceText} tick={{ fontSize: 11 }} width={40} />
+          <Tooltip formatter={(v, name) => [`${paceText(Number(v))} /km`, name === "avg" ? "6-week average" : "Run"]} labelFormatter={(d) => shortDate(Number(d))} />
+          <Scatter data={runs} dataKey="run" fill="var(--text-faint)" fillOpacity={0.5} shape="circle" isAnimationActive={false} />
+          <Line data={line} type="monotone" dataKey="avg" stroke="var(--brand)" strokeWidth={2} dot={false} isAnimationActive={false} />
+        </ComposedChart>
+      )}
     </div>
   );
 }

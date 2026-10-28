@@ -125,3 +125,63 @@ export function flatSampleMask(
     return true;
   });
 }
+
+/** A run's summary without its samples, small enough to cache: the means,
+ * the weight, and the within-run sums pooledPowerPerBpm needs (each run is
+ * demeaned by its own means, so they add up across runs). */
+export interface CompactRunSummary {
+  meanHr: number;
+  meanPower: number;
+  weight: number;
+  /** Sum of w (hr - meanHr)^2 and w (hr - meanHr)(power - meanPower). */
+  sxx: number;
+  sxy: number;
+}
+
+export function compactSummary(run: RunHrPowerSummary): CompactRunSummary {
+  let sxx = 0;
+  let sxy = 0;
+  for (const s of run.samples) {
+    const dh = s.hr - run.meanHr;
+    sxx += s.weight * dh * dh;
+    sxy += s.weight * dh * (s.powerWPerKg - run.meanPower);
+  }
+  return { meanHr: run.meanHr, meanPower: run.meanPower, weight: run.weight, sxx, sxy };
+}
+
+export interface IndexReading {
+  day: number;
+  /** Power at the reference HR, W/kg (gross). */
+  value: number;
+}
+
+/**
+ * The frozen stage 2 index over a set of runs: pooled within-run slope,
+ * reference HR the median of the runs' mean HRs (rounded), runs further
+ * than MAX_REFERENCE_HR_DISTANCE_BPM from it dropped.
+ */
+export function fitnessReadings(runs: { day: number; summary: CompactRunSummary }[]): { readings: IndexReading[]; referenceHr: number } | null {
+  if (runs.length === 0) return null;
+  const sxx = runs.reduce((a, r) => a + r.summary.sxx, 0);
+  const slope = sxx > 0 ? runs.reduce((a, r) => a + r.summary.sxy, 0) / sxx : 0;
+  const hrs = runs.map((r) => r.summary.meanHr).sort((a, b) => a - b);
+  const m = hrs.length >> 1;
+  const referenceHr = Math.round(hrs.length % 2 ? hrs[m] : (hrs[m - 1] + hrs[m]) / 2);
+  const readings = runs.flatMap((r) => {
+    if (Math.abs(referenceHr - r.summary.meanHr) > MAX_REFERENCE_HR_DISTANCE_BPM) return [];
+    return [{ day: r.day, value: r.summary.meanPower + slope * (referenceHr - r.summary.meanHr) }];
+  });
+  return { readings: readings.sort((a, b) => a.day - b.day), referenceHr };
+}
+
+/** Trailing mean of the readings over `windowDays`, at each reading's day,
+ * where at least `minRuns` fall in the window: one run reads ~3% noisy,
+ * a few averaged are what's quiet enough to show a trend. */
+export function trailingIndex(readings: IndexReading[], windowDays = 42, minRuns = 3): IndexReading[] {
+  const out: IndexReading[] = [];
+  for (const r of readings) {
+    const inWindow = readings.filter((o) => o.day <= r.day && o.day > r.day - windowDays);
+    if (inWindow.length >= minRuns && out.at(-1)?.day !== r.day) out.push({ day: r.day, value: inWindow.reduce((a, o) => a + o.value, 0) / inWindow.length });
+  }
+  return out;
+}

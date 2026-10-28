@@ -53,7 +53,7 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
 
   if (rest[0] === "progress") {
     return plan.history ? (
-      <ProgressView history={plan.history} today={plan.today} onBack={() => navigate("schedule")} />
+      <ProgressView history={plan.history} formInputs={formInputs} today={plan.today} onBack={() => navigate("schedule")} />
     ) : (
       <p className="help">Loading your runs…</p>
     );

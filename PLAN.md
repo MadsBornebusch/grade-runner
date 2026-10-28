@@ -4666,6 +4666,17 @@ Today and a button on the week view. Three cards:
   stage 2).
 - *Per week / per month.* Hours, km, climb and descent; months when the
   range is over about 13 months. Strava hikes add climb and descent only.
+- *Fitness, experimental (added 2026-10-28).* The frozen stage 2 index
+  (§15 stage 2 above), shown as flat-ground pace at the reference HR: each
+  run a dot, the line a trailing 42-day mean where at least 3 runs fall in
+  the window. `plan/fitnessFromRuns.ts` runs the same steps as
+  `scripts/planRunData.ts` on the stored runs and caches a compact summary
+  per run (`fitnessIndex.ts`'s `CompactRunSummary`: means plus the
+  within-run sums the pooled slope needs, so no samples are stored). Only
+  runs with full data can give a reading. Checked against the script on the
+  Strava cache: 117 readings, per-run noise 3.2% on 2026 (3.1% above). The
+  card says it isn't shown to follow race fitness, which is still the open
+  question above.
 
 ### Strength sessions and the weighted hike (built 2026-10-23)
 
