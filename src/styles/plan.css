@@ -2291,3 +2291,38 @@ a.button-ghost {
   min-width: 0;
   margin: 0;
 }
+
+/* ---------- Progress ---------- */
+
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.progress__ranges {
+  align-self: flex-start;
+}
+
+.progress__headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1) var(--sp-3);
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+
+.progress__big {
+  font-size: var(--fs-3xl);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--lh-tight);
+}
+
+.progress__swatch--long { background: var(--brand); }
+.progress__swatch--recent { background: var(--accent); }
+
+.progress-line {
+  cursor: pointer;
+}

@@ -4643,6 +4643,30 @@ carry a grade per lap.
   opens from a done indoor run on Today and Schedule (DoneRunLine), and
   loads the laps as it opens.
 
+### Progress page (built 2026-10-28)
+
+`#/schedule/progress` (`ui/plan/ProgressView.tsx`), opened from a line on
+Today and a button on the week view. Three cards:
+
+- *Predicted finish over time.* `GoalRaceSettings.predictedFinishS` is
+  overwritten on every re-solve, so `storage/predictionLog.ts` keeps a
+  copy: one entry per change, keyed by course and race date, one entry per
+  day at most. `usePlan` writes it whenever the cached prediction changes.
+  It starts on the day it was built; rebuilding past predictions would mean
+  refitting the model as of each past date, so there is no backfill. Drawn
+  as a step line held to today. The copy says it also moves when a
+  setting changes, not only with fitness.
+- *Training load.* `plan/progressSeries.ts`'s `loadSeries`: runningImpact's
+  mechanical score, the generator's 42-day and 7-day EWMAs, shown per week
+  (7 x the daily level). The raw series, not `capSpikes`, so a race shows as
+  the jump it was. The EWMAs start at the first run, so a short window has
+  no warm-up ramp. Labelled "6-week average" and "Last 7 days"; no
+  fitness/fatigue names, since a load average isn't a fitness measurement.
+  The per-run fitness index stays off the page until it's validated (§15
+  stage 2).
+- *Per week / per month.* Hours, km, climb and descent; months when the
+  range is over about 13 months. Strava hikes add climb and descent only.
+
 ### Strength sessions and the weighted hike (built 2026-10-23)
 
 What the plan prescribes in its strength sessions, and a weighted uphill

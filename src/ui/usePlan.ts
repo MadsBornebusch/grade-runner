@@ -9,6 +9,7 @@ import { listStoredCourses } from "../storage/courseLibrary";
 import { createLocalStore } from "../storage/localStore";
 import { fuelLogStore } from "../storage/fuelLogs";
 import { planSettingsStore } from "../storage/planSettings";
+import { predictionLogStore, raceLogKey, withPrediction } from "../storage/predictionLog";
 import { listStoredRuns, subscribeToRunEdits } from "../storage/runLibrary";
 import { getAutoFetchStatus, subscribeToAutoFetch } from "./autoFetchRuns";
 import { getBackfillStatus, subscribeToBackfill } from "./backfillRuns";
@@ -122,6 +123,20 @@ export function usePlan(formInputs: FormInputs, pausePrediction = false): PlanSt
     // formInputs is fully represented by wantKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [race?.courseId, race?.predictionKey, wantKey, pausePrediction]);
+
+  // Keep a copy of each new prediction for the Progress page.
+  const predictedS = race?.predictedFinishS;
+  useEffect(() => {
+    if (!race || !predictedS) return;
+    const key = raceLogKey(race);
+    const date = dateOfDayNumber(today);
+    predictionLogStore.set((log) => {
+      const entries = log.byRace[key] ?? [];
+      const next = withPrediction(entries, date, predictedS);
+      return next === entries ? log : { ...log, byRace: { ...log.byRace, [key]: next } };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [race?.courseId, race?.date, predictedS, today]);
 
   const carbs = useMemo(() => {
     const runs = (history ?? []).map((r) => ({ runId: r.runId, day: r.day, movingMin: r.movingMin }));

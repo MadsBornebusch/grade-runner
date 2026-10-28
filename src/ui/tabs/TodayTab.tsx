@@ -1,14 +1,16 @@
 import { useMemo, useState } from "react";
 import { sessionState, toggleSessionDone, useSessionDone, type SessionDone } from "../plan/useSessionDone";
 import { intensityTargets } from "../plan/intensity";
-import { ArrowsClockwise, CaretRight, CheckCircle, FlagCheckered, Moon, XCircle } from "@phosphor-icons/react";
+import { ArrowsClockwise, CaretRight, ChartLineUp, CheckCircle, FlagCheckered, Moon, XCircle } from "@phosphor-icons/react";
 import { useSyncExternalStore } from "react";
 import { runsNeedingFuelLog } from "../../plan/carbLadder";
-import { dateOfDayNumber, dayNumberOf } from "../../plan/historyFromRuns";
+import { dateOfDayNumber, dayNumberOf, type DatedHistoryRun } from "../../plan/historyFromRuns";
 import { matchDay } from "../../plan/matchSessions";
 import { mondayOf, type PlannedSession } from "../../plan/planGenerator";
 import { fuelLogStore } from "../../storage/fuelLogs";
 import { planSettingsStore } from "../../storage/planSettings";
+import { predictionLogStore, raceLogKey } from "../../storage/predictionLog";
+import { loadSeries, longTermChange } from "../../plan/progressSeries";
 import { getBackfillStatus, subscribeToBackfill } from "../backfillRuns";
 import type { FormInputs } from "../formInputs";
 import { CheckinCard } from "../plan/CheckinCard";
@@ -168,6 +170,8 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
 
       {week && <WeekStrip plan={plan} weekStart={week.start} doneOf={doneOf} onOpen={() => navigate("schedule")} />}
 
+      <ProgressLine history={history} today={today} onOpen={() => navigate("schedule", "progress")} />
+
       {next.length > 0 && (
         <section>
           <h3 className="section-title">Coming up</h3>
@@ -255,5 +259,27 @@ function WeekStrip({ plan, weekStart, doneOf, onOpen }: { plan: PlanState; weekS
         </p>
       </div>
     </section>
+  );
+}
+
+/** One line on Today: the 6-week load's change and the prediction's. */
+function ProgressLine({ history, today, onOpen }: { history: DatedHistoryRun[]; today: number; onOpen: () => void }) {
+  const race = planSettingsStore.use().goalRace;
+  const log = predictionLogStore.use().byRace;
+  const change = useMemo(() => longTermChange(loadSeries(history, today, today - 28), 28), [history, today]);
+  const entries = race ? (log[raceLogKey(race)] ?? []) : [];
+  const diffMin = entries.length > 1 ? Math.round((entries.at(-1)!.finishS - entries[0].finishS) / 60) : 0;
+  const parts = [
+    change !== null && Math.abs(change) >= 0.02 ? `Training load ${change > 0 ? "up" : "down"} ${Math.round(Math.abs(change) * 100)}% in 4 weeks` : "Training load steady",
+    diffMin !== 0 && `prediction ${Math.abs(diffMin)} min ${diffMin < 0 ? "faster" : "slower"}`,
+  ].filter(Boolean);
+  return (
+    <button type="button" className="card list-row progress-line" onClick={onOpen}>
+      <ChartLineUp size={20} weight="duotone" className="brand-ink" />
+      <span>
+        <strong>Progress</strong> <span className="muted">· {parts.join(", ")}</span>
+      </span>
+      <CaretRight size={16} />
+    </button>
   );
 }

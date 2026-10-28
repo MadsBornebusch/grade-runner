@@ -8,6 +8,7 @@ import type { FormInputs } from "../formInputs";
 import { MoveLongRunSheet } from "../plan/MoveLongRunSheet";
 import { PlanEmptyState } from "../plan/PlanEmptyState";
 import { PlanOverview } from "../plan/PlanOverview";
+import { ProgressView } from "../plan/ProgressView";
 import { ScheduleEditor } from "../plan/ScheduleEditor";
 import { SessionSheet } from "../plan/SessionSheet";
 import { WeekView } from "../plan/WeekView";
@@ -23,7 +24,7 @@ interface ScheduleTabProps {
 }
 
 /** #/schedule (this week), #/schedule/week/YYYY-MM-DD, #/schedule/plan
- * (all weeks), #/schedule/edit (your week). */
+ * (all weeks), #/schedule/edit (your week), #/schedule/progress. */
 export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabProps) {
   const settings = planSettingsStore.use();
   const doneOf = useSessionDone(plan.snapshot);
@@ -47,6 +48,14 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
           onCancel={() => navigate("schedule")}
         />
       </>
+    );
+  }
+
+  if (rest[0] === "progress") {
+    return plan.history ? (
+      <ProgressView history={plan.history} today={plan.today} onBack={() => navigate("schedule")} />
+    ) : (
+      <p className="help">Loading your runs…</p>
     );
   }
 
@@ -135,6 +144,7 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
         onMoveLongRun={canMove ? () => setMoving(weekdayOf(longSession!.day)) : undefined}
         onEditSchedule={() => navigate("schedule", "edit")}
         onAllWeeks={() => navigate("schedule", "plan")}
+        onProgress={() => navigate("schedule", "progress")}
       />
       {openSession && (
         <SessionSheet

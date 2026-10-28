@@ -23,9 +23,10 @@ interface WeekViewProps {
   onMoveLongRun?: () => void;
   onEditSchedule: () => void;
   onAllWeeks: () => void;
+  onProgress: () => void;
 }
 
-export function WeekView({ week, weekNumber, weekCount, history, today, doneOf, targets, onOpen, onPrev, onNext, onMoveLongRun, onEditSchedule, onAllWeeks }: WeekViewProps) {
+export function WeekView({ week, weekNumber, weekCount, history, today, doneOf, targets, onOpen, onPrev, onNext, onMoveLongRun, onEditSchedule, onAllWeeks, onProgress }: WeekViewProps) {
   const { doneMin, plannedMin, isCurrent } = weekProgress(week, history, today, (s) => !!doneOf(s));
   const isPast = week.start + 7 <= today;
   const days = matchWeek(week.start, week.sessions, history, today);
@@ -102,6 +103,9 @@ export function WeekView({ week, weekNumber, weekCount, history, today, doneOf, 
           </button>
           <button type="button" className="button-ghost button-small" onClick={onAllWeeks}>
             All weeks
+          </button>
+          <button type="button" className="button-ghost button-small" onClick={onProgress}>
+            Progress
           </button>
         </div>
       </div>
