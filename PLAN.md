@@ -4694,6 +4694,29 @@ start at today's shown level). The cards:
   card says it isn't shown to follow race fitness, which is still the open
   question above.
 
+### Installable app (PWA, built 2026-10-29)
+
+- vite-plugin-pwa (generateSW). The manifest has `id`/`start_url`/`scope` `/`, is
+  standalone, and uses `--bg` as its background and theme colour. Icons: the rail's
+  Mountains glyph on `--brand`, a separate maskable 512 with the glyph inside the
+  safe zone, and an apple-touch-icon. There are shortcuts to Today, Schedule and
+  Progress.
+- Precache: the app shell. All data is in localStorage, so the app opens offline.
+  Runtime caches: Google Fonts, and the last 60 OSM tiles (they are opaque, so each
+  costs several MB of quota). `/api/` is never cached, and navigations to it skip
+  the app-shell fallback, because the Strava OAuth callback is a navigation that
+  has to reach the server.
+- Updates use prompt mode: "A new version is ready · Reload / Later"
+  (`src/pwa/UpdatePrompt.tsx`, mounted from main.tsx outside App so tests never
+  import the virtual module). It checks on becoming visible and hourly, because
+  hash routing never navigates.
+- `navigator.storage.persist()` runs on start.
+- "Install app" in Settings uses `beforeinstallprompt`, which is caught at module
+  load in `src/pwa/installPrompt.ts`. The row is hidden where the browser doesn't
+  offer it or the app is installed.
+- Offline, the Strava session check reads as offline, not disconnected. It
+  re-checks on `online`, and the sync and settings pull follow.
+
 ### Strength sessions and the weighted hike (built 2026-10-23)
 
 What the plan prescribes in its strength sessions, and a weighted uphill

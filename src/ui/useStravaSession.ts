@@ -4,6 +4,9 @@ export interface StravaSessionState {
   connected: boolean;
   athleteName: string | null;
   loading: boolean;
+  /** The check couldn't reach the server because the device is offline:
+   * whether Strava is connected isn't known. */
+  offline: boolean;
   refresh: () => void;
 }
 
@@ -11,6 +14,7 @@ interface SessionSnapshot {
   connected: boolean;
   athleteName: string | null;
   loading: boolean;
+  offline: boolean;
 }
 
 // Module-level shared state, same pattern as autoFetchRuns.ts/backfillRuns.ts/
@@ -24,7 +28,7 @@ interface SessionSnapshot {
 // enough that the connection status (a link or a name) could take several
 // seconds to appear anywhere, even though a single direct fetch resolves
 // near-instantly.
-let snapshot: SessionSnapshot = { connected: false, athleteName: null, loading: true };
+let snapshot: SessionSnapshot = { connected: false, athleteName: null, loading: true, offline: false };
 const listeners = new Set<() => void>();
 let started = false;
 
@@ -40,11 +44,19 @@ function refresh(): void {
   fetch("/api/strava/session")
     .then((res) => (res.ok ? res.json() : { connected: false }))
     .then((data: { connected: boolean; athleteName?: string }) => {
-      setSnapshot({ connected: data.connected, athleteName: data.athleteName ?? null, loading: false });
+      setSnapshot({ connected: data.connected, athleteName: data.athleteName ?? null, loading: false, offline: false });
     })
     .catch(() => {
-      setSnapshot({ connected: false, athleteName: null, loading: false });
+      setSnapshot({ connected: false, athleteName: null, loading: false, offline: !navigator.onLine });
     });
+}
+
+// Opened offline (the installed app): check again once there's a network,
+// so the Strava sync and settings pull follow on their own.
+if (typeof window !== "undefined") {
+  window.addEventListener("online", () => {
+    if (started && snapshot.offline) refresh();
+  });
 }
 
 function subscribe(listener: () => void): () => void {

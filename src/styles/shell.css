@@ -215,3 +215,35 @@
   max-width: var(--content-max);
   margin: 0 auto;
 }
+
+/* "A new version is ready": above the tab bar on phones, bottom-left of
+ * the content beside the rail on wider screens. */
+.update-prompt {
+  position: fixed;
+  z-index: 30;
+  left: var(--sp-4);
+  right: var(--sp-4);
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + var(--sp-3));
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
+  background: var(--surface-raised);
+  color: var(--text);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-3);
+  font-size: var(--fs-sm);
+}
+
+.update-prompt > span {
+  flex: 1;
+}
+
+@media (min-width: 900px) {
+  .update-prompt {
+    left: auto;
+    right: var(--sp-6);
+    bottom: var(--sp-6);
+    width: 360px;
+  }
+}

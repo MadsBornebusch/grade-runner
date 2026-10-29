@@ -2,9 +2,11 @@ import { useStravaSession } from "./useStravaSession";
 
 /** Connect button, or who's connected with a way out. */
 export function StravaConnectionStatus() {
-  const { connected, athleteName, loading } = useStravaSession();
+  const { connected, athleteName, loading, offline } = useStravaSession();
 
   if (loading) return null;
+
+  if (offline) return <p className="help strava-status__line">You're offline. New runs come in from Strava once you're back online.</p>;
 
   if (!connected) {
     return (
