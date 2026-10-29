@@ -14,6 +14,7 @@ import type { RunFitCallbacks } from "./ui/runFitBatch";
 import { TodayTab } from "./ui/tabs/TodayTab";
 import { ScheduleTab } from "./ui/tabs/ScheduleTab";
 import { PlanSettingsSection } from "./ui/plan/PlanSettingsSection";
+import { ProgressView } from "./ui/plan/ProgressView";
 import "./styles/shell.css";
 import "./styles/plan.css";
 
@@ -109,7 +110,10 @@ function App() {
     return () => clearTimeout(timeout);
   }, [stravaConnected, formInputs]);
 
-  const show = (tab: TabId) => ({ hidden: route.tab !== tab, className: `tab-page tab-page--${tab}` });
+  // #/<tab>/progress: the Progress page, over whichever tab opened it, so
+  // that tab stays lit and Back returns to it.
+  const progress = route.rest[0] === "progress";
+  const show = (tab: TabId) => ({ hidden: progress || route.tab !== tab, className: `tab-page tab-page--${tab}` });
 
   return (
     <div className="app-shell">
@@ -120,21 +124,26 @@ function App() {
       />
       <main className="app-main">
         <div {...show("today")}>
-          {route.tab === "today" && <TodayTab plan={plan} formInputs={formInputs} navigate={route.navigate} />}
+          {route.tab === "today" && !progress && <TodayTab plan={plan} formInputs={formInputs} navigate={route.navigate} />}
         </div>
         <div {...show("schedule")}>
-          {route.tab === "schedule" && <ScheduleTab plan={plan} formInputs={formInputs} rest={route.rest} navigate={route.navigate} />}
+          {route.tab === "schedule" && !progress && <ScheduleTab plan={plan} formInputs={formInputs} rest={route.rest} navigate={route.navigate} />}
         </div>
         <div {...show("race")}>
           <RaceTab
             formInputs={formInputs}
             setFormInputs={setFormInputs}
-            active={route.tab === "race"}
-            rest={route.tab === "race" ? route.rest : null}
+            active={route.tab === "race" && !progress}
+            rest={route.tab === "race" && !progress ? route.rest : null}
             navigate={route.navigate}
             plan={plan}
           />
         </div>
+        {progress && (
+          <div className="tab-page tab-page--progress">
+            <ProgressView plan={plan} formInputs={formInputs} onBack={() => route.navigate(route.tab)} />
+          </div>
+        )}
         <div {...show("runs")}>
           {(runsVisited || route.tab === "runs") && (
             <RunsTab

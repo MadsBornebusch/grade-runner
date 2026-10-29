@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
 import { sessionState, toggleSessionDone, useSessionDone, type SessionDone } from "../plan/useSessionDone";
 import { intensityTargets } from "../plan/intensity";
-import { ArrowsClockwise, CaretRight, ChartLineUp, CheckCircle, FlagCheckered, Moon, XCircle } from "@phosphor-icons/react";
+import { ArrowsClockwise, CaretRight, CheckCircle, FlagCheckered, Moon, XCircle } from "@phosphor-icons/react";
 import { useSyncExternalStore } from "react";
 import { runsNeedingFuelLog } from "../../plan/carbLadder";
 import { dateOfDayNumber, dayNumberOf, type DatedHistoryRun } from "../../plan/historyFromRuns";
 import { matchDay } from "../../plan/matchSessions";
-import { mondayOf, type PlannedSession } from "../../plan/planGenerator";
+import { mondayOf, type Phase, type PlannedSession } from "../../plan/planGenerator";
 import { fuelLogStore } from "../../storage/fuelLogs";
 import { planSettingsStore } from "../../storage/planSettings";
 import { predictionLogStore, raceLogKey } from "../../storage/predictionLog";
@@ -16,6 +16,7 @@ import type { FormInputs } from "../formInputs";
 import { CheckinCard } from "../plan/CheckinCard";
 import { FuelLogCard } from "../plan/FuelLogCard";
 import { PlanEmptyState } from "../plan/PlanEmptyState";
+import { loadTrend, predictionDelta } from "../plan/progressCopy";
 import { RestRow, SessionCard } from "../plan/SessionCard";
 import { KIND_ICON } from "../plan/kindIcons";
 import { SessionSheet } from "../plan/SessionSheet";
@@ -170,7 +171,7 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
 
       {week && <WeekStrip plan={plan} weekStart={week.start} doneOf={doneOf} onOpen={() => navigate("schedule")} />}
 
-      <ProgressLine history={history} today={today} onOpen={() => navigate("schedule", "progress")} />
+      <ProgressLine history={history} today={today} phase={week?.phase} onOpen={() => navigate("today", "progress")} />
 
       {next.length > 0 && (
         <section>
@@ -262,24 +263,40 @@ function WeekStrip({ plan, weekStart, doneOf, onOpen }: { plan: PlanState; weekS
   );
 }
 
-/** One line on Today: the 6-week load's change and the prediction's. */
-function ProgressLine({ history, today, onOpen }: { history: DatedHistoryRun[]; today: number; onOpen: () => void }) {
+/** One line on Today: a sparkline of the 6-week load over 3 months, its
+ * trend read against this week's phase, and the prediction's change. */
+function ProgressLine({ history, today, phase, onOpen }: { history: DatedHistoryRun[]; today: number; phase?: Phase; onOpen: () => void }) {
   const race = planSettingsStore.use().goalRace;
   const log = predictionLogStore.use().byRace;
-  const change = useMemo(() => longTermChange(loadSeries(history, today, today - 28), 28), [history, today]);
-  const entries = race ? (log[raceLogKey(race)] ?? []) : [];
-  const diffMin = entries.length > 1 ? Math.round((entries.at(-1)!.finishS - entries[0].finishS) / 60) : 0;
-  const parts = [
-    change !== null && Math.abs(change) >= 0.02 ? `Training load ${change > 0 ? "up" : "down"} ${Math.round(Math.abs(change) * 100)}% in 4 weeks` : "Training load steady",
-    diffMin !== 0 && `prediction ${Math.abs(diffMin)} min ${diffMin < 0 ? "faster" : "slower"}`,
-  ].filter(Boolean);
+  const series = useMemo(() => loadSeries(history, today, today - 91), [history, today]);
+  const trend = loadTrend(longTermChange(series, 28), phase);
+  const delta = race ? predictionDelta(log[raceLogKey(race)] ?? []) : null;
+  const level = series.at(-1)?.longTerm;
+  const parts = [trend?.text ?? (level ? `6-week load ${Math.round(level)}` : null), delta && `finish ${delta.text.replace(/ since .*/, "")}`].filter(Boolean);
   return (
     <button type="button" className="card list-row progress-line" onClick={onOpen}>
-      <ChartLineUp size={20} weight="duotone" className="brand-ink" />
-      <span>
-        <strong>Progress</strong> <span className="muted">· {parts.join(", ")}</span>
+      <span className="progress-line__text">
+        <strong>Progress</strong>
+        {parts.length > 0 && <span className="muted"> · {parts.join(", ")}</span>}
       </span>
+      <Sparkline values={series.map((p) => p.longTerm)} />
       <CaretRight size={16} />
     </button>
+  );
+}
+
+function Sparkline({ values }: { values: number[] }) {
+  if (values.length < 2) return null;
+  const w = 72;
+  const h = 28;
+  const max = Math.max(...values) || 1;
+  const min = Math.min(...values);
+  const y = (v: number) => h - 2 - ((v - min) / (max - min || 1)) * (h - 4);
+  const pts = values.map((v, i) => `${((i / (values.length - 1)) * w).toFixed(1)},${y(v).toFixed(1)}`);
+  return (
+    <svg className="sparkline" width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
+      <polygon points={`0,${h} ${pts.join(" ")} ${w},${h}`} className="sparkline__fill" />
+      <polyline points={pts.join(" ")} className="sparkline__line" />
+    </svg>
   );
 }

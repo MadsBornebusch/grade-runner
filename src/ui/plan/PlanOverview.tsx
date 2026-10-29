@@ -2,7 +2,8 @@ import { ArrowLeft, FlagCheckered, Path, Warning } from "@phosphor-icons/react";
 import type { DatedHistoryRun } from "../../plan/historyFromRuns";
 import type { Plan } from "../../plan/planGenerator";
 import { PHASE_LABEL, formatMinutes, shortDate } from "./planCopy";
-import { planWarnings, weekProgress } from "./planViewModel";
+import { pastRaceLabel, planWarnings, weekProgress } from "./planViewModel";
+import { ReadinessCard } from "./ReadinessCard";
 
 interface PlanOverviewProps {
   plan: Plan;
@@ -19,13 +20,8 @@ interface PlanOverviewProps {
 }
 
 export function PlanOverview({ plan, raceName, raceDay, expectedHours, generic, history, runNames, today, onBack, onOpenWeek, onEditSchedule }: PlanOverviewProps) {
-  const raceLabel = (day: number) => {
-    const run = history.find((r) => r.day === day && r.movingMin >= 60);
-    return (run && runNames.get(run.runId)) || `your race on ${shortDate(day)}`;
-  };
+  const raceLabel = pastRaceLabel(history, runNames);
   const warnings = planWarnings(plan, expectedHours, generic, raceLabel);
-  const best = [...plan.comparableRaces].sort((a, b) => b.chronicBefore - a.chronicBefore)[0];
-  const scaleMax = Math.max(plan.projectedChronicAtRace, ...plan.comparableRaces.map((c) => c.chronicBefore)) * 1.15 || 1;
 
   return (
     <section className="plan-overview">
@@ -68,26 +64,7 @@ export function PlanOverview({ plan, raceName, raceDay, expectedHours, generic, 
         {plan.budgetBindsFrom !== null && <p className="help">From {shortDate(plan.budgetBindsFrom)} your hours are full: progress slows rather than adding time.</p>}
       </div>
 
-      <div className="card">
-        <h3 className="card-title">Race-day training</h3>
-        {plan.comparableRaces.length === 0 ? (
-          <p className="help">No past race of similar length to compare with.</p>
-        ) : (
-          <>
-            <div className="readiness">
-              <div className="readiness__bar" style={{ width: `${(100 * plan.projectedChronicAtRace) / scaleMax}%` }} />
-              {plan.comparableRaces.map((c) => (
-                <span key={c.day} className="readiness__tick" style={{ left: `${(100 * c.chronicBefore) / scaleMax}%` }} title={raceLabel(c.day)} />
-              ))}
-            </div>
-            <p className="help">
-              Bar: your training on race day if you follow the plan. Ticks: before{" "}
-              {[...new Set(plan.comparableRaces.map((c) => raceLabel(c.day)))].join(", ")}.
-            </p>
-            {best && plan.projectedChronicAtRace >= best.chronicBefore && <p>About as trained as before {raceLabel(best.day)}, or more.</p>}
-          </>
-        )}
-      </div>
+      <ReadinessCard plan={plan} raceLabel={raceLabel} />
 
       {warnings.map((w) => (
         <div key={w.text} className="banner banner--warning">

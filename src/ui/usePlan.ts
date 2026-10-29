@@ -10,6 +10,7 @@ import { createLocalStore } from "../storage/localStore";
 import { fuelLogStore } from "../storage/fuelLogs";
 import { planSettingsStore } from "../storage/planSettings";
 import { predictionLogStore, raceLogKey, withPrediction } from "../storage/predictionLog";
+import { phaseLogStore } from "../storage/phaseLog";
 import { listStoredRuns, subscribeToRunEdits } from "../storage/runLibrary";
 import { getAutoFetchStatus, subscribeToAutoFetch } from "./autoFetchRuns";
 import { getBackfillStatus, subscribeToBackfill } from "./backfillRuns";
@@ -137,6 +138,15 @@ export function usePlan(formInputs: FormInputs, pausePrediction = false): PlanSt
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [race?.courseId, race?.date, predictedS, today]);
+
+  // And this week's phase, for the Progress page's shading of past weeks.
+  const weekPhase = snapshot?.plan.weeks.find((w) => w.start === mondayOf(today))?.phase;
+  useEffect(() => {
+    if (!weekPhase) return;
+    const monday = dateOfDayNumber(mondayOf(today));
+    if (phaseLogStore.get().byWeek[monday] === weekPhase) return;
+    phaseLogStore.set((log) => ({ ...log, byWeek: { ...log.byWeek, [monday]: weekPhase } }));
+  }, [weekPhase, today]);
 
   const carbs = useMemo(() => {
     const runs = (history ?? []).map((r) => ({ runId: r.runId, day: r.day, movingMin: r.movingMin }));

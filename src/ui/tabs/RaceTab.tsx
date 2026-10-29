@@ -739,7 +739,7 @@ export function RaceTab({ formInputs, setFormInputs, active, rest, navigate, pla
     <div className="race-tab">
       {view.kind === "goal" && (
         <>
-          <GoalRaceCard formInputs={formInputs} plan={plan} refreshKey={courseLibraryVersion} />
+          <GoalRaceCard formInputs={formInputs} plan={plan} refreshKey={courseLibraryVersion} onProgress={() => navigate("race", "progress")} />
           {goalRace && (loadingOrMissing ?? pacingPlan)}
           <CourseLibraryPanel
             title={goalRace ? "Other courses" : "Your courses"}

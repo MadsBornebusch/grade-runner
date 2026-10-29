@@ -2326,3 +2326,51 @@ a.button-ghost {
 .progress-line {
   cursor: pointer;
 }
+
+.progress-line__text {
+  flex: 1;
+}
+
+.sparkline {
+  flex: none;
+}
+
+.sparkline__line {
+  fill: none;
+  stroke: var(--brand);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.sparkline__fill {
+  fill: var(--brand);
+  opacity: 0.15;
+}
+
+.progress-note p {
+  margin: 0;
+}
+
+.progress-note .help {
+  margin-top: var(--sp-1);
+}
+
+.race-hero__progress {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-top: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+  min-height: 32px;
+  border: none;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.race-hero__progress:hover {
+  background: rgba(255, 255, 255, 0.22);
+}

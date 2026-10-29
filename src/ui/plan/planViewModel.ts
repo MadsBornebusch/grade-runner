@@ -1,6 +1,6 @@
 import type { DatedHistoryRun } from "../../plan/historyFromRuns";
 import type { Plan, PlannedSession, PlanWeek } from "../../plan/planGenerator";
-import { formatMinutes } from "./planCopy";
+import { formatMinutes, shortDate } from "./planCopy";
 
 /** Minutes run so far in the week, and the week's planned total (in the
  * current week: what was run before today plus what's planned from today).
@@ -42,4 +42,12 @@ export function planWarnings(plan: Plan, expectedHours: number, generic: boolean
   }
   if (generic) out.push({ text: "Using typical pace and climb values until 20 of your runs with full data have synced." });
   return out;
+}
+
+/** A past race's name from the run that day, or its date. */
+export function pastRaceLabel(history: DatedHistoryRun[], runNames: Map<string, string>) {
+  return (day: number) => {
+    const run = history.find((r) => r.day === day && r.movingMin >= 60);
+    return (run && runNames.get(run.runId)) || `your race on ${shortDate(day)}`;
+  };
 }

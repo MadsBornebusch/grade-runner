@@ -8,7 +8,7 @@
 // uses the raw series, not capSpikes's: a race shows as the jump it was
 // (loadLedger.ts: "Validate and display the raw series").
 import { ACUTE_TAU_DAYS, CHRONIC_TAU_DAYS, ewma } from "./loadLedger";
-import { mondayOf, type HistoryRun } from "./planGenerator";
+import { mondayOf, type HistoryRun, type Phase, type PlanWeek } from "./planGenerator";
 
 export interface LoadPoint {
   day: number;
@@ -101,5 +101,54 @@ export function byMonth(weeks: WeekTotals[], monthOf: (day: number) => string): 
     m.descentM += w.descentM;
     m.climbM += w.climbM;
   }
+  return out;
+}
+
+export interface PhaseBand {
+  /** First day, and the day after the last. */
+  from: number;
+  to: number;
+  phase: Phase;
+}
+
+/**
+ * Weeks shaded by phase between `from` and `to`: past weeks from the log
+ * (Mondays by day number), this week and later from the plan, which wins
+ * where both have a week. Neighbouring weeks of one phase merge into one
+ * band; bands are clipped to the window.
+ */
+export function phaseBands(logged: Map<number, Phase>, weeks: Pick<PlanWeek, "start" | "phase">[], from: number, to: number): PhaseBand[] {
+  const byWeek = new Map(logged);
+  for (const w of weeks) byWeek.set(w.start, w.phase);
+  const out: PhaseBand[] = [];
+  for (const [start, phase] of [...byWeek].sort((a, b) => a[0] - b[0])) {
+    const a = Math.max(start, from);
+    const b = Math.min(start + 7, to);
+    if (a >= b) continue;
+    const last = out.at(-1);
+    if (last && last.phase === phase && last.to === a) last.to = b;
+    else out.push({ from: a, to: b, phase });
+  }
+  return out;
+}
+
+/**
+ * The 6-week level ahead if the plan is followed, per week (7 x the daily
+ * level, like loadSeries), from `today` to the race. The plan's levels are
+ * the generator's spike-capped ones, so they're moved to start at the
+ * displayed level today: only the plan's change from this week is used.
+ */
+export function planProjection(
+  weeks: Pick<PlanWeek, "start" | "chronicAtStart">[],
+  today: number,
+  longTermToday: number,
+  race?: { day: number; chronic: number },
+): { day: number; plan: number }[] {
+  const current = weeks.find((w) => w.start <= today && today < w.start + 7);
+  if (!current) return [];
+  const at = (chronic: number) => Math.max(0, longTermToday + 7 * (chronic - current.chronicAtStart));
+  const out = [{ day: today, plan: longTermToday }];
+  for (const w of weeks) if (w.start > today && (!race || w.start < race.day)) out.push({ day: w.start, plan: at(w.chronicAtStart) });
+  if (race && race.day > today) out.push({ day: race.day, plan: at(race.chronic) });
   return out;
 }

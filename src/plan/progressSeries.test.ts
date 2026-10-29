@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mondayOf } from "./planGenerator";
-import { byMonth, loadSeries, longTermChange, weeklyTotals } from "./progressSeries";
+import { byMonth, loadSeries, longTermChange, phaseBands, planProjection, weeklyTotals } from "./progressSeries";
 
 const MONDAY = mondayOf(20000);
 const run = (day: number, extra: Partial<{ mechanical: number; movingMin: number; distanceKm: number; descentM: number; climbM: number }> = {}) => ({
@@ -75,5 +75,38 @@ describe("byMonth", () => {
     ]);
     // The weeks themselves are untouched.
     expect(w[0].runs).toBe(1);
+  });
+});
+
+describe("phaseBands", () => {
+  it("merges same-phase weeks, lets the plan win and clips to the window", () => {
+    const logged = new Map([
+      [MONDAY - 21, "base" as const],
+      [MONDAY - 14, "base" as const],
+      [MONDAY - 7, "deload" as const],
+      [MONDAY, "base" as const],
+    ]);
+    const plan = [{ start: MONDAY, phase: "specific" as const }, { start: MONDAY + 7, phase: "specific" as const }];
+    expect(phaseBands(logged, plan, MONDAY - 18, MONDAY + 10)).toEqual([
+      { from: MONDAY - 18, to: MONDAY - 7, phase: "base" },
+      { from: MONDAY - 7, to: MONDAY, phase: "deload" },
+      { from: MONDAY, to: MONDAY + 10, phase: "specific" },
+    ]);
+  });
+});
+
+describe("planProjection", () => {
+  it("moves the plan's levels to start at today's displayed level", () => {
+    const weeks = [{ start: MONDAY, chronicAtStart: 40 }, { start: MONDAY + 7, chronicAtStart: 45 }, { start: MONDAY + 14, chronicAtStart: 42 }];
+    expect(planProjection(weeks, MONDAY + 2, 300, { day: MONDAY + 20, chronic: 38 })).toEqual([
+      { day: MONDAY + 2, plan: 300 },
+      { day: MONDAY + 7, plan: 335 },
+      { day: MONDAY + 14, plan: 314 },
+      { day: MONDAY + 20, plan: 286 },
+    ]);
+  });
+
+  it("is empty without a week containing today", () => {
+    expect(planProjection([{ start: MONDAY + 7, chronicAtStart: 40 }], MONDAY, 300)).toEqual([]);
   });
 });

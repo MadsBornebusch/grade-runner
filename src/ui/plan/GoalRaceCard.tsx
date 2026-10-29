@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { FlagCheckered, PencilSimple, Ruler, Timer, TrendDown } from "@phosphor-icons/react";
+import { CaretRight, ChartLineUp, FlagCheckered, PencilSimple, Ruler, Timer, TrendDown } from "@phosphor-icons/react";
 import { demonstratedIntake } from "../../plan/carbLadder";
 import { dayNumberOf } from "../../plan/historyFromRuns";
 import { listStoredCourses, type StoredCourse } from "../../storage/courseLibrary";
 import { fuelLogStore } from "../../storage/fuelLogs";
 import { planSettingsStore } from "../../storage/planSettings";
+import { predictionLogStore, raceLogKey } from "../../storage/predictionLog";
 import { runPipeline } from "../../gpx/pipeline";
 import { formatDuration, parseDurationToSeconds } from "../format";
 import type { FormInputs } from "../formInputs";
@@ -12,15 +13,18 @@ import { predictFinishS } from "../solverInputs";
 import { TIME_ZONE, type PlanState } from "../usePlan";
 import { localDateKey } from "../../plan/loadLedger";
 import { shortDate } from "./planCopy";
+import { modelFinishLabel, predictionDelta } from "./progressCopy";
 
 interface GoalRaceCardProps {
   formInputs: FormInputs;
   plan: PlanState;
+  /** Opens the Progress page. */
+  onProgress: () => void;
   /** Bumped when a course is added, to refresh the picker. */
   refreshKey: number;
 }
 
-export function GoalRaceCard({ formInputs, plan, refreshKey }: GoalRaceCardProps) {
+export function GoalRaceCard({ formInputs, plan, refreshKey, onProgress }: GoalRaceCardProps) {
   const settings = planSettingsStore.use();
   const race = settings.goalRace;
   const [courses, setCourses] = useState<StoredCourse[]>([]);
@@ -58,7 +62,7 @@ export function GoalRaceCard({ formInputs, plan, refreshKey }: GoalRaceCardProps
           </span>
         )}
       </div>
-      <Prediction formInputs={formInputs} plan={plan} course={course} />
+      <Prediction formInputs={formInputs} plan={plan} course={course} onProgress={onProgress} />
       <div className="race-hero__actions">
         <button type="button" className="button-on-dark button-on-dark--ghost" onClick={() => setEditing(true)}>
           <PencilSimple size={16} /> Change race
@@ -68,8 +72,9 @@ export function GoalRaceCard({ formInputs, plan, refreshKey }: GoalRaceCardProps
   );
 }
 
-function Prediction({ formInputs, plan, course }: { formInputs: FormInputs; plan: PlanState; course?: StoredCourse }) {
+function Prediction({ formInputs, plan, course, onProgress }: { formInputs: FormInputs; plan: PlanState; course?: StoredCourse; onProgress: () => void }) {
   const race = planSettingsStore.use().goalRace!;
+  const delta = predictionDelta(predictionLogStore.use().byRace[raceLogKey(race)] ?? []);
   const logs = fuelLogStore.use().byRunId;
   const [overrideText, setOverrideText] = useState<string | null>(null);
   const trained = plan.history
@@ -96,7 +101,7 @@ function Prediction({ formInputs, plan, course }: { formInputs: FormInputs; plan
     <div className="race-hero__panel">
       <div className="race-hero__finish">
         <span className="overline">
-          <Timer size={14} /> {race.expectedHoursOverride ? "Your expected finish" : formInputs.pacingMargin ? "Predicted finish" : "Best-case finish"}
+          <Timer size={14} /> {race.expectedHoursOverride ? "Your expected finish" : modelFinishLabel(!!formInputs.pacingMargin)}
         </span>
         {overrideText === null ? (
           <button type="button" className="race-hero__time num" onClick={() => setOverrideText(used ? formatDuration(used).slice(0, -3) : "")} title="Change">
@@ -119,6 +124,11 @@ function Prediction({ formInputs, plan, course }: { formInputs: FormInputs; plan
           </form>
         )}
       </div>
+      <button type="button" className="race-hero__progress" onClick={onProgress}>
+        <ChartLineUp size={16} />
+        <span>{delta && !race.expectedHoursOverride ? delta.text : "Your progress"}</span>
+        <CaretRight size={14} />
+      </button>
       <p className="race-hero__note">
         {race.expectedHoursOverride && predicted
           ? `Plan uses your time. Prediction from your fitness today: ${formatDuration(predicted).slice(0, -3)}.`

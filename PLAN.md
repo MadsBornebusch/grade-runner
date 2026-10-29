@@ -4645,8 +4645,24 @@ carry a grade per lap.
 
 ### Progress page (built 2026-10-28)
 
-`#/schedule/progress` (`ui/plan/ProgressView.tsx`), opened from a line on
-Today and a button on the week view. Three cards:
+`#/<tab>/progress` (`ui/plan/ProgressView.tsx`, routed in `App.tsx` over
+the tab that opened it, so that tab stays lit and Back returns there).
+Opened from a line on Today (with a 3-month sparkline of the 6-week load),
+a button on the week view and a button under the finish time on the goal
+race card. No sixth tab: five already fill a phone's width. Order after a
+UX review (2026-10-29): range chips, training load, race-day training (the
+readiness bar from All weeks, `ReadinessCard.tsx`), per week, predicted
+finish (one line until it has changed once), fitness last as experimental.
+
+Copy is shared in `ui/plan/progressCopy.ts`. The load trend is read against
+this week's phase: a drop in a recovery, easy or taper week reads "as
+planned", a drop in a build week isn't a headline, a rise is shown. The
+finish label is the goal race card's ("Best-case" until the pacing margin is
+fitted). The load chart shades weeks by phase (past weeks from
+`storage/phaseLog.ts`, which records each week's phase once it starts; ahead
+from the plan) and draws the plan ahead as a dashed line
+(`progressSeries.ts`'s `planProjection`: the plan's capped levels, moved to
+start at today's shown level). The cards:
 
 - *Predicted finish over time.* `GoalRaceSettings.predictedFinishS` is
   overwritten on every re-solve, so `storage/predictionLog.ts` keeps a

@@ -8,7 +8,6 @@ import type { FormInputs } from "../formInputs";
 import { MoveLongRunSheet } from "../plan/MoveLongRunSheet";
 import { PlanEmptyState } from "../plan/PlanEmptyState";
 import { PlanOverview } from "../plan/PlanOverview";
-import { ProgressView } from "../plan/ProgressView";
 import { ScheduleEditor } from "../plan/ScheduleEditor";
 import { SessionSheet } from "../plan/SessionSheet";
 import { WeekView } from "../plan/WeekView";
@@ -24,7 +23,7 @@ interface ScheduleTabProps {
 }
 
 /** #/schedule (this week), #/schedule/week/YYYY-MM-DD, #/schedule/plan
- * (all weeks), #/schedule/edit (your week), #/schedule/progress. */
+ * (all weeks), #/schedule/edit (your week). #/schedule/progress is App.tsx's. */
 export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabProps) {
   const settings = planSettingsStore.use();
   const doneOf = useSessionDone(plan.snapshot);
@@ -48,14 +47,6 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
           onCancel={() => navigate("schedule")}
         />
       </>
-    );
-  }
-
-  if (rest[0] === "progress") {
-    return plan.history ? (
-      <ProgressView history={plan.history} formInputs={formInputs} today={plan.today} onBack={() => navigate("schedule")} />
-    ) : (
-      <p className="help">Loading your runs…</p>
     );
   }
 

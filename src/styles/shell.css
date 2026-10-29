@@ -210,7 +210,8 @@
 
 /* The plan screens read as one column, also on desktop. */
 .tab-page--today,
-.tab-page--schedule {
+.tab-page--schedule,
+.tab-page--progress {
   max-width: var(--content-max);
   margin: 0 auto;
 }
