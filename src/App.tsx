@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useNotificationSchedule } from "./pwa/useNotificationSchedule";
 import { TabBar } from "./ui/TabBar";
 import { RaceTab } from "./ui/tabs/RaceTab";
 import { SettingsTab } from "./ui/tabs/SettingsTab";
@@ -24,6 +25,7 @@ function App() {
   const { connected: stravaConnected } = useStravaSession();
   // Re-predicting the race is a long solve: not while typing in Settings.
   const plan = usePlan(formInputs, route.tab === "settings");
+  useNotificationSchedule(plan, formInputs);
   const formInputsRef = useRef(formInputs);
   formInputsRef.current = formInputs;
   // Where the fits land. setFormInputs is stable, so this is built once.

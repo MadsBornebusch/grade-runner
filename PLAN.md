@@ -4717,6 +4717,23 @@ start at today's shown level). The cards:
 - Offline, the Strava session check reads as offline, not disconnected. It
   re-checks on `online`, and the sync and settings pull follow.
 
+### Morning notification (on-device, built 2026-10-31)
+
+- Settings › Notifications. The app writes the next 8 days' texts by local date
+  (`ui/plan/notificationText.ts`, the Today card's wording) to the Cache API
+  (`grade-runner-notify`, `/__notify/schedule`), so the service worker can read
+  them without localStorage. `public/notify-sw.js` is imported into the generated
+  worker (`workbox.importScripts`). On Chrome's `periodicsync` (tag
+  `daily-session`) it shows today's entry once per day, between 6 and 21 local
+  time. Clicking it opens Today.
+- Chrome grants periodic sync only to installed apps, and it picks the times
+  itself (about once a day, from engagement). The timing is best-effort. The
+  reliable alternative is server Web Push (a store, VAPID keys, a cron), which
+  wasn't built.
+- Rest days get nothing. Today's entry is dropped once a run is logged for it.
+  "Show the next one now" previews the next entry. Turning it off unregisters the
+  tag and deletes the cache.
+
 ### Strength sessions and the weighted hike (built 2026-10-23)
 
 What the plan prescribes in its strength sessions, and a weighted uphill

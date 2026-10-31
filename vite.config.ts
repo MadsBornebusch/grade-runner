@@ -36,6 +36,8 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // The morning notification (src/pwa/dailyNotification.ts).
+        importScripts: ['notify-sw.js'],
         // /api is the server: Strava's OAuth callback is a top-level
         // navigation, and answering it with the app shell would drop the
         // session cookie. Nothing under it is cached either.

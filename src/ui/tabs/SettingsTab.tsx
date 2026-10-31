@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { AthleteFields } from "../InputsPanel";
 import type { FormInputs } from "../formInputs";
 import { useInstallPrompt } from "../../pwa/installPrompt";
+import { NotificationSettings } from "../../pwa/NotificationSettings";
 
 interface SettingsTabProps {
   formInputs: FormInputs;
@@ -32,6 +33,7 @@ export function SettingsTab({ formInputs, onChange, planSection }: SettingsTabPr
           </div>
         </section>
       )}
+      <NotificationSettings />
     </div>
   );
 }
