@@ -34,6 +34,20 @@ describe("intensity targets", () => {
     expect(intensityTargets(f, powerAt(141))).toMatchObject({ raceAtLt1: true, easyMaxHr: 135, steady: { lo: 135, hi: 140 } });
   });
 
+  it("gives race-effort long runs a band topped by the race's heart rate, at most LT1", () => {
+    const f = { ...base, lt1HeartRateBpm: 140, lt2HeartRateBpm: 170 };
+    const hrAt = heartRateAtPower(f)!;
+    const powerAt = (hr: number) => [...Array(4000).keys()].map((k) => k / 200).find((x) => hrAt(x) >= hr)!;
+    const t = intensityTargets(f, powerAt(124));
+    expect(t.race).toEqual({ lo: 119, hi: 124 });
+    expect(intensityTargets(f, powerAt(145)).race).toEqual({ lo: 135, hi: 140 });
+    expect(intensityTargets(f, null).race).toBeNull();
+    const s = { ...long(), raceEffort: true, descentM: 900 };
+    expect(effortChip(s, t)).toBe("Race effort · 119–124 bpm");
+    expect(howToRun(s, "R", false, t)).toContain("race effort the whole way (119–124 bpm)");
+    expect(howToRun(s, "R", false, t)).toContain("900 m of descent");
+  });
+
   it("reads heart rate from test stages, interpolating between them", () => {
     const f = { ...base, fatOxPoints: [6, 5.5, 5].map((pace, i) => ({ paceMinPerKm: pace, fatGPerMin: 0.4, carbGPerMin: 2, heartRateBpm: 120 + 10 * i })) };
     const hrAt = heartRateAtPower(f)!;

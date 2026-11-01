@@ -47,13 +47,14 @@ export function repsLine(s: PlannedSession): string | null {
   return `${s.reps} × ${s.repMinutes} min${uphillReps(s) ? " uphill" : ""}`;
 }
 
-const NO_TARGETS: IntensityTargets = { easyMaxHr: null, steady: null, quality: null, raceAtLt1: false };
+const NO_TARGETS: IntensityTargets = { easyMaxHr: null, steady: null, race: null, quality: null, raceAtLt1: false };
 
 const bpm = (lo: number, hi: number) => `${lo}–${hi} bpm`;
 
 /** Short effort label for a session card; null where the kind says it all. */
 export function effortChip(s: PlannedSession, t: IntensityTargets): string | null {
   if (s.kind === "long") {
+    if (s.raceEffort) return `Race effort${t.race ? ` · ${bpm(t.race.lo, t.race.hi)}` : ""}`;
     if (s.steadyMinutes) return `${s.steadyMinutes} min steady${t.steady ? ` · ${bpm(t.steady.lo, t.steady.hi)}` : ""}`;
     return t.easyMaxHr ? `Easy · under ${t.easyMaxHr} bpm` : "Easy";
   }
@@ -71,6 +72,7 @@ export function effortDetail(s: PlannedSession, t: IntensityTargets): string | n
     case "hike":
       return "Legs burn, breathing stays easy";
     case "long":
+      if (s.raceEffort) return t.race ? `Race effort, ${bpm(t.race.lo, t.race.hi)}` : "Race effort";
       return s.steadyMinutes
         ? `${easy}, with ${s.steadyMinutes} min steady${t.steady ? ` at ${bpm(t.steady.lo, t.steady.hi)}` : " at race effort"}`
         : easy;
@@ -88,6 +90,14 @@ export function howToRun(s: PlannedSession, raceName: string, strengthCounts: bo
       return `Relaxed${under}. You can talk in full sentences.`;
     case "long": {
       const carbs = s.carbsGPerH ? ` Take carbs from the first 20 min, a little every 20 min: ${s.carbsGPerH} g/h today.` : "";
+      if (s.raceEffort) {
+        const range = t.race ? ` (${bpm(t.race.lo, t.race.hi)})` : "";
+        const hills = s.descentM >= 50 ? ` The hills match the race's per km: about ${tens(s.descentM)} m of descent.` : "";
+        return (
+          `At race effort the whole way${range}: the effort you'd hold for all of ${raceName}. Walk the climbs you'd walk there and run the downhills controlled. ` +
+          `Heart rate creeps up over hours, so slow down to stay in range rather than hold a pace.${hills}${carbs}`
+        );
+      }
       if (!s.steadyMinutes) {
         return `Easy and steady${under}, walk the steep climbs. On a long run heart rate creeps up, so treat it as a ceiling: slow down rather than push to stay in range.${carbs}`;
       }

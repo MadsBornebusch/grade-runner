@@ -4738,6 +4738,35 @@ start at today's shown level). The cards:
   cap grows from what was actually run, floored by the single-run allowance.
 - Plan inputs key bumped to 13.
 
+### Long runs like the race (built 2026-11-01)
+
+- **Why (the user's proposal).** For a race much longer than the long run, the long
+  run should have the race's hills per km and be run at race effort. For a shorter
+  race, the long run stays slower than race pace but keeps the race's hills per km.
+- **Hills.** With the course's distance and descent known (`GoalRace.distanceKm`, new),
+  the long run's descent, climb and steep descent are at most the race's per km × the
+  run's km. This replaces the 0.6 share of the per-hour rate; the full per-hour rate,
+  the per-run allowance and the weekly cap still apply. Such a long run takes its hills
+  before the descent session (`rank`), since its share is bounded. Without the course's
+  hills it's unchanged.
+- **Race effort (`raceEffortLongRuns`).** The race lasts at least 2× the longest long
+  run and at least 5 h. Then the long run is `raceEffort`: no steady block (and no
+  steady load bump), with km at the race's average speed (course km ÷ expected hours),
+  which also sizes its distance limit. Below that, it's easy plus the steady block, as
+  before. The hours gate stands in for "race effort under LT1": the generator has no
+  thresholds, and a 5 h+ race is under LT1 for practically everyone.
+- **Heart rate.** `IntensityTargets.race`: race heart rate − 5 to race heart rate,
+  capped at LT1. Copy says race effort the whole way and to slow down as heart rate
+  drifts; still no pace targets.
+- **Deloads.** Capping the long run lowered the week's planned hills, and the week after
+  a deload grew from the deload's total or one run's allowance (the long run's), so the
+  peak weeks fell about 25%. Now the week after a lighter week can return to the last
+  build week's hills and grows from there.
+- **Result on the test copy.** 3 h 30 long runs plan about 1,000 m (race density,
+  was 1,350 m); peak weekly descent about 2,000 m (was 1,980 m), with descent sessions
+  and uphill intervals taking the rest. Plan inputs key bumped to 16 (adds the course
+  distance).
+
 ### Hills per hour grow; race week short (built 2026-11-01)
 
 - **Why.** Once the long run reaches its time cap, the per-hour limits (90th percentile

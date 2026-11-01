@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   restDaysAfter,
-  carbTargets, generatePlan, mondayOf, STRENGTH_MINUTES, hikePackPct, rampedFocuses, strengthBlockOf, strengthFocuses, recoveryWeeks, slotsForWeek, steadyBlockMinutes, strengthDaysOf, suggestLongRunMaxMinutes, thresholdReps, type HistoryRun, type PlanOptions, type WeeklySchedule,
+  carbTargets, generatePlan, raceEffortLongRuns, mondayOf, STRENGTH_MINUTES, hikePackPct, rampedFocuses, strengthBlockOf, strengthFocuses, recoveryWeeks, slotsForWeek, steadyBlockMinutes, strengthDaysOf, suggestLongRunMaxMinutes, thresholdReps, type HistoryRun, type PlanOptions, type WeeklySchedule,
 } from "./planGenerator";
 import { guardBreaches, referenceAt, runReferences } from "./sessionGuard";
 
@@ -258,7 +258,9 @@ describe("climb", () => {
     // Hillier going up than down per hour on past runs; the plan pairs them.
     const hist = history(rng(4), 12, 4, 50, 120).map((r) => ({ ...r, climbM: r.descentM * 0.5 }));
     const plan = generatePlan(hist, schedule, { name: "r", day: TODAY + 150, expectedHours: 6 }, TODAY, OPTIONS);
+    // After a lighter week, back to the last build week's level at most.
     let last: number | null = null;
+    let lastBuild = 0;
     for (const w of plan.weeks) {
       const runs = w.sessions.filter((x) => x.kind !== "race" && x.kind !== "strength");
       for (const r of runs) {
@@ -266,8 +268,9 @@ describe("climb", () => {
         expect(r.climbM).toBeLessThanOrEqual(r.allowance!.climbM + 1e-6);
       }
       const climb = runs.reduce((a, r) => a + r.climbM, 0);
-      if (last !== null && last > 0 && w.phase !== "recovery") expect(climb).toBeLessThanOrEqual(1.1 * Math.max(last, runs[0]?.allowance?.climbM ?? 0) + 1e-6);
+      if (last !== null && last > 0 && w.phase !== "recovery") expect(climb).toBeLessThanOrEqual(Math.max(1.1 * Math.max(last, runs[0]?.allowance?.climbM ?? 0), lastBuild) + 1e-6);
       last = climb;
+      if (w.phase === "base" || w.phase === "specific") lastBuild = climb;
     }
     expect(plan.weeks.some((w) => w.sessions.some((x) => x.climbM > 0))).toBe(true);
   });
@@ -457,7 +460,7 @@ describe("steady block on capped long runs", () => {
 
   it("only appears in build weeks once the long run is at the cap, growing and adding load", () => {
     const schedule: WeeklySchedule = { weeklyMinutes: 360, longRunWeekday: 5, longRunMaxMinutes: 150 };
-    const plan = generatePlan(history(rng(11), 20, 3, 50, 120), schedule, { name: "r", day: TODAY + 150, expectedHours: 10 }, TODAY, OPTIONS);
+    const plan = generatePlan(history(rng(11), 20, 3, 50, 120), schedule, { name: "r", day: TODAY + 150, expectedHours: 4.5 }, TODAY, OPTIONS);
     const longs = plan.weeks.flatMap((w) => w.sessions.filter((x) => x.kind === "long").map((x) => ({ x, phase: w.phase })));
     for (const { x, phase } of longs) {
       if (!x.steadyMinutes) continue;
@@ -470,6 +473,50 @@ describe("steady block on capped long runs", () => {
     expect(blocks.length).toBeGreaterThan(2);
     expect(Math.max(...blocks)).toBeGreaterThan(blocks[0]);
     expect(longs.some(({ x, phase }) => (phase === "deload" || phase === "taper") && x.steadyMinutes)).toBe(false);
+  });
+});
+
+describe("long runs like the race", () => {
+  const schedule: WeeklySchedule = { weeklyMinutes: 420, longRunWeekday: 5, longRunMaxMinutes: 180 };
+  const longsOf = (plan: ReturnType<typeof generatePlan>) => plan.weeks.flatMap((w) => w.sessions.filter((x) => x.kind === "long"));
+
+  it("are at race effort, with no steady block, for a race far longer than them", () => {
+    expect(raceEffortLongRuns({ expectedHours: 10 }, 180)).toBe(true);
+    expect(raceEffortLongRuns({ expectedHours: 5.5 }, 180)).toBe(false); // under twice the long run
+    expect(raceEffortLongRuns({ expectedHours: 4 }, 90)).toBe(false); // too short a race for race effort every week
+    const race = { name: "r", day: TODAY + 150, expectedHours: 10, distanceKm: 70, descentM: 2800 };
+    const longs = longsOf(generatePlan(history(rng(11), 20, 3, 50, 120), schedule, race, TODAY, OPTIONS));
+    expect(longs.length).toBeGreaterThan(5);
+    for (const x of longs) {
+      expect(x.raceEffort).toBe(true);
+      expect(x.steadyMinutes).toBeUndefined();
+      // Distance at the race's speed, hills at most the race's per km.
+      expect(x.distanceKm).toBeLessThanOrEqual((x.minutes / 60) * 7 + 1e-9);
+      expect(x.descentM).toBeLessThanOrEqual(40 * x.distanceKm + 1e-9);
+    }
+  });
+
+  it("stay easy for a shorter race, with the race's hills per km at the speed of easy running", () => {
+    const race = { name: "r", day: TODAY + 150, expectedHours: 4.5, distanceKm: 40, descentM: 2000, steepDescentM: 200 };
+    const longs = longsOf(generatePlan(history(rng(11), 20, 3, 50, 120), schedule, race, TODAY, OPTIONS));
+    expect(longs.some((x) => x.steadyMinutes)).toBe(true);
+    for (const x of longs) {
+      expect(x.raceEffort).toBeUndefined();
+      expect(x.descentM).toBeLessThanOrEqual(50 * x.distanceKm + 1e-9);
+      expect(x.steepDescentM).toBeLessThanOrEqual(5 * x.distanceKm + 1e-9);
+    }
+  });
+
+  it("take the race's hills as their target, not a share of the hills per hour", () => {
+    // A hilly race lifts the long run past the old 0.6 x hills per hour;
+    // a flat one holds it down, and the week's hills go elsewhere.
+    const hist = history(rng(11), 20, 3, 50, 120);
+    const at = (descentM: number) => longsOf(generatePlan(hist, schedule, { name: "r", day: TODAY + 150, expectedHours: 4.5, distanceKm: 40, descentM }, TODAY, OPTIONS));
+    const none = longsOf(generatePlan(hist, schedule, { name: "r", day: TODAY + 150, expectedHours: 4.5 }, TODAY, OPTIONS));
+    const sum = (xs: { descentM: number }[]) => xs.reduce((a, x) => a + x.descentM, 0);
+    expect(sum(at(10000))).toBeGreaterThan(sum(none));
+    expect(sum(at(200))).toBeLessThan(sum(none));
+    for (const x of at(200)) expect(x.descentM).toBeLessThanOrEqual(5 * x.distanceKm + 1e-9);
   });
 });
 
@@ -513,6 +560,14 @@ describe("hills per hour", () => {
       if (x.kind === "race" || x.kind === "strength" || x.kind === "hike") continue;
       expect(rate(x)).toBeLessThanOrEqual(1.5 * OPTIONS.maxDescentPerHour + 1e-6);
     }
+  });
+
+  it("return to the last build week's level after a deload, not the deload's", () => {
+    const hills = (w: (typeof plan.weeks)[number]) => w.sessions.filter((x) => x.kind !== "race" && x.kind !== "strength").reduce((a, x) => a + x.descentM, 0);
+    const i = plan.weeks.findIndex((w, k) => k > 0 && w.phase === "deload" && plan.weeks[k - 1].phase === "base" && plan.weeks[k + 1]?.phase === "base");
+    expect(i).toBeGreaterThan(0);
+    expect(hills(plan.weeks[i])).toBeLessThan(hills(plan.weeks[i - 1]));
+    expect(hills(plan.weeks[i + 1])).toBeGreaterThanOrEqual(hills(plan.weeks[i - 1]) - 1);
   });
 
   it("leave race week short runs only, no long run", () => {

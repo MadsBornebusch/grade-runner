@@ -18,6 +18,8 @@ export interface IntensityTargets {
   easyMaxHr: number | null;
   /** The long run's steady block: race effort up to LT1. */
   steady: HrRange | null;
+  /** Race-effort long runs: around the race's predicted heart rate. */
+  race: HrRange | null;
   /** Threshold work, around LT2. */
   quality: HrRange | null;
   /** The race's predicted effort reaches LT1, so steady = just under LT1. */
@@ -61,6 +63,9 @@ const r = Math.round;
  * under LT1 so it is a distinct, narrow band; easy runs stay below it. */
 const STEADY_BELOW_LT1_MIN = 5;
 const STEADY_BELOW_LT1_MAX = 15;
+/** Assumption: a race-effort band reaches this far under the race's heart
+ * rate, which is its top: heart rate drifts up over hours at one effort. */
+const RACE_BAND_BPM = 5;
 
 export function intensityTargets(formInputs: FormInputs, raceEffortWPerKg: number | null | undefined): IntensityTargets {
   const hrAt = heartRateAtPower(formInputs);
@@ -69,6 +74,11 @@ export function intensityTargets(formInputs: FormInputs, raceEffortWPerKg: numbe
   const lt2Hr = formInputs.lt2HeartRateBpm ?? (hrAt ? r(hrAt(lt2)) : null);
   const raceAtLt1 = !!raceEffortWPerKg && raceEffortWPerKg >= lt1;
   let steady: HrRange | null = null;
+  let race: HrRange | null = null;
+  if (raceEffortWPerKg && hrAt) {
+    const hi = Math.min(r(hrAt(raceEffortWPerKg)), lt1Hr ?? Infinity);
+    race = { lo: hi - RACE_BAND_BPM, hi };
+  }
   if (lt1Hr !== null) {
     // Race effort at or above LT1: steady is the narrow band just under it.
     const raceHr = raceAtLt1 ? lt1Hr : raceEffortWPerKg && hrAt ? r(hrAt(raceEffortWPerKg)) : lt1Hr - 10;
@@ -78,6 +88,7 @@ export function intensityTargets(formInputs: FormInputs, raceEffortWPerKg: numbe
     // Easy ends where steady starts, so the two never overlap.
     easyMaxHr: steady?.lo ?? null,
     steady,
+    race,
     quality: lt2Hr !== null ? { lo: lt2Hr - 5, hi: lt2Hr + 2 } : null,
     raceAtLt1,
   };

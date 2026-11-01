@@ -110,6 +110,8 @@ export interface GoalRace {
   /** Total and steep (< -17%) descent of the course, if known. */
   descentM?: number;
   steepDescentM?: number;
+  /** Course length, if known: long runs take the race's hills per km. */
+  distanceKm?: number;
 }
 
 export interface PlanOptions {
@@ -180,6 +182,9 @@ export interface PlannedSession {
   /** Long runs at the time cap: minutes near the end at steady race effort
    * (up to LT1) rather than easy. The rest of the run stays easy. */
   steadyMinutes?: number;
+  /** Long runs for a race far longer than them (raceEffortLongRuns): the
+   * whole run at race effort, not easy, and no steady block. */
+  raceEffort?: boolean;
   /** The session guard's limits on this day: show the session as "N min or
    * M km, whichever comes first" from these, not from the speed estimate. */
   allowance?: RunReference;
@@ -290,6 +295,19 @@ export function taperFractions(expectedHours: number): number[] {
  * longest-run cap counts as at the cap (planned runs are floored to whole
  * minutes, done ones rarely land on the exact minute). */
 export const CAPPED_LONG_RUN_SHARE = 0.95;
+
+/** Assumption: the race lasts at least this many times the longest long
+ * run, and at least RACE_EFFORT_MIN_RACE_HOURS, before the long run is run
+ * at race effort. Effort that low (well under LT1 for a race this long) is
+ * sustainable for a training run; for a shorter race, race effort is too
+ * hard to repeat every week, so the long run stays easy and slower. */
+const RACE_EFFORT_RACE_SHARE = 2;
+const RACE_EFFORT_MIN_RACE_HOURS = 5;
+
+/** Whether the plan's long runs are at race effort (else easy, with the
+ * steady block once at the cap). */
+export const raceEffortLongRuns = (race: Pick<GoalRace, "expectedHours">, longRunMaxMinutes: number) =>
+  race.expectedHours >= RACE_EFFORT_MIN_RACE_HOURS && race.expectedHours * 60 >= RACE_EFFORT_RACE_SHARE * longRunMaxMinutes;
 /**
  * Strength blocks by weeks to race (PLAN.md §15, strength sessions).
  * Uphill Athlete's order: general strength, then max strength, then
@@ -501,6 +519,7 @@ export function generatePlan(
   let lastWeekDescent: number | null = seed("descentM");
   let lastWeekSteep: number | null = seed("steepDescentM");
   let lastWeekClimb: number | null = seed("climbM");
+  const lastBuildWeekHills: Record<HillQ, number> = { descentM: 0, steepDescentM: 0, climbM: 0 };
   let budgetBindsFrom: number | null = null;
 
   for (let w = 0; w < nWeeks; w++) {
@@ -589,7 +608,15 @@ export function generatePlan(
     const runs = sessions.filter((s) => s.kind !== "strength" && s.kind !== "race");
     // Including what was run earlier in the current week, but no more than
     // the week's limit: going over doesn't raise next week's.
-    const carry = (q: HillQ) => Math.min(caps[q], sumOf(doneThisWeek, q) + runs.reduce((s, x) => s + x[q], 0));
+    // After a lighter week the hills return to the last build week's level
+    // (and grow from there the week after), rather than restarting from
+    // the lighter week's.
+    const build = phase === "base" || phase === "specific";
+    const carry = (q: HillQ) => {
+      const total = Math.min(caps[q], sumOf(doneThisWeek, q) + runs.reduce((s, x) => s + x[q], 0));
+      if (build) lastBuildWeekHills[q] = total;
+      return build ? total : Math.max(total, lastBuildWeekHills[q] / DESCENT_WEEKLY_STEP);
+    };
     lastWeekDescent = carry("descentM");
     lastWeekSteep = carry("steepDescentM");
     lastWeekClimb = carry("climbM");
@@ -763,12 +790,18 @@ function planWeek(
   let weekLeft = state.budgetMinutes - (o.strengthCountsInBudget ? strengthSessions.filter((x) => x.day >= state.fromDay).reduce((a, x) => a + x.minutes, 0) : 0);
   if (longSlot && phase !== "race") {
     const allow = allowOn(start + longRunWeekday);
-    const maxByDistance = (allow.distanceKm / o.speedKmh) * 60;
+    // At race effort the long run covers ground at the race's speed, which
+    // sizes its distance limit and its hills (below).
+    const atRaceEffort = raceEffortLongRuns(race, state.longRunCapMinutes);
+    const speedKmh = atRaceEffort && race.distanceKm ? race.distanceKm / race.expectedHours : o.speedKmh;
+    const maxByDistance = (allow.distanceKm / speedKmh) * 60;
     const minutes = Math.floor(Math.min(free.get(longRunWeekday)!, weekLeft, allow.movingMin, maxByDistance) * lighter);
     if (minutes >= MIN_RUN_MINUTES) {
       const s = session(start + longRunWeekday, "long", minutes, o.easyDensity);
+      s.distanceKm = Math.min((minutes / 60) * speedKmh, allow.distanceKm);
+      if (atRaceEffort) s.raceEffort = true;
       // Build weeks only: lighter weeks and the taper keep it all easy.
-      const steady = phase === "base" || phase === "specific" ? steadyBlockMinutes(s.day, minutes, state.longRunCapMinutes, state.cappedDays) : 0;
+      const steady = !atRaceEffort && (phase === "base" || phase === "specific") ? steadyBlockMinutes(s.day, minutes, state.longRunCapMinutes, state.cappedDays) : 0;
       if (steady > 0) {
         s.steadyMinutes = steady;
         s.mechanical += (steady / 60) * STEADY_DENSITY_SHARE * (o.maxDensity - o.easyDensity);
@@ -873,7 +906,8 @@ function planWeek(
   state.caps.descentM = phase === "recovery" ? 0 : weekDescentCap * lighter;
   state.caps.steepDescentM = phase === "recovery" ? 0 : weekSteepCap * lighter;
   state.caps.climbM = phase === "recovery" ? 0 : weekClimbCap * lighter;
-  const order = [...runs].sort((a, b) => rank(a.kind) - rank(b.kind));
+  const raceHillsKnown = race.descentM !== undefined && !!race.distanceKm;
+  const order = [...runs].sort((a, b) => rank(a.kind, raceHillsKnown) - rank(b.kind, raceHillsKnown));
   // The hike's share is set aside first, so the descent session and the
   // long run can't use up the week's climb before it.
   const hikeRun = runs.find((r) => r.kind === "hike");
@@ -901,11 +935,14 @@ function planWeek(
       continue;
     }
     // Uphill intervals climb as fast as a descent session descends: the
-    // reps are the climb, the jogs back down its descent.
-    const perHour = r.kind === "descent" || r.kind === "quality" ? 1 : r.kind === "long" ? 0.6 : 0.3;
-    r.descentM = Math.max(0, Math.min(descentLeft, climbLeft, allow.descentM, allow.climbM, perHour * o.maxDescentPerHour * hours, perHour * maxClimbPerHour * hours));
+    // reps are the climb, the jogs back down its descent. The long run
+    // takes the race's hills per km where the course is known, so it's
+    // like the race; its extra goes to the other runs.
+    const raceHills = r.kind === "long" && raceHillsKnown ? r.distanceKm / race.distanceKm! : null;
+    const perHour = r.kind === "descent" || r.kind === "quality" || raceHills !== null ? 1 : r.kind === "long" ? 0.6 : 0.3;
+    r.descentM = Math.max(0, Math.min(descentLeft, climbLeft, allow.descentM, allow.climbM, perHour * o.maxDescentPerHour * hours, perHour * maxClimbPerHour * hours, raceHills === null ? Infinity : raceHills * race.descentM!));
     r.climbM = r.descentM;
-    r.steepDescentM = Math.max(0, Math.min(steepLeft, allow.steepDescentM, r.descentM, perHour * o.maxSteepDescentPerHour * hours));
+    r.steepDescentM = Math.max(0, Math.min(steepLeft, allow.steepDescentM, r.descentM, perHour * o.maxSteepDescentPerHour * hours, raceHills === null || race.steepDescentM === undefined ? Infinity : raceHills * race.steepDescentM));
     descentLeft -= r.descentM;
     climbLeft -= r.climbM;
     steepLeft -= r.steepDescentM;
@@ -938,8 +975,11 @@ export function strengthDaysOf(
 }
 
 // The hike after the long run, so the long run keeps its hills; the
-// uphill intervals between them, ahead of the easy runs.
-const rank = (k: SessionKind) => (k === "descent" ? 0 : k === "long" ? 1 : k === "quality" ? 2 : k === "hike" ? 3 : 4);
+// uphill intervals between them, ahead of the easy runs. A long run held
+// to the race's hills per km goes first: it's the most race-like session,
+// and the descent session takes the rest.
+const rank = (k: SessionKind, raceHillsLong: boolean) =>
+  k === "long" && raceHillsLong ? -1 : k === "descent" ? 0 : k === "long" ? 1 : k === "quality" ? 2 : k === "hike" ? 3 : 4;
 
 /** Assumption, not measured: climb per hour of a weighted hike with
  * repeats (steep climbing, then running back down, most of the time
