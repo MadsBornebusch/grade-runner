@@ -54,7 +54,7 @@ const bpm = (lo: number, hi: number) => `${lo}–${hi} bpm`;
 /** Short effort label for a session card; null where the kind says it all. */
 export function effortChip(s: PlannedSession, t: IntensityTargets): string | null {
   if (s.kind === "long") {
-    if (s.raceEffort) return `Race effort${t.race ? ` · ${bpm(t.race.lo, t.race.hi)}` : ""}`;
+    if (s.raceEffort && !s.steadyMinutes) return `Race effort${t.race ? ` · ${bpm(t.race.lo, t.race.hi)}` : ""}`;
     if (s.steadyMinutes) return `${s.steadyMinutes} min steady${t.steady ? ` · ${bpm(t.steady.lo, t.steady.hi)}` : ""}`;
     return t.easyMaxHr ? `Easy · under ${t.easyMaxHr} bpm` : "Easy";
   }
@@ -72,7 +72,10 @@ export function effortDetail(s: PlannedSession, t: IntensityTargets): string | n
     case "hike":
       return "Legs burn, breathing stays easy";
     case "long":
-      if (s.raceEffort) return t.race ? `Race effort, ${bpm(t.race.lo, t.race.hi)}` : "Race effort";
+      if (s.raceEffort) {
+        const race = t.race ? `Race effort, ${bpm(t.race.lo, t.race.hi)}` : "Race effort";
+        return s.steadyMinutes ? `${race}, with ${s.steadyMinutes} min steady${t.steady ? ` at ${bpm(t.steady.lo, t.steady.hi)}` : ""}` : race;
+      }
       return s.steadyMinutes
         ? `${easy}, with ${s.steadyMinutes} min steady${t.steady ? ` at ${bpm(t.steady.lo, t.steady.hi)}` : " at race effort"}`
         : easy;
@@ -93,6 +96,14 @@ export function howToRun(s: PlannedSession, raceName: string, strengthCounts: bo
       if (s.raceEffort) {
         const range = t.race ? ` (${bpm(t.race.lo, t.race.hi)})` : "";
         const hills = s.descentM >= 50 ? ` The hills match the race's per km: about ${tens(s.descentM)} m of descent.` : "";
+        if (s.steadyMinutes) {
+          const steady = t.steady ? ` (${bpm(t.steady.lo, t.steady.hi)})` : "";
+          return (
+            `At race effort${range} for the first ${formatMinutes(s.minutes - s.steadyMinutes - 15)}: walk the climbs you'd walk in ${raceName} and run the downhills controlled. ` +
+            `Then ${s.steadyMinutes} min steady${steady}, a notch harder, short sentences only, and about 15 min easy to finish. ` +
+            `You're at your longest run, so it grows in effort now, not time. Keep it all at race effort if you slept badly or feel off.${hills}${carbs}`
+          );
+        }
         return (
           `At race effort the whole way${range}: the effort you'd hold for all of ${raceName}. Walk the climbs you'd walk there and run the downhills controlled. ` +
           `Heart rate creeps up over hours, so slow down to stay in range rather than hold a pace.${hills}${carbs}`

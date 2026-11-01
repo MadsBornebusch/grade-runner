@@ -480,16 +480,16 @@ describe("long runs like the race", () => {
   const schedule: WeeklySchedule = { weeklyMinutes: 420, longRunWeekday: 5, longRunMaxMinutes: 180 };
   const longsOf = (plan: ReturnType<typeof generatePlan>) => plan.weeks.flatMap((w) => w.sessions.filter((x) => x.kind === "long"));
 
-  it("are at race effort, with no steady block, for a race far longer than them", () => {
+  it("are at race effort for a race far longer than them, still with the steady block at the cap", () => {
     expect(raceEffortLongRuns({ expectedHours: 10 }, 180)).toBe(true);
     expect(raceEffortLongRuns({ expectedHours: 5.5 }, 180)).toBe(false); // under twice the long run
     expect(raceEffortLongRuns({ expectedHours: 4 }, 90)).toBe(false); // too short a race for race effort every week
     const race = { name: "r", day: TODAY + 150, expectedHours: 10, distanceKm: 70, descentM: 2800 };
     const longs = longsOf(generatePlan(history(rng(11), 20, 3, 50, 120), schedule, race, TODAY, OPTIONS));
     expect(longs.length).toBeGreaterThan(5);
+    expect(longs.some((x) => x.steadyMinutes)).toBe(true);
     for (const x of longs) {
       expect(x.raceEffort).toBe(true);
-      expect(x.steadyMinutes).toBeUndefined();
       // Distance at the race's speed, hills at most the race's per km.
       expect(x.distanceKm).toBeLessThanOrEqual((x.minutes / 60) * 7 + 1e-9);
       expect(x.descentM).toBeLessThanOrEqual(40 * x.distanceKm + 1e-9);

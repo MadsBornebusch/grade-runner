@@ -46,6 +46,10 @@ describe("intensity targets", () => {
     expect(effortChip(s, t)).toBe("Race effort · 119–124 bpm");
     expect(howToRun(s, "R", false, t)).toContain("race effort the whole way (119–124 bpm)");
     expect(howToRun(s, "R", false, t)).toContain("900 m of descent");
+    const finish = { ...s, steadyMinutes: 20 };
+    expect(effortChip(finish, t)).toBe("20 min steady · 125–140 bpm");
+    expect(howToRun(finish, "R", false, t)).toContain("At race effort (119–124 bpm) for the first 2 h 25");
+    expect(howToRun(finish, "R", false, t)).toContain("Then 20 min steady (125–140 bpm)");
   });
 
   it("reads heart rate from test stages, interpolating between them", () => {

@@ -4750,10 +4750,12 @@ start at today's shown level). The cards:
   before the descent session (`rank`), since its share is bounded. Without the course's
   hills it's unchanged.
 - **Race effort (`raceEffortLongRuns`).** The race lasts at least 2× the longest long
-  run and at least 5 h. Then the long run is `raceEffort`: no steady block (and no
-  steady load bump), with km at the race's average speed (course km ÷ expected hours),
-  which also sizes its distance limit. Below that, it's easy plus the steady block, as
-  before. The hours gate stands in for "race effort under LT1": the generator has no
+  run and at least 5 h. Then the long run is `raceEffort`, with km at the race's average speed (course km ÷ expected hours),
+  which also sizes its distance limit. Once at the time cap it keeps the steady block
+  near the end (per the user: a harder finish as soon as the cap is reached), a notch
+  above race effort. Below the gate, it's easy plus the steady block, as before. No
+  ramp from normal long-run effort to race effort: for the user, normal long runs
+  were already at or above race effort (a 12-13 h race sits at the top of easy). The hours gate stands in for "race effort under LT1": the generator has no
   thresholds, and a 5 h+ race is under LT1 for practically everyone.
 - **Heart rate.** `IntensityTargets.race`: race heart rate − 5 to race heart rate,
   capped at LT1. Copy says race effort the whole way and to slow down as heart rate
@@ -4765,7 +4767,7 @@ start at today's shown level). The cards:
   well: the first planned week may return to the level of the week before it.
 - **Result on the test copy.** 3 h 30 long runs plan about 1,000 m (race density,
   was 1,350 m); peak weekly descent about 2,000 m (was 1,980 m), with descent sessions
-  and uphill intervals taking the rest. Plan inputs key bumped to 17 (adds the course
+  and uphill intervals taking the rest. Plan inputs key bumped to 18 (adds the course
   distance).
 
 ### Hills per hour grow; race week short (built 2026-11-01)

@@ -182,8 +182,8 @@ export interface PlannedSession {
   /** Long runs at the time cap: minutes near the end at steady race effort
    * (up to LT1) rather than easy. The rest of the run stays easy. */
   steadyMinutes?: number;
-  /** Long runs for a race far longer than them (raceEffortLongRuns): the
-   * whole run at race effort, not easy, and no steady block. */
+  /** Long runs for a race far longer than them (raceEffortLongRuns): at
+   * race effort, not easy, until any steady block. */
   raceEffort?: boolean;
   /** The session guard's limits on this day: show the session as "N min or
    * M km, whichever comes first" from these, not from the speed estimate. */
@@ -809,7 +809,7 @@ function planWeek(
       s.distanceKm = Math.min((minutes / 60) * speedKmh, allow.distanceKm);
       if (atRaceEffort) s.raceEffort = true;
       // Build weeks only: lighter weeks and the taper keep it all easy.
-      const steady = !atRaceEffort && (phase === "base" || phase === "specific") ? steadyBlockMinutes(s.day, minutes, state.longRunCapMinutes, state.cappedDays) : 0;
+      const steady = phase === "base" || phase === "specific" ? steadyBlockMinutes(s.day, minutes, state.longRunCapMinutes, state.cappedDays) : 0;
       if (steady > 0) {
         s.steadyMinutes = steady;
         s.mechanical += (steady / 60) * STEADY_DENSITY_SHARE * (o.maxDensity - o.easyDensity);
