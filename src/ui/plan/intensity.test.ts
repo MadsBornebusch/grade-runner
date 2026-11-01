@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_FORM_INPUTS, type FormInputs } from "../formInputs";
 import { effortChip, howToRun } from "./planCopy";
-import { heartRateAtPower, intensityTargets } from "./intensity";
+import { heartRateAtPower, intensityTargets, raceEffortBand } from "./intensity";
 import type { PlannedSession } from "../../plan/planGenerator";
 import { paceToGrossPowerWPerKg } from "../../model/substrate";
 
@@ -50,6 +50,21 @@ describe("intensity targets", () => {
     expect(effortChip(finish, t)).toBe("20 min steady · 125–140 bpm");
     expect(howToRun(finish, "R", false, t)).toContain("At race effort (119–124 bpm) for the first 2 h 25");
     expect(howToRun(finish, "R", false, t)).toContain("Then 20 min steady (125–140 bpm)");
+  });
+
+  it("ramps race-effort long runs up from normal long runs, never down", () => {
+    const race = { lo: 135, hi: 140 };
+    expect(raceEffortBand({ race, longRun: { lo: 123, hi: 128 } }, 0)).toEqual({ lo: 123, hi: 128 });
+    expect(raceEffortBand({ race, longRun: { lo: 123, hi: 128 } }, 0.5)).toEqual({ lo: 129, hi: 134 });
+    expect(raceEffortBand({ race, longRun: { lo: 123, hi: 128 } }, 1)).toEqual(race);
+    expect(raceEffortBand({ race, longRun: { lo: 137, hi: 142 } }, 0)).toEqual(race);
+    expect(raceEffortBand({ race, longRun: null }, 0)).toEqual(race);
+    expect(raceEffortBand({ race: null, longRun: null }, 0)).toBeNull();
+    const t = { ...intensityTargets({ ...base, lt1HeartRateBpm: 150, lt2HeartRateBpm: 170 }, null), race, longRun: { lo: 123, hi: 128 } };
+    const s = { ...long(), raceEffort: true, raceEffortShare: 0.5 };
+    expect(effortChip(s, t)).toBe("Toward race effort · 129–134 bpm");
+    expect(howToRun(s, "R", false, t)).toContain("At 129–134 bpm the whole way, a step from your usual long runs toward race effort (135–140 bpm)");
+    expect(effortChip({ ...s, raceEffortShare: 1 }, t)).toBe("Race effort · 135–140 bpm");
   });
 
   it("reads heart rate from test stages, interpolating between them", () => {

@@ -185,6 +185,9 @@ export interface PlannedSession {
   /** Long runs for a race far longer than them (raceEffortLongRuns): at
    * race effort, not easy, until any steady block. */
   raceEffort?: boolean;
+  /** Race-effort long runs: 0 = the athlete's normal long-run effort, 1 =
+   * race effort (raceEffortShare); the heart rate in between is the UI's. */
+  raceEffortShare?: number;
   /** The session guard's limits on this day: show the session as "N min or
    * M km, whichever comes first" from these, not from the speed estimate. */
   allowance?: RunReference;
@@ -248,6 +251,10 @@ export interface Plan {
   comparableRaces: { day: number; movingMin: number; chronicBefore: number }[];
   /** First week the budget binds, or null. */
   budgetBindsFrom: number | null;
+  /** Race-effort long runs (raceEffortLongRuns): the Monday their ramp to
+   * race effort starts from. Normal long-run effort is read from the runs
+   * before it, so following the ramp doesn't move its start. */
+  raceEffortRampFrom?: number;
   warnings: string[];
 }
 
@@ -303,6 +310,19 @@ export const CAPPED_LONG_RUN_SHARE = 0.95;
  * hard to repeat every week, so the long run stays easy and slower. */
 const RACE_EFFORT_RACE_SHARE = 2;
 const RACE_EFFORT_MIN_RACE_HOURS = 5;
+
+/** Assumption, not fitted: race-effort long runs move from the athlete's
+ * normal long-run effort to race effort over this many weeks, reaching it
+ * as the specific weeks start. */
+const RACE_EFFORT_RAMP_WEEKS = 12;
+
+/** 0 to 1 by weeks to race: 1 from `fullAt` weeks out (the specific weeks'
+ * start), 0 RACE_EFFORT_RAMP_WEEKS before that. By weeks to race, so a
+ * re-plan keeps each week's step. */
+export function raceEffortShare(weeksToRace: number, fullAt: number): number {
+  if (!Number.isFinite(weeksToRace)) return 0;
+  return Math.max(0, Math.min(1, 1 - (weeksToRace - fullAt) / RACE_EFFORT_RAMP_WEEKS));
+}
 
 /** Whether the plan's long runs are at race effort (else easy, with the
  * steady block once at the cap). */
@@ -596,6 +616,7 @@ export function generatePlan(
       strengthSessions, strengthMinutes, budgetMinutes: Math.max(0, budgetPerWeek - doneMinutes), fromDay: today,
       prevLongDay, nextLongDay: start + 7 + (schedule.longRunWeekdayByWeek?.get(start + 7) ?? schedule.longRunWeekday),
       longRunCapMinutes: schedule.longRunMaxMinutes, cappedDays, weeksToRace,
+      raceEffortShare: raceEffortShare(weeksToRace, taper.length + specificWeeks),
       strengthLevel: (options.strengthLevel ?? 0) + w, restUntil,
     });
     const plannedMech = sessions.reduce((s, x) => s + x.mechanical, 0);
@@ -670,7 +691,8 @@ export function generatePlan(
       warnings.push(`Projected chronic load on race day (${projectedChronicAtRace.toFixed(0)}) is below the level before comparable past races (up to ${best.toFixed(0)}).`);
     }
   }
-  return { status: "ok", weeks, projectedChronicAtRace, comparableRaces, budgetBindsFrom, warnings };
+  const rampFrom = raceEffortLongRuns(race, schedule.longRunMaxMinutes) ? { raceEffortRampFrom: mondayOf(race.day) - 7 * (taper.length + specificWeeks + RACE_EFFORT_RAMP_WEEKS) } : {};
+  return { status: "ok", weeks, projectedChronicAtRace, comparableRaces, budgetBindsFrom, ...rampFrom, warnings };
 }
 
 function chronicOfHistory(runs: HistoryRun[], firstDay: number, upTo: number): number {
@@ -704,6 +726,9 @@ interface WeekState {
   longRunCapMinutes: number;
   cappedDays: number[];
   weeksToRace: number;
+  /** Race-effort long runs: how far from normal long-run effort to race
+   * effort (raceEffortShare). */
+  raceEffortShare: number;
   /** Level on the strength ramp this week. */
   strengthLevel: number;
   /** Nothing before this day: the days off after a race. */
@@ -799,15 +824,17 @@ function planWeek(
   if (longSlot && phase !== "race") {
     const allow = allowOn(start + longRunWeekday);
     // At race effort the long run covers ground at the race's speed, which
-    // sizes its distance limit and its hills (below).
+    // sizes its distance limit and its hills (below); on the way there, in
+    // step with the effort, from the athlete's usual speed.
     const atRaceEffort = raceEffortLongRuns(race, state.longRunCapMinutes);
-    const speedKmh = atRaceEffort && race.distanceKm ? race.distanceKm / race.expectedHours : o.speedKmh;
+    const share = atRaceEffort ? state.raceEffortShare : 0;
+    const speedKmh = race.distanceKm ? o.speedKmh + share * (race.distanceKm / race.expectedHours - o.speedKmh) : o.speedKmh;
     const maxByDistance = (allow.distanceKm / speedKmh) * 60;
     const minutes = Math.floor(Math.min(free.get(longRunWeekday)!, weekLeft, allow.movingMin, maxByDistance) * lighter);
     if (minutes >= MIN_RUN_MINUTES) {
       const s = session(start + longRunWeekday, "long", minutes, o.easyDensity);
       s.distanceKm = Math.min((minutes / 60) * speedKmh, allow.distanceKm);
-      if (atRaceEffort) s.raceEffort = true;
+      if (atRaceEffort) Object.assign(s, { raceEffort: true, raceEffortShare: Math.round(share * 100) / 100 });
       // Build weeks only: lighter weeks and the taper keep it all easy.
       const steady = phase === "base" || phase === "specific" ? steadyBlockMinutes(s.day, minutes, state.longRunCapMinutes, state.cappedDays) : 0;
       if (steady > 0) {

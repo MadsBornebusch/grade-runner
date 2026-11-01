@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StoredRun } from "../storage/runLibrary";
-import { historyRunFromStored, planOptionsFromHistory, treadmillLoad, type DatedHistoryRun } from "./historyFromRuns";
+import { averageHeartRate, historyRunFromStored, longRunHeartRate, planOptionsFromHistory, treadmillLoad, type DatedHistoryRun } from "./historyFromRuns";
 import { DEFAULT_RUNNING_IMPACT_COEFFICIENTS } from "../model/runningImpact";
 
 const summaryRun = (over: Partial<StoredRun> = {}): StoredRun => ({
@@ -66,5 +66,22 @@ describe("treadmill laps", () => {
     expect(h.source).toBe("laps");
     expect(h.climbM).toBeCloseTo(10000 * 0.05 / Math.sqrt(1.0025), 6);
     expect(historyRunFromStored(summaryRun({ elevationGainM: 0 }), "Europe/Oslo")!.climbM).toBe(0);
+  });
+});
+
+describe("long-run heart rate", () => {
+  it("averages heart rate over moving time, and needs it for half the run", () => {
+    const seg = (heartRateBpm: number | null, dtS: number, paused = false) => ({ heartRateBpm, dtS, paused });
+    expect(averageHeartRate([seg(120, 60), seg(150, 120), seg(200, 600, true)])).toBe(140);
+    expect(averageHeartRate([seg(120, 60), seg(null, 120)])).toBeNull();
+  });
+
+  it("is the median of recent long runs' averages, races left out", () => {
+    const run = (day: number, movingMin: number, avgHrBpm?: number, runId = `r${day}`) => ({ day, movingMin, avgHrBpm, runId });
+    const today = 1000;
+    const runs = [run(990, 120, 130), run(980, 90, 136), run(970, 150, 140), run(960, 60, 170), run(950, 100), run(985, 300, 160, "race"), run(800, 120, 100)];
+    expect(longRunHeartRate(runs, today, new Set(["race"]))).toBe(136);
+    expect(longRunHeartRate(runs, today)).toBe(138);
+    expect(longRunHeartRate(runs, 975)).toBeNull(); // one long run before then
   });
 });

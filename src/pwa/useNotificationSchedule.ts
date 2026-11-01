@@ -14,10 +14,10 @@ export function useNotificationSchedule(plan: PlanState, formInputs: FormInputs)
   const race = planSettingsStore.use().goalRace;
   const json = useMemo(() => {
     if (!dailyEnabled || !plan.snapshot || !plan.history) return null;
-    const targets = intensityTargets(formInputs, race?.raceEffortWPerKg);
+    const targets = intensityTargets(formInputs, race?.raceEffortWPerKg, plan.longRunHr);
     const sessions = plan.snapshot.plan.weeks.flatMap((w) => w.sessions);
     return JSON.stringify(notificationSchedule(sessions, plan.history, plan.today, targets, race?.name ?? "Race"));
-  }, [dailyEnabled, plan.snapshot, plan.history, plan.today, formInputs, race?.raceEffortWPerKg, race?.name]);
+  }, [dailyEnabled, plan.snapshot, plan.history, plan.longRunHr, plan.today, formInputs, race?.raceEffortWPerKg, race?.name]);
 
   useEffect(() => {
     if (json) writeSchedule(JSON.parse(json)).catch(() => {});

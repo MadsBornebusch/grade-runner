@@ -2,7 +2,7 @@
 // model's words: "chronic", "load", "mechanical", "guard".
 import type { Phase, PlannedSession, SessionKind } from "../../plan/planGenerator";
 import { dateOfDayNumber } from "../../plan/historyFromRuns";
-import type { IntensityTargets } from "./intensity";
+import { raceEffortBand, type HrRange, type IntensityTargets } from "./intensity";
 
 export const PHASE_LABEL: Record<Phase, string> = {
   recovery: "Recover",
@@ -47,14 +47,25 @@ export function repsLine(s: PlannedSession): string | null {
   return `${s.reps} × ${s.repMinutes} min${uphillReps(s) ? " uphill" : ""}`;
 }
 
-const NO_TARGETS: IntensityTargets = { easyMaxHr: null, steady: null, race: null, quality: null, raceAtLt1: false };
+const NO_TARGETS: IntensityTargets = { easyMaxHr: null, steady: null, race: null, longRun: null, quality: null, raceAtLt1: false };
 
 const bpm = (lo: number, hi: number) => `${lo}–${hi} bpm`;
+
+/** A race-effort long run's band, and whether it's still on the way up to
+ * race effort (intensity.ts's raceEffortBand). */
+function raceEffortOf(s: PlannedSession, t: IntensityTargets): { band: HrRange | null; ramping: boolean; label: string } {
+  const band = raceEffortBand(t, s.raceEffortShare ?? 1);
+  const ramping = !!band && !!t.race && band.hi < t.race.hi;
+  return { band, ramping, label: ramping ? "Toward race effort" : "Race effort" };
+}
 
 /** Short effort label for a session card; null where the kind says it all. */
 export function effortChip(s: PlannedSession, t: IntensityTargets): string | null {
   if (s.kind === "long") {
-    if (s.raceEffort && !s.steadyMinutes) return `Race effort${t.race ? ` · ${bpm(t.race.lo, t.race.hi)}` : ""}`;
+    if (s.raceEffort && !s.steadyMinutes) {
+      const { band, label } = raceEffortOf(s, t);
+      return `${label}${band ? ` · ${bpm(band.lo, band.hi)}` : ""}`;
+    }
     if (s.steadyMinutes) return `${s.steadyMinutes} min steady${t.steady ? ` · ${bpm(t.steady.lo, t.steady.hi)}` : ""}`;
     return t.easyMaxHr ? `Easy · under ${t.easyMaxHr} bpm` : "Easy";
   }
@@ -73,7 +84,8 @@ export function effortDetail(s: PlannedSession, t: IntensityTargets): string | n
       return "Legs burn, breathing stays easy";
     case "long":
       if (s.raceEffort) {
-        const race = t.race ? `Race effort, ${bpm(t.race.lo, t.race.hi)}` : "Race effort";
+        const { band, label } = raceEffortOf(s, t);
+        const race = band ? `${label}, ${bpm(band.lo, band.hi)}` : label;
         return s.steadyMinutes ? `${race}, with ${s.steadyMinutes} min steady${t.steady ? ` at ${bpm(t.steady.lo, t.steady.hi)}` : ""}` : race;
       }
       return s.steadyMinutes
@@ -94,18 +106,24 @@ export function howToRun(s: PlannedSession, raceName: string, strengthCounts: bo
     case "long": {
       const carbs = s.carbsGPerH ? ` Take carbs from the first 20 min, a little every 20 min: ${s.carbsGPerH} g/h today.` : "";
       if (s.raceEffort) {
-        const range = t.race ? ` (${bpm(t.race.lo, t.race.hi)})` : "";
+        const { band, ramping } = raceEffortOf(s, t);
+        const range = band ? ` (${bpm(band.lo, band.hi)})` : "";
+        // On the way up: this week's step, and where it's heading.
+        const toward = ramping && t.race ? `, a step from your usual long runs toward race effort (${bpm(t.race.lo, t.race.hi)})` : "";
+        const effort = ramping && band ? `At ${bpm(band.lo, band.hi)}` : `At race effort${range}`;
         const hills = s.descentM >= 50 ? ` The hills match the race's per km: about ${tens(s.descentM)} m of descent.` : "";
         if (s.steadyMinutes) {
           const steady = t.steady ? ` (${bpm(t.steady.lo, t.steady.hi)})` : "";
           return (
-            `At race effort${range} for the first ${formatMinutes(s.minutes - s.steadyMinutes - 15)}: walk the climbs you'd walk in ${raceName} and run the downhills controlled. ` +
+            `${effort}${toward} for the first ${formatMinutes(s.minutes - s.steadyMinutes - 15)}: walk the climbs you'd walk in ${raceName} and run the downhills controlled. ` +
             `Then ${s.steadyMinutes} min steady${steady}, a notch harder, short sentences only, and about 15 min easy to finish. ` +
-            `You're at your longest run, so it grows in effort now, not time. Keep it all at race effort if you slept badly or feel off.${hills}${carbs}`
+            `You're at your longest run, so it grows in effort now, not time. Skip the steady part if you slept badly or feel off.${hills}${carbs}`
           );
         }
         return (
-          `At race effort the whole way${range}: the effort you'd hold for all of ${raceName}. Walk the climbs you'd walk there and run the downhills controlled. ` +
+          (ramping
+            ? `${effort} the whole way${toward}, which the long runs reach as ${raceName} nears. Walk the climbs you'd walk there and run the downhills controlled. `
+            : `At race effort the whole way${range}: the effort you'd hold for all of ${raceName}. Walk the climbs you'd walk there and run the downhills controlled. `) +
           `Heart rate creeps up over hours, so slow down to stay in range rather than hold a pace.${hills}${carbs}`
         );
       }

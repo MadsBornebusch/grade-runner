@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { buildHistory } from "../plan/historyCache";
-import { dateOfDayNumber, dayNumberOf, type DatedHistoryRun } from "../plan/historyFromRuns";
+import { dateOfDayNumber, dayNumberOf, longRunHeartRate, type DatedHistoryRun } from "../plan/historyFromRuns";
 import { ladderStart } from "../plan/carbLadder";
 import { hikeHillRuns, needsReplan, planFromSettings, planInputsKey, type PlanBlocker, type PlanSnapshot } from "../plan/planFromSettings";
 import { mondayOf } from "../plan/planGenerator";
@@ -30,6 +30,8 @@ export const planSnapshotStore = createLocalStore<{ version: 1; snapshot: PlanSn
 export interface PlanState {
   /** Null while the runs are loading. */
   history: DatedHistoryRun[] | null;
+  /** The athlete's normal long-run heart rate (longRunHeartRate), if known. */
+  longRunHr: number | null;
   /** Run names by StoredRun.id, for labelling past races. */
   runNames: Map<string, string>;
   /** Shown while uncached runs are processed. */
@@ -181,9 +183,16 @@ export function usePlan(formInputs: FormInputs, pausePrediction = false): PlanSt
   if (!race) blocker = "noRace";
   else if (!race.expectedHoursOverride && !race.predictedFinishS) blocker = "noPrediction";
   else if (history && history.length === 0) blocker = "noHistory";
+  // Read up to the ramp's start, so following it doesn't move its start.
+  const rampFrom = snapshot?.plan.raceEffortRampFrom;
+  const longRunHr = useMemo(
+    () => (history ? longRunHeartRate(history, rampFrom !== undefined ? Math.min(today, rampFrom) : today, raceRunIds) : null),
+    [history, today, rampFrom, raceRunIds],
+  );
 
   return {
     history,
+    longRunHr,
     runNames,
     progress,
     snapshot: blocker ? null : snapshot,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   restDaysAfter,
-  carbTargets, generatePlan, raceEffortLongRuns, mondayOf, STRENGTH_MINUTES, hikePackPct, rampedFocuses, strengthBlockOf, strengthFocuses, recoveryWeeks, slotsForWeek, steadyBlockMinutes, strengthDaysOf, suggestLongRunMaxMinutes, thresholdReps, type HistoryRun, type PlanOptions, type WeeklySchedule,
+  carbTargets, generatePlan, raceEffortLongRuns, raceEffortShare, mondayOf, STRENGTH_MINUTES, hikePackPct, rampedFocuses, strengthBlockOf, strengthFocuses, recoveryWeeks, slotsForWeek, steadyBlockMinutes, strengthDaysOf, suggestLongRunMaxMinutes, thresholdReps, type HistoryRun, type PlanOptions, type WeeklySchedule,
 } from "./planGenerator";
 import { guardBreaches, referenceAt, runReferences } from "./sessionGuard";
 
@@ -490,10 +490,30 @@ describe("long runs like the race", () => {
     expect(longs.some((x) => x.steadyMinutes)).toBe(true);
     for (const x of longs) {
       expect(x.raceEffort).toBe(true);
-      // Distance at the race's speed, hills at most the race's per km.
-      expect(x.distanceKm).toBeLessThanOrEqual((x.minutes / 60) * 7 + 1e-9);
+      // Distance between the usual and the race's speed (the ramp), hills
+      // at most the race's per km.
+      expect(x.distanceKm).toBeLessThanOrEqual((x.minutes / 60) * OPTIONS.speedKmh + 1e-9);
       expect(x.descentM).toBeLessThanOrEqual(40 * x.distanceKm + 1e-9);
     }
+  });
+
+  it("ramp to race effort over the 12 weeks before the specific weeks", () => {
+    expect(raceEffortShare(20, 8)).toBe(0);
+    expect(raceEffortShare(14, 8)).toBe(0.5);
+    expect(raceEffortShare(8, 8)).toBe(1);
+    expect(raceEffortShare(2, 8)).toBe(1);
+    expect(raceEffortShare(Infinity, 8)).toBe(0);
+    const race = { name: "r", day: TODAY + 210, expectedHours: 10, distanceKm: 70, descentM: 2800 };
+    const plan = generatePlan(history(rng(11), 20, 3, 50, 120), schedule, race, TODAY, OPTIONS);
+    expect(plan.raceEffortRampFrom).toBeLessThan(TODAY + 210 - 7 * 12);
+    const shares = longsOf(plan).map((x) => x.raceEffortShare!);
+    expect(shares[0]).toBe(0);
+    expect(shares.at(-1)).toBe(1);
+    for (let i = 1; i < shares.length; i++) expect(shares[i]).toBeGreaterThanOrEqual(shares[i - 1]);
+    // Faster than the race's pace at first, the race's by the end.
+    const longs = longsOf(plan);
+    expect(longs[0].distanceKm / (longs[0].minutes / 60)).toBeGreaterThan(9);
+    expect(longs.at(-1)!.distanceKm / (longs.at(-1)!.minutes / 60)).toBeCloseTo(7);
   });
 
   it("stay easy for a shorter race, with the race's hills per km at the speed of easy running", () => {

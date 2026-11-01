@@ -20,6 +20,9 @@ export interface IntensityTargets {
   steady: HrRange | null;
   /** Race-effort long runs: around the race's predicted heart rate. */
   race: HrRange | null;
+  /** The athlete's normal long runs (their recent median heart rate at the
+   * top): where race-effort long runs start from (raceEffortBand). */
+  longRun: HrRange | null;
   /** Threshold work, around LT2. */
   quality: HrRange | null;
   /** The race's predicted effort reaches LT1, so steady = just under LT1. */
@@ -67,7 +70,7 @@ const STEADY_BELOW_LT1_MAX = 15;
  * rate, which is its top: heart rate drifts up over hours at one effort. */
 const RACE_BAND_BPM = 5;
 
-export function intensityTargets(formInputs: FormInputs, raceEffortWPerKg: number | null | undefined): IntensityTargets {
+export function intensityTargets(formInputs: FormInputs, raceEffortWPerKg: number | null | undefined, longRunHr: number | null = null): IntensityTargets {
   const hrAt = heartRateAtPower(formInputs);
   const { lt1, lt2 } = thresholdPowers(formInputs);
   const lt1Hr = formInputs.lt1HeartRateBpm ?? (hrAt ? r(hrAt(lt1)) : null);
@@ -89,7 +92,22 @@ export function intensityTargets(formInputs: FormInputs, raceEffortWPerKg: numbe
     easyMaxHr: steady?.lo ?? null,
     steady,
     race,
+    longRun: longRunHr !== null ? { lo: r(longRunHr) - RACE_BAND_BPM, hi: r(longRunHr) } : null,
     quality: lt2Hr !== null ? { lo: lt2Hr - 5, hi: lt2Hr + 2 } : null,
     raceAtLt1,
   };
+}
+
+/**
+ * A race-effort long run's band at `share` of the way (PlannedSession's
+ * raceEffortShare) from the athlete's normal long runs to race effort.
+ * Only ever up: where normal long runs are already at or above race
+ * effort (a very long race sits at the top of easy), it's race effort all
+ * along.
+ */
+export function raceEffortBand(t: Pick<IntensityTargets, "race" | "longRun">, share = 1): HrRange | null {
+  if (!t.race) return null;
+  if (!t.longRun || t.longRun.hi >= t.race.hi || share >= 1) return t.race;
+  const hi = r(t.longRun.hi + Math.max(0, share) * (t.race.hi - t.longRun.hi));
+  return { lo: hi - RACE_BAND_BPM, hi };
 }

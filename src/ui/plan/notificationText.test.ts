@@ -6,7 +6,7 @@ import type { IntensityTargets } from "./intensity";
 import { howToRun, repsLine, sessionTitle } from "./planCopy";
 
 // Synthetic targets, not anyone's values.
-const t: IntensityTargets = { easyMaxHr: 140, steady: null, race: null, quality: { lo: 160, hi: 166 }, raceAtLt1: false };
+const t: IntensityTargets = { easyMaxHr: 140, steady: null, race: null, longRun: null, quality: { lo: 160, hi: 166 }, raceAtLt1: false };
 const s = (day: number, kind: PlannedSession["kind"], minutes: number, extra: Partial<PlannedSession> = {}): PlannedSession => ({
   day,
   kind,

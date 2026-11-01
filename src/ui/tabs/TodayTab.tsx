@@ -38,7 +38,7 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
   const backfill = useSyncExternalStore(subscribeToBackfill, getBackfillStatus);
   const [openSession, setOpenSession] = useState<PlannedSession | null>(null);
   const race = settings.goalRace;
-  const targets = useMemo(() => intensityTargets(formInputs, race?.raceEffortWPerKg), [formInputs, race?.raceEffortWPerKg]);
+  const targets = useMemo(() => intensityTargets(formInputs, race?.raceEffortWPerKg, plan.longRunHr), [formInputs, race?.raceEffortWPerKg, plan.longRunHr]);
   const today = plan.today;
   const now = new Date();
   const header = (

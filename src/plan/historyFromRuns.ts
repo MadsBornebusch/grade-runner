@@ -19,6 +19,8 @@ export interface DatedHistoryRun extends HistoryRun {
   runId: string;
   /** "laps": a treadmill run with its lap grades entered. */
   source: "points" | "summary" | "laps";
+  /** Moving-time average of the recorded heart rate, if any. */
+  avgHrBpm?: number;
 }
 
 export const dayNumberOf = (date: string) => Date.parse(`${date}T00:00:00Z`) / 864e5;
@@ -42,10 +44,51 @@ export function historyRunFromStored(run: StoredRun, timeZone: string): DatedHis
   if (course?.hasElevation) {
     const mechanical = runningImpact(course.segments);
     if (!(summary.mechanical > 0 && mechanical / summary.mechanical > 1.5)) {
-      return { ...base, mechanical, descentM: descentMeters(course.segments), steepDescentM: steepDescentMeters(course.segments), climbM: course.totalElevationGain, source: "points" };
+      const avgHrBpm = averageHeartRate(course.segments);
+      return {
+        ...base, mechanical, descentM: descentMeters(course.segments), steepDescentM: steepDescentMeters(course.segments), climbM: course.totalElevationGain, source: "points",
+        ...(avgHrBpm !== null ? { avgHrBpm } : {}),
+      };
     }
   }
   return { ...base, mechanical: summary.mechanical, descentM: summary.descentM, steepDescentM: summary.steepDescentM, climbM: gain, source: "summary" };
+}
+
+/** Moving-time average heart rate over the segments that have one; null
+ * under half the moving time covered. */
+export function averageHeartRate(segments: Pick<CourseSegment, "heartRateBpm" | "dtS" | "paused">[]): number | null {
+  let t = 0;
+  let sum = 0;
+  let moving = 0;
+  for (const s of segments) {
+    if (s.paused || !s.dtS) continue;
+    moving += s.dtS;
+    if (s.heartRateBpm && s.heartRateBpm > 0) {
+      t += s.dtS;
+      sum += s.heartRateBpm * s.dtS;
+    }
+  }
+  return t > 0 && t >= moving / 2 ? sum / t : null;
+}
+
+/** Assumption: runs this long or longer count as long runs, and the last
+ * this-many days of them say what a normal long run is. */
+const LONG_RUN_MIN_MINUTES = 75;
+const LONG_RUN_HR_DAYS = 90;
+
+/**
+ * The athlete's normal long-run heart rate: the median of the recent long
+ * runs' averages (races left out), or null with fewer than two. Where the
+ * plan's race-effort long runs start from (ui/plan/intensity.ts).
+ */
+export function longRunHeartRate(history: Pick<DatedHistoryRun, "day" | "movingMin" | "avgHrBpm" | "runId">[], today: number, raceRunIds: ReadonlySet<string> = new Set()): number | null {
+  const hrs = history
+    .filter((r) => r.day < today && r.day >= today - LONG_RUN_HR_DAYS && r.movingMin >= LONG_RUN_MIN_MINUTES && r.avgHrBpm && !raceRunIds.has(r.runId))
+    .map((r) => r.avgHrBpm!)
+    .sort((a, b) => a - b);
+  if (hrs.length < 2) return null;
+  const m = hrs.length >> 1;
+  return hrs.length % 2 ? hrs[m] : (hrs[m - 1] + hrs[m]) / 2;
 }
 
 /**

@@ -31,7 +31,7 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
   const [moving, setMoving] = useState<number | null>(null);
   const race = settings.goalRace;
   const hours = race ? expectedHoursOf(race) : null;
-  const targets = useMemo(() => intensityTargets(formInputs, race?.raceEffortWPerKg), [formInputs, race?.raceEffortWPerKg]);
+  const targets = useMemo(() => intensityTargets(formInputs, race?.raceEffortWPerKg, plan.longRunHr), [formInputs, race?.raceEffortWPerKg, plan.longRunHr]);
 
   if (rest[0] === "edit") {
     return (
