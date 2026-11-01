@@ -4717,6 +4717,27 @@ start at today's shown level). The cards:
 - Offline, the Strava session check reads as offline, not disconnected. It
   re-checks on `online`, and the sync and settings pull follow.
 
+### Uphill intervals (built 2026-11-01)
+
+- **What changed.** Every build week's threshold run is now uphill intervals: N × M min at
+  threshold HR, jogging back down. `thresholdReps` gives about 40% of the run as work,
+  10–30 min in all. Reps last 3 min more than 24 weeks out, 4 min more than 16 out,
+  5 min more than 10 out, and 6 min after that. A rep is at most half the work, so
+  there are always at least 2 reps.
+- **Hills.** The intervals draw on the week's descent and climb limits at the descent
+  session's rate (perHour 1). They rank after the descent session and the long run and
+  before the hike and the easy runs, so the long run keeps its hills.
+- **Climb is a ceiling, not a target.** The week's limit often leaves only 70–150 m. The
+  card says to climb about that much and do the remaining reps flat at the same HR, and
+  that all flat is fine.
+- **When it falls back.** Under 50 m of climb, which happens in most specific-phase weeks
+  because the downhill run takes the hills, the card shows "Threshold run" with flat
+  reps (`sessionTitle`).
+- **Doing them flat.** Matching is by minutes only, so flat reps count as done. Less
+  descent than planned doesn't trigger a re-plan (only an overshoot does). Next week's
+  cap grows from what was actually run, floored by the single-run allowance.
+- Plan inputs key bumped to 13.
+
 ### Morning notification (on-device, built 2026-10-31)
 
 - Settings › Notifications. The app writes the next 8 days' texts by local date

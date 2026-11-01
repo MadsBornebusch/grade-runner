@@ -3,6 +3,7 @@ import type { PlannedSession } from "../../plan/planGenerator";
 import { dateOfDayNumber } from "../../plan/historyFromRuns";
 import { dayNotification, notificationSchedule } from "./notificationText";
 import type { IntensityTargets } from "./intensity";
+import { howToRun, repsLine, sessionTitle } from "./planCopy";
 
 // Synthetic targets, not anyone's values.
 const t: IntensityTargets = { easyMaxHr: 140, steady: null, quality: { lo: 160, hi: 166 }, raceAtLt1: false };
@@ -49,6 +50,20 @@ describe("day notification", () => {
 
   it("wishes luck on race day", () => {
     expect(dayNotification([s(0, "race", 300)], t, "Hill Race")?.title).toBe("Race day: Hill Race");
+  });
+});
+
+describe("uphill intervals", () => {
+  it("are named by their hills and give the reps; a flat threshold run keeps its name", () => {
+    const uphill = s(0, "quality", 50, { reps: 5, repMinutes: 4, climbM: 200, descentM: 200 });
+    expect(dayNotification([uphill], t, "R")).toEqual({
+      title: "Uphill intervals · 50 min",
+      body: "About 8 km · 5 × 4 min uphill · Around LT2, 160–166 bpm · 200 m up and down",
+    });
+    expect(howToRun(uphill, "R", false, t)).toContain("Climb about 200 m in total");
+    const flat = { ...uphill, climbM: 20, descentM: 20 };
+    expect(sessionTitle(flat)).toBe("Threshold run");
+    expect(repsLine(flat)).toBe("5 × 4 min");
   });
 });
 

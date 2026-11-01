@@ -5,7 +5,7 @@ import type { DatedHistoryRun } from "../../plan/historyFromRuns";
 import type { PlannedSession } from "../../plan/planGenerator";
 import { GUARD_FLOORS, SESSION_GUARD_MULTIPLE } from "../../plan/sessionGuard";
 import { Sheet } from "./Sheet";
-import { KIND_TITLE, climbDescentText, dayLabel, distanceLine, effortDetail, formatMinutes, formatMinutesExact, howToRun } from "./planCopy";
+import { sessionTitle, climbDescentText, dayLabel, distanceLine, effortDetail, formatMinutes, formatMinutesExact, howToRun } from "./planCopy";
 import type { IntensityTargets } from "./intensity";
 import { strengthWorkout } from "./strengthCopy";
 
@@ -30,7 +30,7 @@ export function SessionSheet({ session: s, runs, raceName, raceGPerH, strengthCo
   const ref = s.allowance;
   const effort = effortDetail(s, targets);
   return (
-    <Sheet title={`${dayLabel(s.day)} · ${KIND_TITLE[s.kind]}`} onClose={onClose}>
+    <Sheet title={`${dayLabel(s.day)} · ${sessionTitle(s)}`} onClose={onClose}>
       {s.kind !== "race" && (
         <div className="detail-hero">
           <span className="detail-hero__big num">{formatMinutes(s.minutes)}</span>

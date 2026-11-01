@@ -21,7 +21,7 @@ import { RestRow, SessionCard } from "../plan/SessionCard";
 import { KIND_ICON } from "../plan/kindIcons";
 import { SessionSheet } from "../plan/SessionSheet";
 import { weekProgress } from "../plan/planViewModel";
-import { KIND_TITLE, PHASE_LABEL, WEEKDAY_LETTER, dayLabel, dayName, formatMinutes, formatMinutesExact } from "../plan/planCopy";
+import { PHASE_LABEL, sessionTitle, WEEKDAY_LETTER, dayLabel, dayName, formatMinutes, formatMinutesExact } from "../plan/planCopy";
 import type { TabId } from "../useHashRoute";
 import type { PlanState } from "../usePlan";
 
@@ -116,7 +116,7 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
           <Moon size={28} weight="duotone" aria-hidden="true" />
           <div>
             <h2>Rest day</h2>
-            <p>{next[0] ? `Nothing planned. Next: ${dayName(next[0].day)}, ${KIND_TITLE[next[0].kind].toLowerCase()} ${formatMinutes(next[0].minutes)}.` : "Nothing planned."}</p>
+            <p>{next[0] ? `Nothing planned. Next: ${dayName(next[0].day)}, ${sessionTitle(next[0]).toLowerCase()} ${formatMinutes(next[0].minutes)}.` : "Nothing planned."}</p>
           </div>
         </div>
       ) : (
@@ -152,7 +152,7 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
           <div className="card list-row">
             {yesterdayMissed ? <XCircle size={18} className="muted" /> : <CheckCircle size={18} weight="fill" className="success" />}
             <span className="num">
-              {yesterday.sessions.map((s) => KIND_TITLE[s.kind]).join(" + ") || "Extra run"}
+              {yesterday.sessions.map(sessionTitle).join(" + ") || "Extra run"}
               {yesterday.runs.length > 0
                 ? ` · ran ${formatMinutesExact(yesterday.runs.reduce((a, r) => a + r.movingMin, 0))}, ${yesterday.runs.reduce((a, r) => a + r.distanceKm, 0).toFixed(1)} km`
                 : yesterdayMissed
@@ -183,7 +183,7 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
                 <button key={s.day} type="button" className={`list-row kind-${s.kind}`} onClick={() => setOpenSession(s)}>
                   <I size={20} weight="duotone" className="kind-ink" />
                   <span>
-                    {dayLabel(s.day)} · {KIND_TITLE[s.kind]} <span className="num muted">{s.kind === "race" ? "" : formatMinutes(s.minutes)}</span>
+                    {dayLabel(s.day)} · {sessionTitle(s)} <span className="num muted">{s.kind === "race" ? "" : formatMinutes(s.minutes)}</span>
                   </span>
                   <CaretRight size={16} />
                 </button>

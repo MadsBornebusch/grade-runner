@@ -3,7 +3,7 @@
 // the service worker shows them without the app open (src/pwa/).
 import type { PlannedSession } from "../../plan/planGenerator";
 import { dateOfDayNumber, type DatedHistoryRun } from "../../plan/historyFromRuns";
-import { KIND_TITLE, climbDescentText, distanceLine, effortDetail, formatMinutes } from "./planCopy";
+import { climbDescentText, distanceLine, effortDetail, formatMinutes, repsLine, sessionTitle } from "./planCopy";
 import type { IntensityTargets } from "./intensity";
 import { STRENGTH_FOCUS_TITLE } from "./strengthCopy";
 
@@ -25,6 +25,8 @@ export function dayNotification(sessions: PlannedSession[], targets: IntensityTa
       const distance = distanceLine(run);
       parts.push(distance.startsWith("or ") ? `${formatMinutes(run.minutes)} ${distance}` : distance.replace(/^./, (c) => c.toUpperCase()));
     }
+    const reps = repsLine(run);
+    if (reps) parts.push(reps);
     const effort = effortDetail(run, targets);
     if (effort) parts.push(effort);
     if (run.kind === "hike" && run.packPct) parts.push(`${run.packPct}% pack`);
@@ -35,7 +37,7 @@ export function dayNotification(sessions: PlannedSession[], targets: IntensityTa
   if (strength && run) parts.push(`Plus strength${focus ? `: ${focus}` : ""}, ${formatMinutes(strength.minutes)}`);
   else if (strength && focus) parts.push(focus);
   const main = run ?? strength!;
-  return { title: `${KIND_TITLE[main.kind]} · ${formatMinutes(main.minutes)}`, body: parts.join(" · ") };
+  return { title: `${sessionTitle(main)} · ${formatMinutes(main.minutes)}`, body: parts.join(" · ") };
 }
 
 /** Notifications by local date (YYYY-MM-DD) from `today` for `days` days.

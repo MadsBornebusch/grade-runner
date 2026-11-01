@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   restDaysAfter,
-  carbTargets, generatePlan, mondayOf, STRENGTH_MINUTES, hikePackPct, rampedFocuses, strengthBlockOf, strengthFocuses, recoveryWeeks, slotsForWeek, steadyBlockMinutes, strengthDaysOf, suggestLongRunMaxMinutes, type HistoryRun, type PlanOptions, type WeeklySchedule,
+  carbTargets, generatePlan, mondayOf, STRENGTH_MINUTES, hikePackPct, rampedFocuses, strengthBlockOf, strengthFocuses, recoveryWeeks, slotsForWeek, steadyBlockMinutes, strengthDaysOf, suggestLongRunMaxMinutes, thresholdReps, type HistoryRun, type PlanOptions, type WeeklySchedule,
 } from "./planGenerator";
 import { guardBreaches, referenceAt, runReferences } from "./sessionGuard";
 
@@ -470,5 +470,32 @@ describe("steady block on capped long runs", () => {
     expect(blocks.length).toBeGreaterThan(2);
     expect(Math.max(...blocks)).toBeGreaterThan(blocks[0]);
     expect(longs.some(({ x, phase }) => (phase === "deload" || phase === "taper") && x.steadyMinutes)).toBe(false);
+  });
+});
+
+describe("uphill intervals", () => {
+  it("split a threshold run into at least two reps that lengthen toward the race", () => {
+    expect(thresholdReps(50, 30)).toEqual({ reps: 6, repMinutes: 3 });
+    expect(thresholdReps(50, 8)).toEqual({ reps: 3, repMinutes: 6 });
+    expect(thresholdReps(30, 8)).toEqual({ reps: 2, repMinutes: 5 });
+    for (const minutes of [20, 35, 60, 75]) for (const weeks of [2, 12, 20, 40]) {
+      const { reps, repMinutes } = thresholdReps(minutes, weeks);
+      expect(reps).toBeGreaterThanOrEqual(2);
+      expect(reps * repMinutes).toBeLessThanOrEqual(30);
+    }
+  });
+
+  it("get the week's hills ahead of the easy runs, within their own allowance", () => {
+    const schedule: WeeklySchedule = { weeklyMinutes: 360, runsPerWeek: 5, longRunWeekday: 5, longRunMaxMinutes: 180 };
+    const plan = generatePlan(history(rng(8), 12, 5, 50, 120), schedule, { name: "r", day: TODAY + 200, expectedHours: 6 }, TODAY, OPTIONS);
+    const weeks = plan.weeks.filter((w) => w.sessions.some((x) => x.kind === "quality"));
+    expect(weeks.length).toBeGreaterThan(0);
+    for (const w of weeks) {
+      const q = w.sessions.find((x) => x.kind === "quality")!;
+      expect(q.reps).toBeGreaterThanOrEqual(2);
+      expect(q.climbM).toBeLessThanOrEqual(q.allowance!.climbM + 1e-6);
+      for (const e of w.sessions.filter((x) => x.kind === "easy")) expect(q.climbM / q.minutes).toBeGreaterThanOrEqual(e.climbM / e.minutes - 1e-9);
+    }
+    expect(weeks.some((w) => w.sessions.find((x) => x.kind === "quality")!.climbM > 0)).toBe(true);
   });
 });

@@ -34,6 +34,19 @@ export const KIND_TITLE: Record<SessionKind, string> = {
   race: "Race day",
 };
 
+/** Threshold runs with this much climb are uphill intervals. */
+export const UPHILL_REPS_MIN_CLIMB_M = 50;
+const uphillReps = (s: PlannedSession) => s.kind === "quality" && !!s.reps && s.climbM >= UPHILL_REPS_MIN_CLIMB_M;
+
+/** The session's name: KIND_TITLE, except a threshold run with hills. */
+export const sessionTitle = (s: PlannedSession) => (uphillReps(s) ? "Uphill intervals" : KIND_TITLE[s.kind]);
+
+/** "5 × 3 min uphill", or null for a session without reps. */
+export function repsLine(s: PlannedSession): string | null {
+  if (s.kind !== "quality" || !s.reps || !s.repMinutes) return null;
+  return `${s.reps} × ${s.repMinutes} min${uphillReps(s) ? " uphill" : ""}`;
+}
+
 const NO_TARGETS: IntensityTargets = { easyMaxHr: null, steady: null, quality: null, raceAtLt1: false };
 
 const bpm = (lo: number, hi: number) => `${lo}–${hi} bpm`;
@@ -87,6 +100,20 @@ export function howToRun(s: PlannedSession, raceName: string, strengthCounts: bo
       );
     }
     case "quality": {
+      const range = t.quality ? ` (${bpm(t.quality.lo, t.quality.hi)})` : "";
+      if (uphillReps(s)) {
+        // The climb is a ceiling, like the hike's: a real hill often gives
+        // more than the week's hills leave, and flat at the same heart rate
+        // trains the same thing.
+        return (
+          `Warm up easy, then ${s.reps} × ${s.repMinutes} min uphill${range}, comfortably hard, around your 1-hour race effort. ` +
+          `Jog back down easy between them. A steady 5–10% climb works best. Climb about ${tens(s.climbM)} m in total; ` +
+          `if your hill gives more, do the last reps on the flat at the same heart rate. All flat is fine too: the heart rate is what counts.`
+        );
+      }
+      if (s.reps && s.repMinutes) {
+        return `Warm up easy, then ${s.reps} × ${s.repMinutes} min comfortably hard${range}, around your 1-hour race effort, with 2 min easy jogging between. Easy to finish.`;
+      }
       // About half the run at threshold, 10-30 min, inside a warm-up and
       // an easy finish.
       const hard = Math.max(10, Math.min(30, Math.round(s.minutes / 2 / 5) * 5));

@@ -187,6 +187,9 @@ export interface PlannedSession {
   strengthFocus?: StrengthFocus;
   /** Weighted uphill hikes: pack weight, % of body weight. */
   packPct?: number;
+  /** Threshold runs: the reps (uphill where the week's hills allow). */
+  reps?: number;
+  repMinutes?: number;
 }
 
 /** Runs this long or longer get a carb target. */
@@ -318,6 +321,17 @@ export function rampedFocuses(focuses: StrengthFocus[], level: number): Strength
 export const STRENGTH_MINUTES: Record<StrengthFocus, number> = {
   general: 35, build: 40, nearHeavy: 40, heavy: 45, heavyJumps: 40, maintenance: 25, power: 25, circuit: 30, deload: 25, sharpen: 20,
 };
+/** Assumption (coaching convention, not fitted): about 40% of a threshold
+ * run is work, 10-30 min, in reps that lengthen toward the race; the rest
+ * is warm-up, the jogs back down and an easy finish. A rep is at most half
+ * the work, so there are always at least two. */
+export function thresholdReps(minutes: number, weeksToRace: number): { reps: number; repMinutes: number } {
+  const work = Math.max(10, Math.min(30, Math.round((0.4 * minutes) / 5) * 5));
+  const length = weeksToRace > 24 ? 3 : weeksToRace > 16 ? 4 : weeksToRace > 10 ? 5 : 6;
+  const repMinutes = Math.min(length, Math.floor(work / 2));
+  return { reps: Math.max(2, Math.floor(work / repMinutes)), repMinutes };
+}
+
 export type StrengthBlock = "heavy" | "me";
 export function strengthBlockOf(weeksToRace: number): StrengthBlock {
   return weeksToRace > ME_WEEKS ? "heavy" : "me";
@@ -794,6 +808,7 @@ function planWeek(
     if (quality) {
       quality.kind = "quality";
       quality.mechanical = (quality.minutes / 60) * o.maxDensity;
+      Object.assign(quality, thresholdReps(quality.minutes, state.weeksToRace));
     }
     const descent = phase === "specific" ? easy.find((r) => r !== quality) : undefined;
     if (descent) descent.kind = "descent";
@@ -859,7 +874,9 @@ function planWeek(
       r.steepDescentM = 0;
       continue;
     }
-    const perHour = r.kind === "descent" ? 1 : r.kind === "long" ? 0.6 : 0.3;
+    // Uphill intervals climb as fast as a descent session descends: the
+    // reps are the climb, the jogs back down its descent.
+    const perHour = r.kind === "descent" || r.kind === "quality" ? 1 : r.kind === "long" ? 0.6 : 0.3;
     r.descentM = Math.max(0, Math.min(descentLeft, climbLeft, allow.descentM, allow.climbM, perHour * o.maxDescentPerHour * hours, perHour * maxClimbPerHour * hours));
     r.climbM = r.descentM;
     r.steepDescentM = Math.max(0, Math.min(steepLeft, allow.steepDescentM, r.descentM, perHour * o.maxSteepDescentPerHour * hours));
@@ -894,8 +911,9 @@ export function strengthDaysOf(
   return chosen.sort((a, b) => a - b);
 }
 
-// The hike after the long run, so the long run keeps its hills.
-const rank = (k: SessionKind) => (k === "descent" ? 0 : k === "long" ? 1 : k === "hike" ? 2 : 3);
+// The hike after the long run, so the long run keeps its hills; the
+// uphill intervals between them, ahead of the easy runs.
+const rank = (k: SessionKind) => (k === "descent" ? 0 : k === "long" ? 1 : k === "quality" ? 2 : k === "hike" ? 3 : 4);
 
 /** Assumption, not measured: climb per hour of a weighted hike with
  * repeats (steep climbing, then running back down, most of the time

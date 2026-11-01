@@ -2,7 +2,7 @@ import { Backpack, CaretRight, CheckCircle, CircleHalf, Couch, ForkKnife, Heartb
 import { KIND_ICON } from "./kindIcons";
 import type { PlannedSession } from "../../plan/planGenerator";
 import type { SessionState } from "../../plan/matchSessions";
-import { KIND_TITLE, climbDescentText, distanceLine, effortChip, formatMinutes, formatMinutesExact } from "./planCopy";
+import { climbDescentText, distanceLine, effortChip, formatMinutes, formatMinutesExact, repsLine, sessionTitle } from "./planCopy";
 import type { IntensityTargets } from "./intensity";
 import { STRENGTH_FOCUS_TITLE } from "./strengthCopy";
 
@@ -41,17 +41,19 @@ export function SessionCard({ session, state, ranMin, hero, targets, onOpen }: S
         <KindIcon size={hero ? 30 : 26} weight="duotone" />
       </span>
       <span className="session-card__body">
-        <span className="session-card__title">{KIND_TITLE[session.kind]}</span>
+        <span className="session-card__title">{sessionTitle(session)}</span>
         {session.kind === "race" ? null : hero ? (
           <>
             <span className="session-card__big num">{formatMinutes(session.minutes)}</span>
             {isRun && <span className="session-card__sub num">{distanceLine(session)}</span>}
+            {repsLine(session) && <span className="session-card__sub num">{repsLine(session)}</span>}
             {focus && <span className="session-card__sub">{focus.slice(3)}</span>}
           </>
         ) : (
           <span className="session-card__sub num">
             {formatMinutes(session.minutes)}
             {isRun && ` · ${distanceLine(session)}`}
+            {repsLine(session) && ` · ${repsLine(session)}`}
             {focus}
           </span>
         )}
