@@ -117,7 +117,7 @@ export function howToRun(s: PlannedSession, raceName: string, strengthCounts: bo
           return (
             `${effort}${toward} for the first ${formatMinutes(s.minutes - s.steadyMinutes - 15)}: walk the climbs you'd walk in ${raceName} and run the downhills controlled. ` +
             `Then ${s.steadyMinutes} min steady${steady}, a notch harder, short sentences only, and about 15 min easy to finish. ` +
-            `You're at your longest run, so it grows in effort now, not time. Skip the steady part if you slept badly or feel off.${hills}${carbs}`
+            `Your long runs are at their time cap, so they grow in effort now, not time. Skip the steady part if you slept badly or feel off.${hills}${carbs}`
           );
         }
         return (
@@ -134,7 +134,7 @@ export function howToRun(s: PlannedSession, raceName: string, strengthCounts: bo
       const effort = t.raceAtLt1 ? "steady, just under the top of easy" : "race effort";
       return (
         `Easy${under} for the first ${formatMinutes(s.minutes - s.steadyMinutes - 15)}, then ${s.steadyMinutes} min ${effort}${range}: ` +
-        `steady, short sentences only. Finish with about 15 min easy. You're at your longest run, so it grows in effort now, not time: ` +
+        `steady, short sentences only. Finish with about 15 min easy. Your long runs are at their time cap, so they grow in effort now, not time: ` +
         `running race effort on tired legs is what the race asks for. Keep it all easy if you slept badly or feel off.${carbs}`
       );
     }

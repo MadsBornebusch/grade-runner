@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   restDaysAfter,
-  carbTargets, generatePlan, raceEffortLongRuns, raceEffortShare, mondayOf, STRENGTH_MINUTES, hikePackPct, rampedFocuses, strengthBlockOf, strengthFocuses, recoveryWeeks, slotsForWeek, steadyBlockMinutes, strengthDaysOf, suggestLongRunMaxMinutes, thresholdReps, type HistoryRun, type PlanOptions, type WeeklySchedule,
+  carbTargets, generatePlan, longestReachedOn, raceEffortLongRuns, raceEffortShare, mondayOf, STRENGTH_MINUTES, hikePackPct, rampedFocuses, strengthBlockOf, strengthFocuses, recoveryWeeks, slotsForWeek, steadyBlockMinutes, strengthDaysOf, suggestLongRunMaxMinutes, thresholdReps, type HistoryRun, type PlanOptions, type WeeklySchedule,
 } from "./planGenerator";
 import { guardBreaches, referenceAt, runReferences } from "./sessionGuard";
 
@@ -473,6 +473,30 @@ describe("steady block on capped long runs", () => {
     expect(blocks.length).toBeGreaterThan(2);
     expect(Math.max(...blocks)).toBeGreaterThan(blocks[0]);
     expect(longs.some(({ x, phase }) => (phase === "deload" || phase === "taper") && x.steadyMinutes)).toBe(false);
+  });
+});
+
+describe("steady block on the shorter long runs", () => {
+  it("counts the longest long run as reached from the first of a recent run of them", () => {
+    expect(longestReachedOn(100, true, [])).toBe(100);
+    expect(longestReachedOn(100, false, [])).toBe(Infinity);
+    expect(longestReachedOn(100, false, [86, 65, 40])).toBe(40);
+    expect(longestReachedOn(100, false, [86, 65, 10])).toBe(65); // 55 days before 65: an earlier build
+    expect(longestReachedOn(100, false, [50])).toBe(Infinity);
+  });
+
+  it("comes once the longest long run has been reached, on the weeks between too", () => {
+    // Long-run weeks reach 180 min; the weeks between hold the long run to 150.
+    const schedule: WeeklySchedule = { weeklyMinutes: 300, longRunWeekday: 5, longRunMaxMinutes: 180, longRunWeekEvery: 2 };
+    const plan = generatePlan(history(rng(11), 20, 3, 50, 120), schedule, { name: "r", day: TODAY + 180, expectedHours: 4.5 }, TODAY, OPTIONS);
+    const longs = plan.weeks.flatMap((w) => w.sessions.filter((x) => x.kind === "long"));
+    const firstCapped = longs.findIndex((x) => x.minutes >= 0.95 * 180);
+    expect(firstCapped).toBeGreaterThan(0);
+    // Never before the longest has been reached.
+    expect(longs.slice(0, firstCapped).some((x) => x.steadyMinutes)).toBe(false);
+    const shorter = longs.slice(firstCapped).filter((x) => x.minutes >= 0.95 * 150 && x.minutes < 0.95 * 180);
+    expect(shorter.some((x) => x.steadyMinutes)).toBe(true);
+    for (const x of shorter) expect(x.steadyMinutes ?? 0).toBeLessThanOrEqual(x.minutes / 3);
   });
 });
 

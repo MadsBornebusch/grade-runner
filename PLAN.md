@@ -4738,6 +4738,22 @@ start at today's shown level). The cards:
   cap grows from what was actually run, floored by the single-run allowance.
 - Plan inputs key bumped to 13.
 
+### Steady finish on the shorter long runs too (built 2026-11-01)
+
+- **Why.** With the weekly hours full (the budget binds from about 13 weeks out on the
+  test copy), neither time nor load grows; only the hills, the rep length and the hike
+  pack do. Per the user, the long runs between long-run weeks (held to
+  `normalLongRunMinutes`) get the steady finish as well, so their effort grows too.
+- **Rule.** The steady block goes on a long run at its week's cap (the long-run week's
+  maximum, or the shorter cap between), once the longest long run has been reached in
+  the current build (`longestReachedOn`: capped long runs at most 42 days apart; an old
+  long race doesn't count). It grows 10 min for each such long run since then, at most a
+  third of the run and 60 min.
+- **Result on the test copy.** From the first 3 h 30 run (mid-March), every build-week
+  long run has one: 10, 20, 30 … up to 50 min on the 2 h 30 runs and 60 min on the
+  3 h 30 runs. Before, only the 3 h 30 runs had one, 2-3 weeks apart. Plan inputs key
+  bumped to 20.
+
 ### Long runs like the race (built 2026-11-01)
 
 - **Why (the user's proposal).** For a race much longer than the long run, the long

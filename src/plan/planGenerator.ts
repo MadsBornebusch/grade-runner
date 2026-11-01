@@ -78,12 +78,15 @@ export function suggestLongRunMaxMinutes(raceExpectedHours: number, weeklyMinute
   return Math.round(Math.min(byRace, 0.75 * weeklyMinutes) / 15) * 15;
 }
 
+/** The long run's cap outside long-run weeks. */
+export const normalLongRunMinutes = (schedule: WeeklySchedule) =>
+  (schedule.longRunWeekEvery ?? 2) === 1 ? schedule.longRunMaxMinutes : Math.min(schedule.longRunMaxMinutes, (schedule.normalLongRunShare ?? 0.5) * schedule.weeklyMinutes);
+
 /** The week's run days and their caps from the schedule. */
 export function slotsForWeek(schedule: WeeklySchedule, weekStart: number, longRunWeek: boolean): { slots: AvailabilitySlot[]; longRunWeekday: number } {
   const longDay = schedule.longRunWeekdayByWeek?.get(weekStart) ?? schedule.longRunWeekday;
   const runs = schedule.runsPerWeek ?? 4;
-  const normalLong = Math.min(schedule.longRunMaxMinutes, (schedule.normalLongRunShare ?? 0.5) * schedule.weeklyMinutes);
-  const longMinutes = longRunWeek || (schedule.longRunWeekEvery ?? 2) === 1 ? schedule.longRunMaxMinutes : normalLong;
+  const longMinutes = longRunWeek || (schedule.longRunWeekEvery ?? 2) === 1 ? schedule.longRunMaxMinutes : normalLongRunMinutes(schedule);
   const others = spreadDays(longDay, runs - 1);
   return {
     longRunWeekday: longDay,
@@ -429,8 +432,29 @@ const STEADY_DENSITY_SHARE = 0.25;
 /**
  * Minutes of steady running in a long run of `minutes` on `day`, given the
  * days of earlier capped long runs (done or planned). Zero below the cap:
- * time on feet comes first, intensity only once time can't grow.
+ * time on feet comes first, intensity only once time can't grow. The cap
+ * is the week's: once the longest long run has been reached, the shorter
+ * long runs between long-run weeks are at theirs too (per the user: with
+ * the weekly hours full, their effort is what can still grow).
  */
+/** Assumption: capped long runs this far apart still belong to one build
+ * (long-run weeks come every 2-3 weeks, a deload adds one). */
+const CAPPED_CHAIN_GAP_DAYS = 42;
+
+/** The first day of the current run of capped long runs (`atCap`: the run
+ * on `day` is one), each within CAPPED_CHAIN_GAP_DAYS of the next; Infinity
+ * when the longest long run hasn't been reached lately. */
+export function longestReachedOn(day: number, atCap: boolean, cappedDays: number[]): number {
+  let first = atCap ? day : Infinity;
+  let after = day;
+  for (const d of cappedDays.filter((x) => x < day).sort((a, b) => b - a)) {
+    if (after - d > CAPPED_CHAIN_GAP_DAYS) break;
+    first = d;
+    after = d;
+  }
+  return first;
+}
+
 export function steadyBlockMinutes(day: number, minutes: number, capMinutes: number, cappedDays: number[]): number {
   if (minutes < CAPPED_LONG_RUN_SHARE * capMinutes) return 0;
   let streak = 0;
@@ -469,8 +493,12 @@ export function generatePlan(
   const planned: HistoryRun[] = [];
   const nonRace = () => [...credited.filter((_, i) => !isRace[i]), ...planned];
   // Long runs at the time cap so far, done then planned, for the steady
-  // block's progression.
+  // block's progression: at the longest (cappedDays), and at least at the
+  // shorter weeks' cap (steadyDays), which count once the longest has
+  // been reached.
   const cappedDays = past.filter((r, i) => !isRace[i] && r.movingMin >= CAPPED_LONG_RUN_SHARE * schedule.longRunMaxMinutes).map((r) => r.day);
+  const normalLong = normalLongRunMinutes(schedule);
+  const steadyDays = past.filter((r, i) => !isRace[i] && r.movingMin >= CAPPED_LONG_RUN_SHARE * normalLong).map((r) => r.day);
 
   // Daily mechanical series from the first run to `upTo` (exclusive),
   // history plus planned sessions, capped like the ledger.
@@ -615,7 +643,7 @@ export function generatePlan(
       doneDescentM: sumOf(doneThisWeek, "descentM"), doneSteepM: sumOf(doneThisWeek, "steepDescentM"), doneClimbM: sumOf(doneThisWeek, "climbM"),
       strengthSessions, strengthMinutes, budgetMinutes: Math.max(0, budgetPerWeek - doneMinutes), fromDay: today,
       prevLongDay, nextLongDay: start + 7 + (schedule.longRunWeekdayByWeek?.get(start + 7) ?? schedule.longRunWeekday),
-      longRunCapMinutes: schedule.longRunMaxMinutes, cappedDays, weeksToRace,
+      longRunCapMinutes: schedule.longRunMaxMinutes, cappedDays, steadyDays, weeksToRace,
       raceEffortShare: raceEffortShare(weeksToRace, taper.length + specificWeeks),
       strengthLevel: (options.strengthLevel ?? 0) + w, restUntil,
     });
@@ -652,6 +680,7 @@ export function generatePlan(
     const long = sessions.find((x) => x.kind === "long");
     prevLongDay = long?.day ?? null;
     if (long && long.minutes >= CAPPED_LONG_RUN_SHARE * schedule.longRunMaxMinutes) cappedDays.push(long.day);
+    if (long && long.minutes >= CAPPED_LONG_RUN_SHARE * normalLong) steadyDays.push(long.day);
     weeks.push({
       start, phase, chronicAtStart: chronic, targetMechanical: target, plannedMechanical: plannedMech, plannedMinutes: plannedMin,
       budgetMinutes: budgetPerWeek, budgetBinds: binds, longRunWeek, sessions, notes,
@@ -725,6 +754,7 @@ interface WeekState {
   nextLongDay: number;
   longRunCapMinutes: number;
   cappedDays: number[];
+  steadyDays: number[];
   weeksToRace: number;
   /** Race-effort long runs: how far from normal long-run effort to race
    * effort (raceEffortShare). */
@@ -836,7 +866,14 @@ function planWeek(
       s.distanceKm = Math.min((minutes / 60) * speedKmh, allow.distanceKm);
       if (atRaceEffort) Object.assign(s, { raceEffort: true, raceEffortShare: Math.round(share * 100) / 100 });
       // Build weeks only: lighter weeks and the taper keep it all easy.
-      const steady = phase === "base" || phase === "specific" ? steadyBlockMinutes(s.day, minutes, state.longRunCapMinutes, state.cappedDays) : 0;
+      // Once the longest long run has been reached (this one, or before),
+      // each long run at its week's cap, counting those since.
+      const weekCap = availability.find((x) => x.weekday === longRunWeekday)?.minutes ?? state.longRunCapMinutes;
+      const reached = longestReachedOn(s.day, minutes >= CAPPED_LONG_RUN_SHARE * state.longRunCapMinutes, state.cappedDays);
+      const steady =
+        (phase === "base" || phase === "specific") && Number.isFinite(reached)
+          ? steadyBlockMinutes(s.day, minutes, weekCap, state.steadyDays.filter((d) => d >= reached))
+          : 0;
       if (steady > 0) {
         s.steadyMinutes = steady;
         s.mechanical += (steady / 60) * STEADY_DENSITY_SHARE * (o.maxDensity - o.easyDensity);
