@@ -87,23 +87,33 @@ export const MIN_RUNS_FOR_OWN_OPTIONS = 20;
 export const usesGenericPlanOptions = (history: DatedHistoryRun[]) =>
   history.filter((r) => r.source === "points" && r.movingMin >= 30).length < MIN_RUNS_FOR_OWN_OPTIONS;
 
+/** Hills per hour may be this much more than the last 30 days' (their
+ * 90th percentile), like the other hill limits' weekly step. */
+const HILLS_PER_HOUR_STEP = 1.1;
+const RECENT_DAYS = 30;
+
 /** The generator's density, speed and descent options from the athlete's
  * own points-based runs of 30+ min: median and 90th-percentile load per
- * hour, median speed, 90th-percentile descent and steep descent per hour. */
-export function planOptionsFromHistory(history: DatedHistoryRun[]): PlanOptions {
+ * hour, median speed, 90th-percentile descent and steep descent per hour.
+ * The hill rates are the larger of all runs' and 10% over the last 30
+ * days', so they grow as the athlete runs hillier. */
+export function planOptionsFromHistory(history: DatedHistoryRun[], today?: number): PlanOptions {
   const pts = history.filter((r) => r.source === "points" && r.movingMin >= 30);
   if (pts.length < MIN_RUNS_FOR_OWN_OPTIONS) return GENERIC_OPTIONS;
   const q = (xs: number[], p: number) => {
     const s = [...xs].sort((a, b) => a - b);
     return s[Math.min(s.length - 1, Math.floor(p * s.length))];
   };
-  const perHour = (f: (r: DatedHistoryRun) => number) => pts.map((r) => f(r) / (r.movingMin / 60));
+  const perHour = (f: (r: DatedHistoryRun) => number, runs = pts) => runs.map((r) => f(r) / (r.movingMin / 60));
+  const recent = today === undefined ? [] : pts.filter((r) => r.day >= today - RECENT_DAYS && r.day < today);
+  const hills = (f: (r: DatedHistoryRun) => number) =>
+    Math.max(q(perHour(f), 0.9), recent.length ? HILLS_PER_HOUR_STEP * q(perHour(f, recent), 0.9) : 0);
   return {
     easyDensity: q(perHour((r) => r.mechanical), 0.5),
     maxDensity: q(perHour((r) => r.mechanical), 0.9),
     speedKmh: q(perHour((r) => r.distanceKm), 0.5),
-    maxDescentPerHour: q(perHour((r) => r.descentM), 0.9),
-    maxSteepDescentPerHour: q(perHour((r) => r.steepDescentM), 0.9),
-    maxClimbPerHour: q(perHour((r) => r.climbM), 0.9),
+    maxDescentPerHour: hills((r) => r.descentM),
+    maxSteepDescentPerHour: hills((r) => r.steepDescentM),
+    maxClimbPerHour: hills((r) => r.climbM),
   };
 }

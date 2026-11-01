@@ -479,6 +479,7 @@ export function generatePlan(
   const budgetPerWeek = schedule.weeklyMinutes;
   const weeks: PlanWeek[] = [];
   let buildCount = 0;
+  let hillWeeksAhead = 0;
   let longRunCount = 0;
   let prevLongDay: number | null = null;
   // Long-run weeks (user idea, 2026-10-21): the long run is the most
@@ -545,7 +546,23 @@ export function generatePlan(
     const runsSoFar = nonRace();
     const allowOn = (day: number) => sessionAllowance(referenceAt(runsSoFar, day));
     const caps = { descentM: Infinity, steepDescentM: Infinity, climbM: Infinity };
-    const sessions = planWeek(start, phase, target, referenceAt(runsSoFar, start), allowOn, availability, longRunWeekday, race, options, {
+    // Hills per hour grow like the other hill limits: each build week
+    // ahead plans as if the one before was run (user request, 2026-11-01).
+    // At most HILLS_PER_HOUR_MAX_GROWTH over today's: without a ceiling
+    // the per-run allowance (grown from the planned long runs) would put
+    // a long run's descent into a 40-minute run.
+    const hillStep = Math.min(HILLS_PER_HOUR_MAX_GROWTH, DESCENT_WEEKLY_STEP ** hillWeeksAhead);
+    const weekOptions =
+      hillStep === 1
+        ? options
+        : {
+            ...options,
+            maxDescentPerHour: options.maxDescentPerHour * hillStep,
+            maxSteepDescentPerHour: options.maxSteepDescentPerHour * hillStep,
+            maxClimbPerHour: (options.maxClimbPerHour ?? options.maxDescentPerHour) * hillStep,
+          };
+    if (phase === "base" || phase === "specific") hillWeeksAhead++;
+    const sessions = planWeek(start, phase, target, referenceAt(runsSoFar, start), allowOn, availability, longRunWeekday, race, weekOptions, {
       caps,
       lastWeekDescent, lastWeekSteep, lastWeekClimb,
       doneDescentM: sumOf(doneThisWeek, "descentM"), doneSteepM: sumOf(doneThisWeek, "steepDescentM"), doneClimbM: sumOf(doneThisWeek, "climbM"),
@@ -662,11 +679,20 @@ interface WeekState {
  * (from last week's, or from one session's allowance if that is more), the
  * same step as the session guard. */
 const DESCENT_WEEKLY_STEP = 1.1;
+/** Assumption, not fitted: the plan looks ahead to at most 50% more hills
+ * per hour than the athlete runs now (planOptionsFromHistory's rates).
+ * Re-plans start from what was actually run, so the ceiling moves up as
+ * the athlete does. */
+const HILLS_PER_HOUR_MAX_GROWTH = 1.5;
 /** Assumption: a longest training run under this share of the race's
  * expected duration is worth a warning. */
 const LONG_RUN_RACE_SHARE = 0.4;
 /** Shortest run worth scheduling. */
 const MIN_RUN_MINUTES = 25;
+/** Assumption (common taper practice, not fitted): race week's runs are
+ * short and easy, and there's no long run. Without it, race week's share
+ * of a normal week lands on the few days before the race. */
+const RACE_WEEK_RUN_MAX_MINUTES = 40;
 
 function planWeek(
   start: number,
@@ -735,7 +761,7 @@ function planWeek(
   // The week's running minutes never exceed the budget, even when a
   // long-run week lets the long run past its own slot.
   let weekLeft = state.budgetMinutes - (o.strengthCountsInBudget ? strengthSessions.filter((x) => x.day >= state.fromDay).reduce((a, x) => a + x.minutes, 0) : 0);
-  if (longSlot) {
+  if (longSlot && phase !== "race") {
     const allow = allowOn(start + longRunWeekday);
     const maxByDistance = (allow.distanceKm / o.speedKmh) * 60;
     const minutes = Math.floor(Math.min(free.get(longRunWeekday)!, weekLeft, allow.movingMin, maxByDistance) * lighter);
@@ -760,7 +786,7 @@ function planWeek(
   const others = slots.filter((x) => x.weekday !== longRunWeekday);
   const capOf = (slot: AvailabilitySlot) => {
     const allow = allowOn(start + slot.weekday);
-    return Math.min(free.get(slot.weekday) ?? 0, allow.movingMin, (allow.distanceKm / o.speedKmh) * 60);
+    return Math.min(free.get(slot.weekday) ?? 0, allow.movingMin, (allow.distanceKm / o.speedKmh) * 60, phase === "race" ? RACE_WEEK_RUN_MAX_MINUTES : Infinity);
   };
   let wanted = Math.max(0, Math.min(weekLeft, (remaining / o.easyDensity) * 60));
   let use = others.length;

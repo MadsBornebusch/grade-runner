@@ -4738,6 +4738,26 @@ start at today's shown level). The cards:
   cap grows from what was actually run, floored by the single-run allowance.
 - Plan inputs key bumped to 13.
 
+### Hills per hour grow; race week short (built 2026-11-01)
+
+- **Why.** Once the long run reaches its time cap, the per-hour limits (90th percentile
+  of the athlete's m/h; long runs get 0.6 of it) were what stopped the hills growing:
+  long runs stuck at about 900 m. Per the user, all hill limits should grow.
+- **From what was run.** `planOptionsFromHistory(past, today)` takes the hill rates as
+  the larger of all runs' p90 and 1.1 × the last 30 days' p90.
+- **In the plan's future weeks.** The generator multiplies the rates by 1.1 for each
+  build week ahead, the same step as the weekly totals.
+- **Ceiling (`HILLS_PER_HOUR_MAX_GROWTH`).** The growth stops at 1.5× today's rates.
+  Without it, the per-run allowance (grown from planned long runs) put a long run's
+  descent into a 30–50 min run: 2,000 m in a 50-min descent session in the test.
+  Re-plans start from what was actually run, so the ceiling moves up as the athlete
+  runs it.
+- **Result on the test copy.** 3 h 30 long runs plan about 1,350 m (was 900 m), and
+  50-min downhill runs about 540 m.
+- **Race week.** No long run, and every run is at most `RACE_WEEK_RUN_MAX_MINUTES` (40).
+  Before this, half a normal week landed on the two days before the race: 2 × 75 min.
+- Plan inputs key bumped to 15.
+
 ### Morning notification (on-device, built 2026-10-31)
 
 - Settings › Notifications. The app writes the next 8 days' texts by local date

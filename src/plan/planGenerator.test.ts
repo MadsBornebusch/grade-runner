@@ -499,3 +499,25 @@ describe("uphill intervals", () => {
     expect(weeks.some((w) => w.sessions.find((x) => x.kind === "quality")!.climbM > 0)).toBe(true);
   });
 });
+
+describe("hills per hour", () => {
+  const schedule: WeeklySchedule = { weeklyMinutes: 360, runsPerWeek: 5, longRunWeekday: 5, longRunMaxMinutes: 120 };
+  const race = { name: "r", day: TODAY + 200, expectedHours: 8 };
+  const plan = generatePlan(history(rng(8), 12, 5, 50, 120), schedule, race, TODAY, OPTIONS);
+  const rate = (s: { descentM: number; minutes: number }) => s.descentM / (s.minutes / 60);
+
+  it("grow over the build weeks, to at most 1.5x today's", () => {
+    const longs = plan.weeks.filter((w) => w.phase === "base").map((w) => w.sessions.find((x) => x.kind === "long")!).filter(Boolean);
+    expect(rate(longs.at(-1)!)).toBeGreaterThan(rate(longs[0]) * 1.2);
+    for (const w of plan.weeks) for (const x of w.sessions) {
+      if (x.kind === "race" || x.kind === "strength" || x.kind === "hike") continue;
+      expect(rate(x)).toBeLessThanOrEqual(1.5 * OPTIONS.maxDescentPerHour + 1e-6);
+    }
+  });
+
+  it("leave race week short runs only, no long run", () => {
+    const week = plan.weeks.find((w) => w.phase === "race")!;
+    const runs = week.sessions.filter((x) => x.kind !== "race" && x.kind !== "strength");
+    expect(runs.every((x) => x.kind === "easy" && x.minutes <= 40)).toBe(true);
+  });
+});

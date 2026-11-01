@@ -33,6 +33,16 @@ describe("planOptionsFromHistory", () => {
     expect(o.easyDensity).toBe(75);
     expect(o.speedKmh).toBe(10);
   });
+
+  it("lets hills per hour grow 10% past the last 30 days'", () => {
+    const runs: DatedHistoryRun[] = Array.from({ length: 60 }, (_, k) => ({
+      day: k, date: "", runId: String(k), source: "points", movingMin: 60, distanceKm: 10, mechanical: 60, descentM: k < 40 ? 100 : 200, steepDescentM: 10, climbM: 100,
+    }));
+    expect(planOptionsFromHistory(runs).maxDescentPerHour).toBe(200);
+    expect(planOptionsFromHistory(runs, 60).maxDescentPerHour).toBeCloseTo(220, 6);
+    // Nothing recent: all runs' rate.
+    expect(planOptionsFromHistory(runs, 200).maxDescentPerHour).toBe(200);
+  });
 });
 
 describe("treadmill laps", () => {
