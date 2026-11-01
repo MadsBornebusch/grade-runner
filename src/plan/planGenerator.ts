@@ -515,11 +515,19 @@ export function generatePlan(
   const creditedIn = (from: number) => credited.filter((r, i) => !isRace[i] && r.day >= from && r.day < from + 7);
   const weekBefore = creditedIn(firstWeek - 7);
   const allowBefore = sessionAllowance(referenceAt(credited.filter((_, i) => !isRace[i]), firstWeek - 7));
-  const seed = (q: HillQ) => (weekBefore.length ? Math.min(sumOf(weekBefore, q), DESCENT_WEEKLY_STEP * Math.max(sumOf(creditedIn(firstWeek - 14), q), allowBefore[q])) : null);
+  // A lighter week just run (a deload, say) doesn't hold the first week
+  // down: like a planned one (carry, below), it may return to the week
+  // before's level.
+  const seed = (q: HillQ) => {
+    if (!weekBefore.length) return null;
+    const twoBefore = sumOf(creditedIn(firstWeek - 14), q);
+    return Math.max(Math.min(sumOf(weekBefore, q), DESCENT_WEEKLY_STEP * Math.max(twoBefore, allowBefore[q])), twoBefore / DESCENT_WEEKLY_STEP);
+  };
   let lastWeekDescent: number | null = seed("descentM");
   let lastWeekSteep: number | null = seed("steepDescentM");
   let lastWeekClimb: number | null = seed("climbM");
   const lastBuildWeekHills: Record<HillQ, number> = { descentM: 0, steepDescentM: 0, climbM: 0 };
+  for (const q of ["descentM", "steepDescentM", "climbM"] as const) lastBuildWeekHills[q] = DESCENT_WEEKLY_STEP * (seed(q) ?? 0);
   let budgetBindsFrom: number | null = null;
 
   for (let w = 0; w < nWeeks; w++) {

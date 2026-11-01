@@ -570,6 +570,17 @@ describe("hills per hour", () => {
     expect(hills(plan.weeks[i + 1])).toBeGreaterThanOrEqual(hills(plan.weeks[i - 1]) - 1);
   });
 
+  it("return to the level before a lighter week just run, too", () => {
+    const hist = history(rng(8), 12, 5, 50, 120);
+    const firstWeek = mondayOf(TODAY) + 7;
+    // Last week run with half the hills (a deload); the week before as usual.
+    const light = hist.map((r) => (r.day >= firstWeek - 7 ? { ...r, descentM: r.descentM / 2, steepDescentM: r.steepDescentM / 2, climbM: r.climbM / 2 } : r));
+    const twoBefore = hist.filter((r) => r.day >= firstWeek - 14 && r.day < firstWeek - 7).reduce((a, r) => a + r.descentM, 0);
+    const first = generatePlan(light, schedule, race, TODAY, OPTIONS).weeks[0];
+    expect(first.phase).toBe("base");
+    expect(first.sessions.reduce((a, x) => a + x.descentM, 0)).toBeGreaterThanOrEqual(twoBefore - 1);
+  });
+
   it("leave race week short runs only, no long run", () => {
     const week = plan.weeks.find((w) => w.phase === "race")!;
     const runs = week.sessions.filter((x) => x.kind !== "race" && x.kind !== "strength");

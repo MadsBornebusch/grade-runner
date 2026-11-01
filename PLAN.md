@@ -4761,10 +4761,11 @@ start at today's shown level). The cards:
 - **Deloads.** Capping the long run lowered the week's planned hills, and the week after
   a deload grew from the deload's total or one run's allowance (the long run's), so the
   peak weeks fell about 25%. Now the week after a lighter week can return to the last
-  build week's hills and grows from there.
+  build week's hills and grows from there. This holds for a lighter week just run as
+  well: the first planned week may return to the level of the week before it.
 - **Result on the test copy.** 3 h 30 long runs plan about 1,000 m (race density,
   was 1,350 m); peak weekly descent about 2,000 m (was 1,980 m), with descent sessions
-  and uphill intervals taking the rest. Plan inputs key bumped to 16 (adds the course
+  and uphill intervals taking the rest. Plan inputs key bumped to 17 (adds the course
   distance).
 
 ### Hills per hour grow; race week short (built 2026-11-01)
