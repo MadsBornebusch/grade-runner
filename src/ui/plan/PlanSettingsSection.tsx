@@ -1,7 +1,7 @@
 import { planSettingsStore } from "../../storage/planSettings";
 import type { FormInputs } from "../formInputs";
 import type { PlanState } from "../usePlan";
-import { planSnapshotStore } from "../usePlan";
+import { replacePlanSnapshot } from "../usePlan";
 
 /** Settings › Training plan: carbs, check-ins, re-plan and reset. The
  * weekly schedule itself is edited from Schedule › Your week. */
@@ -40,7 +40,7 @@ export function PlanSettingsSection({ plan, formInputs }: { plan: PlanState; for
           onClick={() => {
             if (!window.confirm("Clear the goal race, your week and the plan? Runs and logs stay.")) return;
             planSettingsStore.set((s) => ({ ...s, goalRace: null, longRunMoves: {} }));
-            planSnapshotStore.set({ version: 1, snapshot: null });
+            replacePlanSnapshot(null, plan.today);
           }}
         >
           Reset plan

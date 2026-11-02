@@ -11,6 +11,8 @@ import { fuelLogStore } from "../storage/fuelLogs";
 import { planSettingsStore } from "../storage/planSettings";
 import { predictionLogStore, raceLogKey, withPrediction } from "../storage/predictionLog";
 import { phaseLogStore } from "../storage/phaseLog";
+import { planLogStore } from "../storage/planLog";
+import { withPastDays } from "../plan/planLog";
 import { listStoredRuns, subscribeToRunEdits } from "../storage/runLibrary";
 import { getAutoFetchStatus, subscribeToAutoFetch } from "./autoFetchRuns";
 import { getBackfillStatus, subscribeToBackfill } from "./backfillRuns";
@@ -26,6 +28,16 @@ export const planSnapshotStore = createLocalStore<{ version: 1; snapshot: PlanSn
   version: 1,
   snapshot: null,
 });
+
+/** Replaces the stored plan, keeping what the old one planned for the
+ * days before `today` in the plan log first. */
+export function replacePlanSnapshot(snapshot: PlanSnapshot | null, today: number): void {
+  const old = planSnapshotStore.get().snapshot;
+  const log = planLogStore.get();
+  const next = withPastDays(log, old, today);
+  if (next !== log) planLogStore.set(next);
+  planSnapshotStore.set({ version: 1, snapshot });
+}
 
 export interface PlanState {
   /** Null while the runs are loading. */
@@ -150,6 +162,14 @@ export function usePlan(formInputs: FormInputs, pausePrediction = false): PlanSt
     phaseLogStore.set((log) => ({ ...log, byWeek: { ...log.byWeek, [monday]: weekPhase } }));
   }, [weekPhase, today]);
 
+  // And the plan's days gone by, as soon as they're gone (a replaced plan
+  // logs its own in replacePlanSnapshot).
+  useEffect(() => {
+    const log = planLogStore.get();
+    const next = withPastDays(log, snapshot, today);
+    if (next !== log) planLogStore.set(next);
+  }, [snapshot, today]);
+
   const carbs = useMemo(() => {
     const runs = (history ?? []).map((r) => ({ runId: r.runId, day: r.day, movingMin: r.movingMin }));
     return { raceGPerH: formInputs.intakeGPerH, startGPerH: ladderStart(runs, logs, today, settings.carbsStartGPerH) };
@@ -168,7 +188,7 @@ export function usePlan(formInputs: FormInputs, pausePrediction = false): PlanSt
       // A generator failure shows as a card; it must not take the app down.
       try {
         const out = planFromSettings(history, settings, today, carbs, raceRunIds);
-        if ("snapshot" in out) planSnapshotStore.set({ version: 1, snapshot: out.snapshot });
+        if ("snapshot" in out) replacePlanSnapshot(out.snapshot, today);
         setPlanError(null);
       } catch (err) {
         setPlanError(err instanceof Error ? err.message : String(err));

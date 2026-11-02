@@ -33,7 +33,7 @@ interface TodayTabProps {
 
 export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
   const settings = planSettingsStore.use();
-  const doneOf = useSessionDone(plan.snapshot);
+  const doneOf = useSessionDone(plan.snapshot?.plan.weeks);
   const logs = fuelLogStore.use().byRunId;
   const backfill = useSyncExternalStore(subscribeToBackfill, getBackfillStatus);
   const [openSession, setOpenSession] = useState<PlannedSession | null>(null);

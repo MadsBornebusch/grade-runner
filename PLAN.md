@@ -4738,6 +4738,23 @@ start at today's shown level). The cards:
   cap grows from what was actually run, floored by the single-run allowance.
 - Plan inputs key bumped to 13.
 
+### Past weeks as planned (built 2026-11-02)
+
+- **Why.** The plan holds only the current week and those ahead, and every re-plan
+  (Mondays, a changed setting, an update that bumps the inputs key) dropped the days
+  before it, so the schedule couldn't go back to last week.
+- **Log (`plan/planLog.ts`, `grade-runner.planLog.v1`).** Before a plan is replaced
+  (`replacePlanSnapshot` in usePlan, also on Reset plan), and whenever days pass, each
+  day before today that the plan covered (from the day it was made) is kept with its
+  sessions (empty = a planned rest day), and each such week's header without sessions.
+  The last plan for a day wins; a mid-week plan doesn't overwrite the days before it.
+  Kept 400 days.
+- **Schedule.** `weeksWithLog`: logged weeks before the plan's, and the current week's
+  days before a mid-week re-plan from the log. Past weeks read "Last week" / "N weeks
+  ago", with what was run against what was planned; strength and hike ticks work on
+  them too (`useSessionDone` takes weeks).
+- Weeks before this was built aren't in the log.
+
 ### Steady finish on the shorter long runs too (built 2026-11-01)
 
 - **Why.** With the weekly hours full (the budget binds from about 13 weeks out on the

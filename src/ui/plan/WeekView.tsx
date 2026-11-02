@@ -13,6 +13,8 @@ interface WeekViewProps {
   week: PlanWeek;
   weekNumber: number;
   weekCount: number;
+  /** In place of "Week N of M", for a past week. */
+  overline?: string;
   history: DatedHistoryRun[];
   today: number;
   doneOf: SessionDone;
@@ -26,7 +28,7 @@ interface WeekViewProps {
   onProgress: () => void;
 }
 
-export function WeekView({ week, weekNumber, weekCount, history, today, doneOf, targets, onOpen, onPrev, onNext, onMoveLongRun, onEditSchedule, onAllWeeks, onProgress }: WeekViewProps) {
+export function WeekView({ week, weekNumber, weekCount, overline, history, today, doneOf, targets, onOpen, onPrev, onNext, onMoveLongRun, onEditSchedule, onAllWeeks, onProgress }: WeekViewProps) {
   const { doneMin, plannedMin, isCurrent } = weekProgress(week, history, today, (s) => !!doneOf(s));
   const isPast = week.start + 7 <= today;
   const days = matchWeek(week.start, week.sessions, history, today);
@@ -39,7 +41,7 @@ export function WeekView({ week, weekNumber, weekCount, history, today, doneOf, 
           <CaretLeft size={20} />
         </button>
         <div className="week-nav__title">
-          <span className="overline">{isCurrent ? "This week" : `Week ${weekNumber} of ${weekCount}`}</span>
+          <span className="overline">{isCurrent ? "This week" : (overline ?? `Week ${weekNumber} of ${weekCount}`)}</span>
           <h2>Week of {shortDate(week.start)}</h2>
         </div>
         <button type="button" className="icon-button" onClick={onNext} disabled={!onNext} aria-label="Next week">

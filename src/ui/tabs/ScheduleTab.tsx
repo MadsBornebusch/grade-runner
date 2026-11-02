@@ -7,6 +7,8 @@ import { expectedHoursOf, planSettingsStore } from "../../storage/planSettings";
 import type { FormInputs } from "../formInputs";
 import { MoveLongRunSheet } from "../plan/MoveLongRunSheet";
 import { PlanEmptyState } from "../plan/PlanEmptyState";
+import { weeksWithLog } from "../../plan/planLog";
+import { planLogStore } from "../../storage/planLog";
 import { PlanOverview } from "../plan/PlanOverview";
 import { ScheduleEditor } from "../plan/ScheduleEditor";
 import { SessionSheet } from "../plan/SessionSheet";
@@ -26,7 +28,10 @@ interface ScheduleTabProps {
  * (all weeks), #/schedule/edit (your week). #/schedule/progress is App.tsx's. */
 export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabProps) {
   const settings = planSettingsStore.use();
-  const doneOf = useSessionDone(plan.snapshot);
+  const log = planLogStore.use();
+  // Past weeks and days as they were planned, then the plan's.
+  const weeks = useMemo(() => (plan.snapshot ? weeksWithLog(log, plan.snapshot) : undefined), [log, plan.snapshot]);
+  const doneOf = useSessionDone(weeks);
   const [openSession, setOpenSession] = useState<PlannedSession | null>(null);
   const [moving, setMoving] = useState<number | null>(null);
   const race = settings.goalRace;
@@ -98,10 +103,16 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
     );
   }
 
-  const wantStart = rest[0] === "week" && rest[1] ? mondayOf(dayNumberOf(rest[1])) : mondayOf(plan.today);
-  const index = Math.max(0, p.weeks.findIndex((w) => w.start === wantStart));
-  const week = p.weeks[index];
-  const goWeek = (i: number) => navigate("schedule", ...(i === 0 ? [] : ["week", dateOfDayNumber(p.weeks[i].start)]));
+  const all = weeks!;
+  const thisMonday = mondayOf(plan.today);
+  const current = Math.max(0, all.findIndex((w) => w.start === thisMonday));
+  const wantStart = rest[0] === "week" && rest[1] ? mondayOf(dayNumberOf(rest[1])) : thisMonday;
+  const found = all.findIndex((w) => w.start === wantStart);
+  const index = found < 0 ? current : found;
+  const week = all[index];
+  const goWeek = (i: number) => navigate("schedule", ...(i === current ? [] : ["week", dateOfDayNumber(all[i].start)]));
+  const weeksAgo = (thisMonday - week.start) / 7;
+  const overline = weeksAgo === 1 ? "Last week" : weeksAgo > 1 ? `${weeksAgo} weeks ago` : undefined;
   const longSession = week.sessions.find((s) => s.kind === "long");
   const canMove = !!longSession && week.start + 7 > plan.today;
   const moveLongRun = (weekday: number) => {
@@ -123,15 +134,16 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
       )}
       <WeekView
         week={week}
-        weekNumber={index + 1}
+        weekNumber={index - current + 1}
         weekCount={p.weeks.length}
+        overline={overline}
         history={history}
         today={plan.today}
         doneOf={doneOf}
         targets={targets}
         onOpen={setOpenSession}
         onPrev={index > 0 ? () => goWeek(index - 1) : undefined}
-        onNext={index < p.weeks.length - 1 ? () => goWeek(index + 1) : undefined}
+        onNext={index < all.length - 1 ? () => goWeek(index + 1) : undefined}
         onMoveLongRun={canMove ? () => setMoving(weekdayOf(longSession!.day)) : undefined}
         onEditSchedule={() => navigate("schedule", "edit")}
         onAllWeeks={() => navigate("schedule", "plan")}
