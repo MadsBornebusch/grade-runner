@@ -41,6 +41,7 @@ import {
   type FormInputs,
 } from "../formInputs";
 import { buildSolverInputs } from "../solverInputs";
+import { useFrozenMemo } from "../useFrozenMemo";
 import { GoalRaceCard } from "../plan/GoalRaceCard";
 import type { PlanState } from "../usePlan";
 import type { TabId } from "../useHashRoute";
@@ -257,18 +258,11 @@ export function RaceTab({ formInputs, setFormInputs, active, rest, navigate, pla
   // planSummaryStats) skip the whole theta-bisection cascade for every
   // keystroke made in Settings, not just the fields that don't feed it.
   // Catches up in one solve, using whatever the final formInputs ended up
-  // being, the moment this tab shows again (frozen flipping is itself a
-  // dependency below).
-  const lastSolverInputsRef = useRef<SolverInputs | null>(null);
-  const solverInputs = useMemo<SolverInputs | null>(() => {
-    if (frozen) return lastSolverInputsRef.current;
-    if (!courseResult || courseResult.segments.length === 0) {
-      lastSolverInputsRef.current = null;
-      return null;
-    }
-    const built = buildSolverInputs(courseResult.segments, formInputs);
-    lastSolverInputsRef.current = built;
-    return built;
+  // being, the moment this tab shows again -- and keeps the same reference
+  // if none of them changed, so just showing the tab doesn't re-solve.
+  const solverInputs = useFrozenMemo<SolverInputs | null>(() => {
+    if (!courseResult || courseResult.segments.length === 0) return null;
+    return buildSolverInputs(courseResult.segments, formInputs);
     // Narrow, explicit field list -- the whole solver cascade downstream
     // of this (solverResult, chosenPacingResult, bestDemonstratedResult,
     // targetTimeResult, chartPoints) re-runs whenever this reference
@@ -278,9 +272,7 @@ export function RaceTab({ formInputs, setFormInputs, active, rest, navigate, pla
     // solver. Only list fields actually read above (directly or via
     // resolveLt1Lt2Fractions/resolveSubstrateAnchors/resolveCeilingParams/
     // resolveGlycogenStoreG).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    frozen,
     courseResult,
     formInputs.bodyMassKg,
     formInputs.vo2MaxHistory,
@@ -300,7 +292,7 @@ export function RaceTab({ formInputs, setFormInputs, active, rest, navigate, pla
     formInputs.unpavedCostMultiplier,
     formInputs.surfaceCostMultipliers,
     formInputs.descentCapCurve,
-  ]);
+  ], frozen, null);
 
   // Even-paced, NOT findSustainableTheta. That one holds a constant fraction
   // of a ceiling evaluated at each segment's own elapsed time, so the target
@@ -349,14 +341,9 @@ export function RaceTab({ formInputs, setFormInputs, active, rest, navigate, pla
   // own dependency array, so an unnecessary new reference here would still
   // re-run buildChartPoints on every keystroke in Settings even with
   // solverInputs itself frozen.
-  const lastHrEstimateInputsRef = useRef<HrEstimateInputs | undefined>(undefined);
-  const hrEstimateInputs = useMemo<HrEstimateInputs | undefined>(() => {
-    if (frozen) return lastHrEstimateInputsRef.current;
-    if (formInputs.hrPowerCalibrationSlope === null || formInputs.hrPowerCalibrationIntercept === null) {
-      lastHrEstimateInputsRef.current = undefined;
-      return undefined;
-    }
-    const built: HrEstimateInputs = {
+  const hrEstimateInputs = useFrozenMemo<HrEstimateInputs | undefined>(() => {
+    if (formInputs.hrPowerCalibrationSlope === null || formInputs.hrPowerCalibrationIntercept === null) return undefined;
+    return {
       calibration: {
         slope: formInputs.hrPowerCalibrationSlope,
         intercept: formInputs.hrPowerCalibrationIntercept,
@@ -365,11 +352,8 @@ export function RaceTab({ formInputs, setFormInputs, active, rest, navigate, pla
         raceCount: 0,
       },
     };
-    lastHrEstimateInputsRef.current = built;
-    return built;
     // Narrow field list -- see comment above.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [frozen, formInputs.hrPowerCalibrationSlope, formInputs.hrPowerCalibrationIntercept]);
+  }, [formInputs.hrPowerCalibrationSlope, formInputs.hrPowerCalibrationIntercept], frozen, undefined);
 
   const targetTimeS = useMemo(() => parseDurationToSeconds(targetTimeInput), [targetTimeInput]);
 
@@ -425,16 +409,13 @@ export function RaceTab({ formInputs, setFormInputs, active, rest, navigate, pla
 
   // Same "another tab is showing, nothing to show a fresh rebuild to"
   // freeze as solverInputs above.
-  const lastAnalysisInputsRef = useRef<AnalysisInputs | null>(null);
-  const analysisInputs = useMemo<AnalysisInputs | null>(() => {
-    if (frozen) return lastAnalysisInputsRef.current;
+  const analysisInputs = useFrozenMemo<AnalysisInputs | null>(() => {
     if (
       resultMode !== "analysis" ||
       !courseResult ||
       !courseResult.hasTimestamps ||
       courseResult.segments.length === 0
     ) {
-      lastAnalysisInputsRef.current = null;
       return null;
     }
     const { lt1Fraction, lt2Fraction } = resolveLt1Lt2Fractions(formInputs);
@@ -459,12 +440,9 @@ export function RaceTab({ formInputs, setFormInputs, active, rest, navigate, pla
       unpavedCostMultiplier: formInputs.unpavedCostMultiplier,
       surfaceCostMultipliers: formInputs.surfaceCostMultipliers ?? undefined,
     };
-    lastAnalysisInputsRef.current = built;
     return built;
     // Narrow field list -- same reasoning as solverInputs above.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    frozen,
     resultMode,
     courseResult,
     formInputs.bodyMassKg,
@@ -482,7 +460,7 @@ export function RaceTab({ formInputs, setFormInputs, active, rest, navigate, pla
     formInputs.altitudeAdjustment,
     formInputs.unpavedCostMultiplier,
     formInputs.surfaceCostMultipliers,
-  ]);
+  ], frozen, null);
 
   const analysisResult = useMemo(() => {
     if (!courseResult || !analysisInputs) return null;

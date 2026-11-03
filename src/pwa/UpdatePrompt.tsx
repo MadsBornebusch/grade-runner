@@ -8,6 +8,11 @@ import { useRegisterSW } from "virtual:pwa-register/react";
  * is by hash), so updates are also looked for when it's shown again and
  * every hour it stays open. */
 const CHECK_EVERY_MS = 60 * 60 * 1000;
+/** updateServiceWorker reloads once the new worker controls the page,
+ * which never happens for a page it didn't control (opened before the
+ * worker was installed, or a hard reload): then the prompt just stayed.
+ * The new worker is active by now either way, so reload regardless. */
+const RELOAD_FALLBACK_MS = 2500;
 
 export function UpdatePrompt() {
   const {
@@ -32,11 +37,17 @@ export function UpdatePrompt() {
     navigator.storage?.persist?.().catch(() => {});
   }, []);
 
+  const reload = () => {
+    setNeedRefresh(false);
+    void updateServiceWorker();
+    setTimeout(() => window.location.reload(), RELOAD_FALLBACK_MS);
+  };
+
   if (!needRefresh) return null;
   return (
     <div className="update-prompt" role="status">
       <span>A new version is ready</span>
-      <button type="button" className="button-primary button-small" onClick={() => updateServiceWorker()}>
+      <button type="button" className="button-primary button-small" onClick={reload}>
         Reload
       </button>
       <button type="button" className="button-ghost button-small" onClick={() => setNeedRefresh(false)}>
