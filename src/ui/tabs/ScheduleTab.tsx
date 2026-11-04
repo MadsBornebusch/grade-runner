@@ -30,8 +30,9 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
   const settings = planSettingsStore.use();
   const log = planLogStore.use();
   // Past weeks and days as they were planned, then the plan's.
-  const weeks = useMemo(() => (plan.snapshot ? weeksWithLog(log, plan.snapshot) : undefined), [log, plan.snapshot]);
-  const doneOf = useSessionDone(weeks);
+  const logged = useMemo(() => (plan.snapshot ? weeksWithLog(log, plan.snapshot) : undefined), [log, plan.snapshot]);
+  // Done strength and hikes on the day they were done.
+  const { weeks, doneOf } = useSessionDone(logged);
   const [openSession, setOpenSession] = useState<PlannedSession | null>(null);
   const [moving, setMoving] = useState<number | null>(null);
   const race = settings.goalRace;
@@ -159,7 +160,7 @@ export function ScheduleTab({ plan, formInputs, rest, navigate }: ScheduleTabPro
           targets={targets}
           bodyMassKg={formInputs.bodyMassKg}
           done={doneOf(openSession)}
-          onToggleDone={() => toggleSessionDone(openSession)}
+          onToggleDone={() => toggleSessionDone(openSession, doneOf(openSession), plan.today)}
           onMoveLongRun={openSession.kind === "long" && canMove ? () => setMoving(weekdayOf(openSession.day)) : undefined}
           onClose={() => setOpenSession(null)}
         />

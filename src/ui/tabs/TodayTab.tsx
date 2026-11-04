@@ -6,7 +6,7 @@ import { useSyncExternalStore } from "react";
 import { runsNeedingFuelLog } from "../../plan/carbLadder";
 import { dateOfDayNumber, dayNumberOf, type DatedHistoryRun } from "../../plan/historyFromRuns";
 import { matchDay } from "../../plan/matchSessions";
-import { mondayOf, type Phase, type PlannedSession } from "../../plan/planGenerator";
+import { mondayOf, type Phase, type PlannedSession, type PlanWeek } from "../../plan/planGenerator";
 import { fuelLogStore } from "../../storage/fuelLogs";
 import { planSettingsStore } from "../../storage/planSettings";
 import { predictionLogStore, raceLogKey } from "../../storage/predictionLog";
@@ -33,7 +33,8 @@ interface TodayTabProps {
 
 export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
   const settings = planSettingsStore.use();
-  const doneOf = useSessionDone(plan.snapshot?.plan.weeks);
+  // Done strength and hikes on the day they were done.
+  const { weeks: shownWeeks, doneOf } = useSessionDone(plan.snapshot?.plan.weeks);
   const logs = fuelLogStore.use().byRunId;
   const backfill = useSyncExternalStore(subscribeToBackfill, getBackfillStatus);
   const [openSession, setOpenSession] = useState<PlannedSession | null>(null);
@@ -77,7 +78,7 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
   }
 
   const history = plan.history;
-  const weeks = plan.snapshot.plan.weeks;
+  const weeks = shownWeeks ?? plan.snapshot.plan.weeks;
   const all = weeks.flatMap((w) => w.sessions);
   const week = weeks.find((w) => w.start === mondayOf(today));
   const todays = all.filter((s) => s.day === today).sort((a, b) => Number(a.kind === "strength") - Number(b.kind === "strength"));
@@ -169,7 +170,7 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
         </section>
       )}
 
-      {week && <WeekStrip plan={plan} weekStart={week.start} doneOf={doneOf} onOpen={() => navigate("schedule")} />}
+      {week && <WeekStrip plan={plan} week={week} doneOf={doneOf} onOpen={() => navigate("schedule")} />}
 
       <ProgressLine history={history} today={today} phase={week?.phase} onOpen={() => navigate("today", "progress")} />
 
@@ -203,7 +204,7 @@ export function TodayTab({ plan, formInputs, navigate }: TodayTabProps) {
           targets={targets}
           bodyMassKg={formInputs.bodyMassKg}
           done={doneOf(openSession)}
-          onToggleDone={() => toggleSessionDone(openSession)}
+          onToggleDone={() => toggleSessionDone(openSession, doneOf(openSession), today)}
           onClose={() => setOpenSession(null)}
         />
       )}
@@ -217,8 +218,8 @@ function countdown(days: number): string {
   return `${Math.round(days / 7)} weeks to go`;
 }
 
-function WeekStrip({ plan, weekStart, doneOf, onOpen }: { plan: PlanState; weekStart: number; doneOf: SessionDone; onOpen: () => void }) {
-  const week = plan.snapshot!.plan.weeks.find((w) => w.start === weekStart)!;
+function WeekStrip({ plan, week, doneOf, onOpen }: { plan: PlanState; week: PlanWeek; doneOf: SessionDone; onOpen: () => void }) {
+  const weekStart = week.start;
   const history = plan.history!;
   const { doneMin, plannedMin } = weekProgress(week, history, plan.today, (s) => !!doneOf(s));
   return (

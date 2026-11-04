@@ -2,32 +2,46 @@ import { useMemo } from "react";
 import { dateOfDayNumber } from "../../plan/historyFromRuns";
 import type { SessionState } from "../../plan/matchSessions";
 import type { PlannedSession, PlanWeek } from "../../plan/planGenerator";
-import { strengthDoneByDay, type StrengthDone } from "../../plan/strengthDone";
+import { strengthDoneByDay, tickDate, type StrengthDone } from "../../plan/strengthDone";
 import { planSettingsStore } from "../../storage/planSettings";
 
 export type SessionDone = (s: PlannedSession) => StrengthDone | null;
 
+/** A strength session or hike shown on the day it was done, not the day
+ * it was planned (`plannedDay`). */
+export type ShownSession = PlannedSession & { plannedDay?: number };
+
 /** Whether a strength session or weighted hike is done: ticked by hand or
- * matched to a Strava activity (strengthDone.ts). Null for other kinds. */
-export function useSessionDone(weeks: PlanWeek[] | undefined): SessionDone {
+ * matched to a Strava activity (strengthDone.ts); null for other kinds.
+ * And `weeks` with each done one moved to the day it was done. */
+export function useSessionDone(weeks: PlanWeek[] | undefined): { weeks: PlanWeek[] | undefined; doneOf: SessionDone } {
   const { strengthDone, strengthFromStrava, hikeDone, hikeFromStrava } = planSettingsStore.use();
   return useMemo(() => {
     const daysOf = (kind: PlannedSession["kind"]) => weeks?.flatMap((w) => w.sessions.filter((s) => s.kind === kind).map((s) => s.day)) ?? [];
     const strength = strengthDoneByDay(daysOf("strength"), strengthDone, strengthFromStrava);
     const hike = strengthDoneByDay(daysOf("hike"), hikeDone, hikeFromStrava);
-    return (s) => (s.kind === "strength" ? strength : s.kind === "hike" ? hike : {})[dateOfDayNumber(s.day)] ?? null;
+    const doneOf: SessionDone = (s) =>
+      (s.kind === "strength" ? strength : s.kind === "hike" ? hike : {})[dateOfDayNumber((s as ShownSession).plannedDay ?? s.day)] ?? null;
+    const moved = weeks?.map((w) => {
+      if (!w.sessions.some((s) => { const on = doneOf(s)?.on; return on !== undefined && on !== s.day; })) return w;
+      const sessions = w.sessions
+        .map((s): ShownSession => { const on = doneOf(s)?.on; return on === undefined || on === s.day ? s : { ...s, day: on, plannedDay: s.day }; })
+        .sort((a, b) => a.day - b.day);
+      return { ...w, sessions };
+    });
+    return { weeks: moved, doneOf };
   }, [weeks, strengthDone, strengthFromStrava, hikeDone, hikeFromStrava]);
 }
 
-/** Ticks a strength session or hike done by hand, or unticks it. */
-export function toggleSessionDone(s: PlannedSession): void {
+/** Ticks a strength session or hike done by hand (on `today` if that's in
+ * its week: tickDate), or unticks it. */
+export function toggleSessionDone(s: PlannedSession, done: StrengthDone | null, today: number): void {
   const field = s.kind === "hike" ? "hikeDone" : "strengthDone";
   planSettingsStore.set((st) => {
-    const key = dateOfDayNumber(s.day);
-    const done = { ...st[field] };
-    if (done[key]) delete done[key];
-    else done[key] = true;
-    return { ...st, [field]: done };
+    const ticks = { ...st[field] };
+    if (done?.source === "manual") delete ticks[dateOfDayNumber(done.on)];
+    else ticks[tickDate((s as ShownSession).plannedDay ?? s.day, today)] = true;
+    return { ...st, [field]: ticks };
   });
 }
 
