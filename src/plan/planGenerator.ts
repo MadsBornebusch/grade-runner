@@ -157,6 +157,10 @@ export interface PlanOptions {
    * budget and target reduced by what's already been run since Monday.
    * Without it the plan starts next Monday. */
   includeCurrentWeek?: boolean;
+  /** Session kinds already run this week, as planned on their day (a
+   * mid-week re-plan): the week's one uphill-interval session, descent
+   * session or hike isn't planned a second time. */
+  doneThisWeek?: SessionKind[];
   /** Days of user-confirmed races and the goal race: a run on one counts
    * as a race for the recovery after it, whatever its size against the
    * athlete's recent runs. */
@@ -641,6 +645,7 @@ export function generatePlan(
       caps,
       lastWeekDescent, lastWeekSteep, lastWeekClimb,
       doneDescentM: sumOf(doneThisWeek, "descentM"), doneSteepM: sumOf(doneThisWeek, "steepDescentM"), doneClimbM: sumOf(doneThisWeek, "climbM"),
+      doneKinds: new Set(start === mondayOf(today) ? (options.doneThisWeek ?? []) : []),
       strengthSessions, strengthMinutes, budgetMinutes: Math.max(0, budgetPerWeek - doneMinutes), fromDay: today,
       prevLongDay, nextLongDay: start + 7 + (schedule.longRunWeekdayByWeek?.get(start + 7) ?? schedule.longRunWeekday),
       longRunCapMinutes: schedule.longRunMaxMinutes, cappedDays, steadyDays, weeksToRace,
@@ -742,6 +747,8 @@ interface WeekState {
   doneDescentM: number;
   doneSteepM: number;
   doneClimbM: number;
+  /** PlanOptions.doneThisWeek, for the current week only. */
+  doneKinds: ReadonlySet<SessionKind>;
   strengthSessions: number;
   strengthMinutes: number | undefined;
   /** The week's running budget, which the slots may add up to more than. */
@@ -930,20 +937,20 @@ function planWeek(
     // density); in the ME block one more becomes a weighted uphill hike
     // (time on feet, easy breathing, so easy density), preferably not the
     // day before or after the long run, then not on a strength day. A week short of runs drops the hike first,
-    // then the descent.
+    // then the descent. One already run this week isn't planned again.
     const afterLong = new Set([start + longRunWeekday + 1, (state.prevLongDay ?? -Infinity) + 1]);
     const afterStrength = new Set(strengthSessions.map((x) => x.day + 1));
     const easy = runs.filter((r) => r.kind === "easy").sort((a, b) => b.minutes - a.minutes);
     const qualityOk = easy.filter((r) => !afterLong.has(r.day));
-    const quality = qualityOk.find((r) => !afterStrength.has(r.day)) ?? qualityOk[0];
+    const quality = state.doneKinds.has("quality") ? undefined : (qualityOk.find((r) => !afterStrength.has(r.day)) ?? qualityOk[0]);
     if (quality) {
       quality.kind = "quality";
       quality.mechanical = (quality.minutes / 60) * o.maxDensity;
       Object.assign(quality, thresholdReps(quality.minutes, state.weeksToRace));
     }
-    const descent = phase === "specific" ? easy.find((r) => r !== quality) : undefined;
+    const descent = phase === "specific" && !state.doneKinds.has("descent") ? easy.find((r) => r !== quality) : undefined;
     if (descent) descent.kind = "descent";
-    if (hikeWeek) {
+    if (hikeWeek && !state.doneKinds.has("hike")) {
       const left = easy.filter((r) => r !== quality && r !== descent);
       const strengthDays = new Set(strengthSessions.map((x) => x.day));
       const nearLong = new Set([state.nextLongDay - 1, start + longRunWeekday - 1, ...afterLong]);

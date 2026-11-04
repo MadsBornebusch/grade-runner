@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { dateOfDayNumber } from "./historyFromRuns";
 import type { PlanSnapshot } from "./planFromSettings";
 import { mondayOf, type PlannedSession, type PlanWeek } from "./planGenerator";
-import { EMPTY_PLAN_LOG, weeksWithLog, withPastDays } from "./planLog";
+import { EMPTY_PLAN_LOG, kindsDoneThisWeek, weeksWithLog, withPastDays } from "./planLog";
 
 const MONDAY = mondayOf(20000);
 const run = (day: number, minutes = 40): PlannedSession => ({ day, kind: "easy", minutes, distanceKm: 6, mechanical: 50, descentM: 0, steepDescentM: 0, climbM: 0 });
@@ -56,5 +56,16 @@ describe("plan log", () => {
     const pruned = withPastDays(log, snapshot(MONDAY + 500, [week(mondayOf(MONDAY + 500), [])]), MONDAY + 500);
     expect(Object.keys(pruned.byDay).some((k) => k === dateOfDayNumber(MONDAY))).toBe(false);
     expect(pruned.weeks[dateOfDayNumber(MONDAY)]).toBeUndefined();
+  });
+
+  it("knows the week's uphill intervals were run, as planned on their day", () => {
+    const quality = { ...run(MONDAY + 1), kind: "quality" as const };
+    const hike = { ...run(MONDAY + 2), kind: "hike" as const };
+    const log = withPastDays(EMPTY_PLAN_LOG, snapshot(MONDAY, [week(MONDAY, [quality, hike, run(MONDAY + 3)])]), MONDAY + 3);
+    expect(kindsDoneThisWeek(log, new Set([MONDAY + 1]), MONDAY + 3)).toEqual(["quality"]);
+    // Not run on the day: free to move.
+    expect(kindsDoneThisWeek(log, new Set([MONDAY + 3]), MONDAY + 3)).toEqual([]);
+    // Last week's don't count.
+    expect(kindsDoneThisWeek(log, new Set([MONDAY + 1]), MONDAY + 8)).toEqual([]);
   });
 });

@@ -5,7 +5,7 @@
 // the days of this week before a mid-week re-plan, as they were planned.
 import { dateOfDayNumber, dayNumberOf } from "./historyFromRuns";
 import type { PlanSnapshot } from "./planFromSettings";
-import type { PlannedSession, PlanWeek } from "./planGenerator";
+import { mondayOf, type PlannedSession, type PlanWeek, type SessionKind } from "./planGenerator";
 
 export interface PlanLog {
   version: 1;
@@ -84,4 +84,16 @@ export function weeksWithLog(log: PlanLog, snapshot: PlanSnapshot): PlanWeek[] {
     w.start < madeOn ? { ...w, sessions: [...loggedDays(w.start, madeOn, w.sessions), ...w.sessions.filter((s) => s.day >= madeOn)] } : w,
   );
   return [...past, ...planned];
+}
+
+/** The week's one-off kinds the athlete has run, as the log planned them,
+ * on the days of this week before `today` with a run (PlanOptions
+ * doneThisWeek): a session planned on a day not run may still be moved. */
+export function kindsDoneThisWeek(log: PlanLog, runDays: ReadonlySet<number>, today: number): SessionKind[] {
+  const kinds = new Set<SessionKind>();
+  for (let day = mondayOf(today); day < today; day++) {
+    if (!runDays.has(day)) continue;
+    for (const s of log.byDay[dateOfDayNumber(day)] ?? []) if (s.kind === "quality" || s.kind === "descent" || s.kind === "hike") kinds.add(s.kind);
+  }
+  return [...kinds];
 }

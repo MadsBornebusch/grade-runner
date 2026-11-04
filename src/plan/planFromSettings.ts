@@ -5,7 +5,7 @@ import { expectedHoursOf, type PlanSettings } from "../storage/planSettings";
 import { dayNumberOf, planOptionsFromHistory, usesGenericPlanOptions, type DatedHistoryRun } from "./historyFromRuns";
 import { strengthRampLevel } from "./strengthRamp";
 import type { GuardRun } from "./sessionGuard";
-import { generatePlan, mondayOf, type HistoryRun, suggestLongRunMaxMinutes, type Plan, type WeeklySchedule } from "./planGenerator";
+import { generatePlan, mondayOf, type HistoryRun, suggestLongRunMaxMinutes, type Plan, type SessionKind, type WeeklySchedule } from "./planGenerator";
 
 export interface PlanSnapshot {
   version: 1;
@@ -44,7 +44,7 @@ export function planInputsKey(settings: PlanSettings, carbs: CarbInputs): string
   // The leading version bumps when the generator's output changes shape,
   // so stored snapshots regenerate.
   return JSON.stringify([
-    20, race.courseId, race.date, race.descentM, race.steepDescentM, race.distanceKm, race.expectedHoursOverride && roundedExpectedHours(race.expectedHoursOverride),
+    21, race.courseId, race.date, race.descentM, race.steepDescentM, race.distanceKm, race.expectedHoursOverride && roundedExpectedHours(race.expectedHoursOverride),
     settings.schedule, settings.longRunMoves, carbs.raceGPerH, settings.carbsStartGPerH, settings.strengthStartedOn, settings.pastGoalRaces,
   ]);
 }
@@ -117,6 +117,8 @@ export function planFromSettings(
   carbs: CarbInputs,
   /** Runs the athlete confirmed as races (StoredRun.raceTag). */
   raceRunIds: ReadonlySet<string> = new Set(),
+  /** PlanOptions.doneThisWeek (planLog.ts's kindsDoneThisWeek). */
+  doneThisWeek: SessionKind[] = [],
 ): { snapshot: PlanSnapshot } | { blocker: PlanBlocker } {
   const race = settings.goalRace;
   if (!race) return { blocker: "noRace" };
@@ -145,6 +147,7 @@ export function planFromSettings(
       strengthLevel: strengthRampLevel(settings.strengthStartedOn, [...Object.keys(settings.strengthDone), ...Object.keys(settings.strengthFromStrava)], today),
       carbs: { raceGPerH: carbs.raceGPerH, startGPerH: carbs.startGPerH },
       includeCurrentWeek: true,
+      doneThisWeek,
       raceDays: [
         dayNumberOf(race.date),
         ...settings.pastGoalRaces.map(dayNumberOf),

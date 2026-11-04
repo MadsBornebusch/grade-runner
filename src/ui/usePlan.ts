@@ -12,7 +12,7 @@ import { planSettingsStore } from "../storage/planSettings";
 import { predictionLogStore, raceLogKey, withPrediction } from "../storage/predictionLog";
 import { phaseLogStore } from "../storage/phaseLog";
 import { planLogStore } from "../storage/planLog";
-import { withPastDays } from "../plan/planLog";
+import { kindsDoneThisWeek, withPastDays } from "../plan/planLog";
 import { listStoredRuns, subscribeToRunEdits } from "../storage/runLibrary";
 import { getAutoFetchStatus, subscribeToAutoFetch } from "./autoFetchRuns";
 import { getBackfillStatus, subscribeToBackfill } from "./backfillRuns";
@@ -187,7 +187,10 @@ export function usePlan(formInputs: FormInputs, pausePrediction = false): PlanSt
       }
       // A generator failure shows as a card; it must not take the app down.
       try {
-        const out = planFromSettings(history, settings, today, carbs, raceRunIds);
+        // What the plan being replaced had on this week's days gone by.
+        const log = withPastDays(planLogStore.get(), snapshot, today);
+        const done = kindsDoneThisWeek(log, new Set([...history, ...hikeHillRuns(settings)].map((r) => r.day)), today);
+        const out = planFromSettings(history, settings, today, carbs, raceRunIds, done);
         if ("snapshot" in out) replacePlanSnapshot(out.snapshot, today);
         setPlanError(null);
       } catch (err) {

@@ -4753,6 +4753,13 @@ start at today's shown level). The cards:
   days before a mid-week re-plan from the log. Past weeks read "Last week" / "N weeks
   ago", with what was run against what was planned; strength and hike ticks work on
   them too (`useSessionDone` takes weeks).
+- **Mid-week re-plans keep the week's one-offs (2026-11-04).** Uphill intervals well
+  past their planned climb trigger a re-plan (overshotSincePlanned), which didn't know
+  they were the week's quality session and planned another two days later. Now
+  `kindsDoneThisWeek` reads this week's past days from the log: a quality, descent or
+  hike session planned on a day with a run counts as done, and the generator
+  (`PlanOptions.doneThisWeek`) doesn't plan that kind again this week; that run stays
+  easy. One planned on a day without a run can still move. Inputs key 21.
 - Weeks before this was built aren't in the log.
 
 ### Steady finish on the shorter long runs too (built 2026-11-01)

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   restDaysAfter,
-  carbTargets, generatePlan, longestReachedOn, raceEffortLongRuns, raceEffortShare, mondayOf, STRENGTH_MINUTES, hikePackPct, rampedFocuses, strengthBlockOf, strengthFocuses, recoveryWeeks, slotsForWeek, steadyBlockMinutes, strengthDaysOf, suggestLongRunMaxMinutes, thresholdReps, type HistoryRun, type PlanOptions, type WeeklySchedule,
+  carbTargets, generatePlan, longestReachedOn, raceEffortLongRuns, raceEffortShare, mondayOf, STRENGTH_MINUTES, hikePackPct, rampedFocuses, strengthBlockOf, strengthFocuses, recoveryWeeks, slotsForWeek, steadyBlockMinutes, strengthDaysOf, suggestLongRunMaxMinutes, thresholdReps, type HistoryRun, type PlanOptions, type SessionKind, type WeeklySchedule,
 } from "./planGenerator";
 import { guardBreaches, referenceAt, runReferences } from "./sessionGuard";
 
@@ -231,6 +231,19 @@ describe("current week and past races", () => {
     const flat = [...hist.filter((r) => r.day < 19996), { day: 19996, movingMin: 50, distanceKm: 7, descentM: 0, steepDescentM: 0, climbM: 0, mechanical: 60 }];
     expect(rest(flat).descent).toBeGreaterThan(0);
     expect(rest(hilly)).toEqual({ descent: 0, climb: 0 });
+  });
+
+  it("doesn't plan this week's uphill intervals again once they're run", () => {
+    const race = { name: "r", day: TODAY + 120, expectedHours: 6 };
+    // Re-planned on Tuesday (19997), with runs on the days ahead.
+    const kinds = (doneThisWeek: SessionKind[]) =>
+      generatePlan(hist.filter((r) => r.day < 19997), schedule, race, 19997, { ...OPTIONS, includeCurrentWeek: true, doneThisWeek })
+        .weeks.slice(0, 2).map((w) => w.sessions.map((x) => x.kind));
+    const [thisWeek, nextWeek] = kinds(["quality"]);
+    expect(kinds([])[0]).toContain("quality");
+    expect(thisWeek).not.toContain("quality");
+    expect(thisWeek.filter((k) => k !== "strength").length).toBe(kinds([])[0].filter((k) => k !== "strength").length);
+    expect(nextWeek).toContain("quality");
   });
 
   it("keeps this week's strength days when re-planned mid-week", () => {
