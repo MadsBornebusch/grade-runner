@@ -4898,6 +4898,9 @@ no trap bar).
   (WeightTraining etc., and Hike); a hike logged as a run counts too (and its time enters the run library).
   A session done on another day ticks the nearest open one that week, past days included: a
   mid-week re-plan keeps the week's strength days before today (user request, 2026-10-24).
+  The schedule then shows it on the day it was done. A hand tick made on another day of the
+  session's week counts as done that day (`tickDate`), so a late tick moves the session to
+  today (user request, 2026-11-04); a past week's tick stays on its planned day.
 
 ### Open questions
 
