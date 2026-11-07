@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { mondayOf } from "./planGenerator";
-import { byMonth, loadSeries, longTermChange, phaseBands, planProjection, weeklyTotals } from "./progressSeries";
+import { mondayOf, type PlannedSession } from "./planGenerator";
+import { byMonth, loadSeries, longTermChange, phaseBands, plannedTotals, planProjection, weekFlag, weeklyTotals } from "./progressSeries";
 
 const MONDAY = mondayOf(20000);
 const run = (day: number, extra: Partial<{ mechanical: number; movingMin: number; distanceKm: number; descentM: number; climbM: number }> = {}) => ({
@@ -108,5 +108,32 @@ describe("planProjection", () => {
 
   it("is empty without a week containing today", () => {
     expect(planProjection([{ start: MONDAY + 7, chronicAtStart: 40 }], MONDAY, 300)).toEqual([]);
+  });
+});
+
+describe("planned totals and week flags", () => {
+  const session = (kind: PlannedSession["kind"], extra: Partial<PlannedSession> = {}): PlannedSession => ({
+    day: MONDAY, kind, minutes: 60, distanceKm: 10, mechanical: 50, descentM: 100, steepDescentM: 0, climbM: 100, ...extra,
+  });
+
+  it("counts planned weeks like done ones: hikes as hills only, no strength", () => {
+    const [w] = plannedTotals([{ start: MONDAY, sessions: [session("easy"), session("hike", { climbM: 400, descentM: 300 }), session("strength")] }]);
+    expect(w).toEqual({ start: MONDAY, hours: 1, km: 10, climbM: 500, descentM: 400, race: false });
+    expect(plannedTotals([{ start: MONDAY, sessions: [session("race", { distanceKm: 0 })] }])[0].race).toBe(true);
+  });
+
+  it("flags a week more than 10% over the biggest of the weeks before", () => {
+    expect(weekFlag(40, [30, 32, 34, 36], undefined, 5, 0.25)).toBe(null); // 10% steps
+    expect(weekFlag(46, [30, 32, 34, 36], undefined, 5, 0.25)).toBe("tooFast");
+    // A normal week after a lighter one isn't.
+    expect(weekFlag(40, [36, 38, 40, 25], undefined, 5, 0.25)).toBe(null);
+    // Nothing before to compare with.
+    expect(weekFlag(40, [], undefined, 5, 0.25)).toBe(null);
+  });
+
+  it("flags a week well past its plan, the week so far too", () => {
+    expect(weekFlag(48, [50, 50, 50, 50], 36, 5, 0.25)).toBe("overPlan");
+    expect(weekFlag(44, [50, 50, 50, 50], 36, 5, 0.25)).toBe(null);
+    expect(weekFlag(20, [50, 50, 50, 50], 40, 5, 0.25)).toBe(null);
   });
 });

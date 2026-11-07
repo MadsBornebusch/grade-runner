@@ -2322,6 +2322,18 @@ a.button-ghost {
 
 .progress__swatch--long { background: var(--brand); }
 .progress__swatch--recent { background: var(--accent); }
+.progress__swatch--planned { background: none; box-shadow: inset 0 0 0 1.5px var(--border-strong); }
+.progress__swatch--tooFast { background: var(--danger); }
+.progress__swatch--overPlan { background: var(--warning); }
+
+.progress__flag {
+  margin: 0 0 var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+}
+.progress__flag--tooFast { background: var(--danger-soft); color: var(--danger); }
+.progress__flag--overPlan { background: var(--warning-soft); color: var(--warning-ink); }
 
 .progress-line {
   cursor: pointer;

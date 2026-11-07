@@ -5,7 +5,7 @@
 // (plan/fitnessIndex.ts). Solid numbers first, the experimental chart last.
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft } from "@phosphor-icons/react";
-import { Area, Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ReferenceArea, Scatter, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Line, LineChart, ReferenceArea, Scatter, Tooltip, XAxis, YAxis } from "recharts";
 import { costOfRunning } from "../../model/minetti";
 import { grossToNet } from "../../model/energetics";
 import { buildFitnessSummaries } from "../../plan/fitnessFromRuns";
@@ -13,9 +13,14 @@ import { fitnessReadings, trailingIndex, type CompactRunSummary } from "../../pl
 import { listStoredRuns } from "../../storage/runLibrary";
 import { resolveCeilingParams, type FormInputs } from "../formInputs";
 import { dateOfDayNumber, dayNumberOf, type DatedHistoryRun } from "../../plan/historyFromRuns";
-import { hikeHillRuns } from "../../plan/planFromSettings";
+import { hikeHillRuns, OVERSHOOT_M, OVERSHOOT_SHARE } from "../../plan/planFromSettings";
+import { weeksWithLog } from "../../plan/planLog";
+import { planLogStore } from "../../storage/planLog";
 import { mondayOf, type Phase, type Plan } from "../../plan/planGenerator";
-import { byMonth, loadSeries, longTermChange, phaseBands, planProjection, weeklyTotals, type LoadPoint, type PhaseBand, type WeekTotals } from "../../plan/progressSeries";
+import {
+  byMonth, loadSeries, longTermChange, phaseBands, plannedTotals, planProjection, RAMP_WEEKS, weekFlag, weeklyTotals,
+  type LoadPoint, type PhaseBand, type PlannedTotals, type WeekFlag, type WeekTotals,
+} from "../../plan/progressSeries";
 import { phaseLogStore } from "../../storage/phaseLog";
 import { planSettingsStore } from "../../storage/planSettings";
 import { predictionLogStore, raceLogKey, type PredictionEntry } from "../../storage/predictionLog";
@@ -35,12 +40,16 @@ const RANGES = [
 ] as const;
 type RangeId = (typeof RANGES)[number]["id"];
 
+/** minExcess (weekFlag): below it a week isn't flagged. Assumption for
+ * hours and km; the hills' is OVERSHOOT_M. */
 const METRICS = [
-  { id: "hours", label: "Hours", unit: "h", digits: 1 },
-  { id: "km", label: "km", unit: "km", digits: 0 },
-  { id: "climbM", label: "Climb", unit: "m", digits: 0 },
-  { id: "descentM", label: "Descent", unit: "m", digits: 0 },
+  { id: "hours", label: "Hours", unit: "h", digits: 1, minExcess: 0.5 },
+  { id: "km", label: "km", unit: "km", digits: 0, minExcess: 5 },
+  { id: "climbM", label: "Climb", unit: "m", digits: 0, minExcess: OVERSHOOT_M },
+  { id: "descentM", label: "Descent", unit: "m", digits: 0, minExcess: OVERSHOOT_M },
 ] as const;
+/** Weeks of the plan ahead on the per-week chart. */
+const WEEKS_AHEAD = 4;
 type MetricId = (typeof METRICS)[number]["id"];
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -89,11 +98,16 @@ function ProgressCards({ plan, history, formInputs }: { plan: PlanState; history
   const load = useMemo(() => loadSeries(history, today, from), [history, today, from]);
   // Over a month back, for the headline (independent of the range).
   const change = useMemo(() => longTermChange(loadSeries(history, today, today - 28), 28), [history, today]);
+  // RAMP_WEEKS more than shown, for the first shown weeks' flags.
   const weeks = useMemo(() => {
     const n = Math.ceil((today - from + 1) / 7) + 1;
-    const w = weeklyTotals(history, hikeHillRuns(settings), today, n);
-    return long ? byMonth(w, (d) => dateOfDayNumber(d).slice(0, 7)) : w;
+    const w = weeklyTotals(history, hikeHillRuns(settings), today, n + RAMP_WEEKS);
+    return long ? byMonth(w.slice(RAMP_WEEKS), (d) => dateOfDayNumber(d).slice(0, 7)) : w;
   }, [history, settings, today, from, long]);
+  // What each week planned: past weeks as logged (from when the log
+  // began), then the plan's.
+  const planLog = planLogStore.use();
+  const planned = useMemo(() => (plan.snapshot ? plannedTotals(weeksWithLog(planLog, plan.snapshot)) : []), [planLog, plan.snapshot]);
 
   // The plan ahead, up to half the range past today (all of it on All).
   const race = settings.goalRace;
@@ -127,7 +141,7 @@ function ProgressCards({ plan, history, formInputs }: { plan: PlanState; history
 
       <LoadCard series={load} ahead={ahead} bands={bands} change={change} phase={phase} long={long} raceDay={raceDay !== undefined && raceDay <= to ? raceDay : undefined} />
       {p && p.status === "ok" && <ReadinessCard plan={p} raceLabel={pastRaceLabel(history, plan.runNames)} />}
-      <WeeksCard weeks={weeks} monthly={long} metric={metric} onMetric={setMetric} today={today} />
+      <WeeksCard weeks={weeks} planned={planned} monthly={long} metric={metric} onMetric={setMetric} today={today} />
       {race && <PredictionCard raceName={race.name} label={finishLabel} entries={predictions} today={today} ownTime={race.expectedHoursOverride !== null} />}
       <FitnessCard history={history} formInputs={formInputs} from={from} long={long} />
     </>
@@ -260,12 +274,41 @@ function LoadCard({ series, ahead, bands, change, phase, long, raceDay }: LoadCa
   );
 }
 
-function WeeksCard({ weeks, monthly, metric, onMetric, today }: { weeks: WeekTotals[]; monthly: boolean; metric: MetricId; onMetric: (m: MetricId) => void; today: number }) {
+interface WeekBar {
+  start: number;
+  done?: number;
+  planned?: number;
+  flag: WeekFlag;
+}
+
+const FLAG_FILL: Record<NonNullable<WeekFlag>, string> = { tooFast: "var(--danger)", overPlan: "var(--warning)" };
+
+/** Done per week (or month), with what was planned where it's known and
+ * the plan's next weeks; a week that builds too fast, or goes well past
+ * its plan, is coloured (weekFlag). `weeks` starts RAMP_WEEKS early per
+ * week (they only feed the flags); per month it's as shown. */
+function WeeksCard({ weeks, planned, monthly, metric, onMetric, today }: { weeks: WeekTotals[]; planned: PlannedTotals[]; monthly: boolean; metric: MetricId; onMetric: (m: MetricId) => void; today: number }) {
   const [ref, width] = useContainerWidth<HTMLDivElement>();
   const m = METRICS.find((x) => x.id === metric)!;
   const fmt = (v: number) => (m.digits ? v.toFixed(m.digits) : Math.round(v).toLocaleString());
-  const done = weeks.filter((w) => w.start + 7 <= today || monthly);
+  const shown = monthly ? weeks : weeks.slice(RAMP_WEEKS);
+  const done = shown.filter((w) => w.start + 7 <= today || monthly);
   const avg = done.length ? done.reduce((a, w) => a + w[metric], 0) / done.length : 0;
+  const bars: WeekBar[] = monthly
+    ? shown.map((w) => ({ start: w.start, done: w[metric], flag: null }))
+    : [
+        ...shown.map((w, i): WeekBar => {
+          const p = planned.find((x) => x.start === w.start);
+          const before = weeks.slice(i, i + RAMP_WEEKS).map((x) => x[metric]);
+          return { start: w.start, done: w[metric], planned: p?.[metric], flag: p?.race ? null : weekFlag(w[metric], before, p?.[metric], m.minExcess, OVERSHOOT_SHARE) };
+        }),
+        ...planned.filter((p) => p.start > mondayOf(today)).slice(0, WEEKS_AHEAD).map((p): WeekBar => ({ start: p.start, planned: p[metric], flag: null })),
+      ];
+  const hasPlan = bars.some((b) => b.planned !== undefined);
+  const flags = new Set(bars.map((b) => b.flag).filter((f) => f !== null));
+  const now = bars.find((b) => b.start === mondayOf(today));
+  // Overlapping bars: the plan's outline behind what was done.
+  const barSize = Math.max(3, Math.min(18, ((width - 52) / Math.max(1, bars.length)) * 0.6));
   return (
     <div className="card chart">
       <div className="chart__header">
@@ -278,18 +321,30 @@ function WeeksCard({ weeks, monthly, metric, onMetric, today }: { weeks: WeekTot
           ))}
         </div>
       </div>
+      {now?.flag && (
+        <p className={`progress__flag progress__flag--${now.flag}`}>
+          {now.flag === "tooFast"
+            ? `This week is already more than 10% over your biggest of the ${RAMP_WEEKS} before. Building this fast raises the injury risk: keep the rest of the week easy.`
+            : "This week is already well past its plan. The plan takes it into account; keep the extra easy."}
+        </p>
+      )}
       <div className="chart__canvas" ref={ref}>
         {width > 0 && (
-          <BarChart width={width} height={170} data={weeks} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+          <BarChart width={width} height={170} data={bars} barSize={barSize} barGap={-barSize} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" opacity={0.3} vertical={false} />
             <XAxis dataKey="start" tickFormatter={(d: number) => (monthly ? monthLabel(d, true) : shortDate(d))} tick={{ fontSize: 11 }} minTickGap={20} />
             <YAxis tick={{ fontSize: 11 }} width={40} />
             <Tooltip
-              formatter={(v) => [`${fmt(Number(v))} ${m.unit}`, m.label]}
+              formatter={(v, name) => [`${fmt(Number(v))} ${m.unit}`, name === "planned" ? "Planned" : "Done"]}
               labelFormatter={(d) => (monthly ? monthLabel(Number(d), true) : `Week of ${shortDate(Number(d))}`)}
               cursor={{ fill: "var(--surface-2)" }}
             />
-            <Bar dataKey={metric} fill="var(--brand)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+            {hasPlan && <Bar dataKey="planned" fill="none" stroke="var(--border-strong)" strokeWidth={1.5} strokeDasharray="3 2" radius={[2, 2, 0, 0]} isAnimationActive={false} />}
+            <Bar dataKey="done" fill="var(--brand)" radius={[2, 2, 0, 0]} isAnimationActive={false}>
+              {bars.map((b) => (
+                <Cell key={b.start} fill={b.flag ? FLAG_FILL[b.flag] : "var(--brand)"} />
+              ))}
+            </Bar>
           </BarChart>
         )}
       </div>
@@ -297,6 +352,21 @@ function WeeksCard({ weeks, monthly, metric, onMetric, today }: { weeks: WeekTot
         Average {fmt(avg)} {m.unit} a {monthly ? "month" : "week"}
         {monthly ? "" : " (finished weeks)"}.{metric === "climbM" || metric === "descentM" ? " Includes hikes synced from Strava." : ""}
       </p>
+      {hasPlan && !monthly && (
+        <p className="help">
+          <span className="chart-swatch progress__swatch--planned" /> Planned (from when the app began keeping past plans; earlier weeks show only what you did).
+        </p>
+      )}
+      {flags.has("tooFast") && (
+        <p className="help">
+          <span className="chart-swatch progress__swatch--tooFast" /> More than 10% over your biggest of the {RAMP_WEEKS} weeks before: faster than the plan builds.
+        </p>
+      )}
+      {flags.has("overPlan") && (
+        <p className="help">
+          <span className="chart-swatch progress__swatch--overPlan" /> Well past the plan.
+        </p>
+      )}
     </div>
   );
 }

@@ -152,3 +152,57 @@ export function planProjection(
   if (race && race.day > today) out.push({ day: race.day, plan: at(race.chronic) });
   return out;
 }
+
+export interface PlannedTotals {
+  /** Monday. */
+  start: number;
+  hours: number;
+  km: number;
+  climbM: number;
+  descentM: number;
+  /** The week has the goal race: its planned race carries no distance,
+   * and a race week isn't measured against the weeks before. */
+  race: boolean;
+}
+
+/** What each week planned, counted like weeklyTotals counts what was
+ * done: runs' time, distance, climb and descent; a hike's climb and
+ * descent but not its time or distance (hikes reach the totals as hills only); no strength. */
+export function plannedTotals(weeks: Pick<PlanWeek, "start" | "sessions">[]): PlannedTotals[] {
+  return weeks.map((w) => {
+    const t: PlannedTotals = { start: w.start, hours: 0, km: 0, climbM: 0, descentM: 0, race: false };
+    for (const s of w.sessions) {
+      if (s.kind === "strength") continue;
+      if (s.kind === "race") t.race = true;
+      if (s.kind !== "hike" && s.kind !== "race") {
+        t.hours += s.minutes / 60;
+        t.km += s.distanceKm;
+      }
+      t.climbM += s.climbM;
+      t.descentM += s.descentM;
+    }
+    return t;
+  });
+}
+
+/** Assumption: the same step the plan grows hills by (DESCENT_WEEKLY_STEP)
+ * and the session guard allows over the biggest run of the last 30 days:
+ * a week more than 10% over the biggest of the RAMP_WEEKS before it builds
+ * faster than the plan ever would. The biggest, not the average, so a
+ * normal week after a lighter one isn't flagged. */
+export const RAMP_STEP = 1.1;
+export const RAMP_WEEKS = 4;
+
+/** "tooFast": more than RAMP_STEP over the biggest of the weeks before
+ * (with `minExcess` on top, so small numbers don't flag); "overPlan": past
+ * what was planned by the overshoot margin (planFromSettings.ts's
+ * OVERSHOOT_SHARE, at least `minExcess`). Works on a week so far, so the
+ * current week flags as soon as it crosses. */
+export type WeekFlag = "tooFast" | "overPlan" | null;
+
+export function weekFlag(done: number, before: number[], planned: number | undefined, minExcess: number, overshootShare: number): WeekFlag {
+  const biggest = before.length ? Math.max(...before) : 0;
+  if (biggest > 0 && done > RAMP_STEP * biggest + minExcess) return "tooFast";
+  if (planned !== undefined && done > planned + Math.max(minExcess, overshootShare * planned)) return "overPlan";
+  return null;
+}

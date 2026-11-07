@@ -4738,6 +4738,24 @@ start at today's shown level). The cards:
   cap grows from what was actually run, floored by the single-run allowance.
 - Plan inputs key bumped to 13.
 
+### Done against plan, and building too fast (built 2026-11-07)
+
+- **Why (user request).** See per week how much was done against what was planned, for
+  km and climb, and whether the athlete is building too fast.
+- **Planned (`plannedTotals`, progressSeries.ts).** From `weeksWithLog`, so past weeks
+  come from the plan log (from 2 Nov 2026 on) and the rest from the plan. Counted like
+  `weeklyTotals`: runs' time, distance and hills; a hike's hills only; no strength.
+  A race week is marked and not flagged.
+- **Flags (`weekFlag`).** "Too fast": the week (so far) more than `RAMP_STEP` (1.1,
+  the plan's own weekly hill step and the session guard's 10%) over the biggest of the
+  `RAMP_WEEKS` (4) weeks before. The biggest, not the average, so a normal week after a
+  lighter one isn't flagged. Plus a floor (5 km, 0.5 h, `OVERSHOOT_M` for hills). "Over
+  plan": past the planned amount by the overshoot margin (`OVERSHOOT_SHARE`).
+- **Chart.** Progress's per-week bars: done filled (red too fast, amber over plan),
+  planned as a dashed outline behind, and the plan's next 4 weeks. The current week
+  shows a line of advice once it crosses. Per-month view: done only.
+- A hike ticked by hand with no Strava activity adds no climb to done.
+
 ### Past weeks as planned (built 2026-11-02)
 
 - **Why.** The plan holds only the current week and those ahead, and every re-plan
